@@ -1,0 +1,6 @@
+{
+  "name": "AI LearnHub - 범용 AI 맞춤 학습",
+  "description": "배우고 싶은 무엇이든 AI가 개인 맞춤 커리큘럼, 실습, 퀴즈, AI 튜터, 자동 복습으로 가르쳐주는 AI 학습 플랫폼",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
