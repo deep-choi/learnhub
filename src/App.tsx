@@ -31,6 +31,7 @@ import { AiChatView } from "./components/AiChatView";
 import { LessonAiInputBar } from "./components/LessonAiInputBar";
 import { CoursesView } from "./components/CoursesView";
 import { CourseDetailView } from "./components/CourseDetailView";
+import { SettingsModal } from "./components/notion/SettingsModal";
 
 const getInitialView = (): NotionPageView => ({ type: "home" });
 
@@ -96,6 +97,7 @@ export default function App() {
   const [isScratchpadOpen, setIsScratchpadOpen] = useState(false);
   const [authCallbackError, setAuthCallbackError] = useState(getAuthCallbackError);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(() => Boolean(getAuthCallbackError()));
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [tutorQuoteContext, setTutorQuoteContext] = useState("");
   const [pendingViewAfterAuth, setPendingViewAfterAuth] = useState<NotionPageView | null>(null);
 
@@ -331,6 +333,7 @@ export default function App() {
           onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
           userAccount={userAccount}
           onOpenAuth={() => setIsAuthModalOpen(true)}
+          onOpenSettings={() => setIsSettingsOpen(true)}
         />
       )}
 
@@ -556,6 +559,18 @@ export default function App() {
           }}
         />
       </div>
+
+      {/* 6. Settings Modal (Theme system, Profile account, General settings) */}
+      <SettingsModal
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        userAccount={userAccount}
+        onOpenAuth={() => setIsAuthModalOpen(true)}
+        onDataChanged={refreshDataState}
+        isZenMode={isZenMode}
+        onToggleZenMode={() => setIsZenMode(!isZenMode)}
+        onOpenTutor={handleOpenTutor}
+      />
     </div>
   );
 }

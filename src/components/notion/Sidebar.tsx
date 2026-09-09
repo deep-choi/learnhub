@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   BookOpen,
   ChevronDown,
@@ -7,22 +7,18 @@ import {
   BarChart3,
   FileText,
   Home,
-  LogIn,
   MessageCircle,
-  Moon,
-  PanelLeftClose,
-  PanelLeftOpen,
   Plus,
   RotateCcw,
   Search,
-  Sparkles,
-  Sun,
+  Settings,
   Target,
+  User,
   Layers,
+  PanelLeftClose,
 } from "lucide-react";
 import { Course, LessonMeta, UserAccount } from "../../types/learning";
 import { LearnHubLogo } from "../common/LearnHubLogo";
-import { THEME_CHANGED_EVENT, ThemeMode, getStoredTheme, toggleTheme } from "../../services/theme";
 
 export type NotionPageView =
   | { type: "home" }
@@ -51,6 +47,7 @@ interface SidebarProps {
   onToggleSidebar: () => void;
   userAccount?: UserAccount;
   onOpenAuth?: () => void;
+  onOpenSettings?: () => void;
 }
 
 type RailCategory = "home" | "courses" | "ai-chat" | "records" | "review-queue";
@@ -69,21 +66,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onToggleSidebar,
   userAccount,
   onOpenAuth,
+  onOpenSettings,
 }) => {
   // 1번째 사진 (Rail only) vs 2번째 사진 (Rail + Expanded Drawer)
   const [isPanelExpanded, setIsPanelExpanded] = useState<boolean>(false);
-  const [theme, setThemeState] = useState<ThemeMode>(() => getStoredTheme());
-
-  useEffect(() => {
-    const handleThemeChange = (e: Event) => {
-      const customEvent = e as CustomEvent<{ theme: ThemeMode }>;
-      if (customEvent.detail?.theme) {
-        setThemeState(customEvent.detail.theme);
-      }
-    };
-    window.addEventListener(THEME_CHANGED_EVENT, handleThemeChange);
-    return () => window.removeEventListener(THEME_CHANGED_EVENT, handleThemeChange);
-  }, []);
 
   useEffect(() => {
     if (userAccount?.isGuest) setIsPanelExpanded(false);
@@ -132,30 +118,39 @@ export const Sidebar: React.FC<SidebarProps> = ({
     setSelectedRailCategory(category);
 
     if (category === "home") {
+      setIsPanelExpanded(false);
       handleSelectView({ type: "home" });
       return;
     }
 
     if (category === "courses") {
-      handleSelectView({ type: "courses" });
+      // 내 과목 클릭 시: 이미 펼쳐져 있는 상태라면 접고, 아니면 펼치기
+      if (currentActiveRail === "courses" && isPanelExpanded) {
+        setIsPanelExpanded(false);
+      } else {
+        setIsPanelExpanded(true);
+        handleSelectView({ type: "courses" });
+      }
       return;
     }
 
     if (category === "ai-chat") {
+      setIsPanelExpanded(false);
       handleSelectView({ type: "ai-chat" });
       return;
     }
 
     if (category === "records") {
+      setIsPanelExpanded(false);
       handleSelectView({ type: "records" });
       return;
     }
 
     if (category === "review-queue") {
+      setIsPanelExpanded(false);
       handleSelectView({ type: "review-queue" });
       return;
     }
-
   };
 
   if (!isOpen) {
@@ -166,7 +161,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           title="사이드바 열기 (⌘\)"
           className="flex h-11 w-11 items-center justify-center rounded-full border border-[var(--lh-line)] bg-[var(--lh-surface)] text-[var(--lh-ink-secondary)] shadow-sm transition hover:bg-[var(--lh-surface-subtle)] hover:text-[var(--lh-ink)] cursor-pointer"
         >
-          <PanelLeftOpen className="h-4 w-4" />
+          <ChevronRight className="h-4 w-4" />
         </button>
       </div>
     );
@@ -180,7 +175,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         className="fixed inset-0 z-40 bg-black/30 backdrop-blur-[2px] transition-opacity md:hidden cursor-pointer"
       />
 
-      {/* Main Container: Slim Rail (Image 1) + Optional Expansible Drawer (Image 2) */}
+      {/* Main Container: Slim Rail + Expansible Drawer */}
       <aside
         className={`fixed inset-y-0 left-0 z-50 flex h-screen shrink-0 border-r border-t border-b border-l-0 border-[var(--lh-line)] bg-[var(--lh-surface)] text-sm select-none shadow-2xl md:relative md:shadow-none transition-all duration-200 rounded-tr-2xl rounded-br-2xl overflow-hidden`}
       >
@@ -198,29 +193,29 @@ export const Sidebar: React.FC<SidebarProps> = ({
           }`}
         >
 
-          {/* Top: LearnHub Official Brand Emblem & Quick Search */}
-          <div className="flex flex-col items-center gap-2.5 pt-1">
+          {/* Top: LearnHub Official Brand Emblem (No box wrapper) & Quick Search */}
+          <div className="flex flex-col items-center gap-3 pt-2">
             <button
               type="button"
               onClick={() => handleRailClick("home")}
               title="LearnHub 홈"
-              className="group flex h-12 w-12 items-center justify-center rounded-2xl bg-[var(--lh-primary-subtle)] border border-[var(--lh-primary-border)] transition-all duration-200 hover:scale-105 hover:shadow-sm cursor-pointer"
+              className="flex items-center justify-center p-1 transition-transform hover:scale-110 cursor-pointer"
             >
-              <LearnHubLogo size={28} />
+              <LearnHubLogo size={32} />
             </button>
 
             <button
               type="button"
               onClick={onOpenSearch}
               title="검색 (⌘K)"
-              className="group flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--lh-surface-subtle)] border border-[var(--lh-line)] text-[var(--lh-ink)] shadow-2xs transition hover:bg-[var(--lh-primary)] hover:text-white hover:border-[var(--lh-primary)] cursor-pointer"
+              className="group flex h-10 w-10 items-center justify-center rounded-2xl bg-[var(--lh-surface-subtle)] border border-[var(--lh-line)] text-[var(--lh-ink)] shadow-2xs transition hover:bg-[var(--lh-primary)] hover:text-white hover:border-[var(--lh-primary)] cursor-pointer"
             >
-              <Search className="h-4 w-4 transition group-hover:scale-105" />
+              <Search className="h-5 w-5 transition group-hover:scale-105" />
             </button>
           </div>
 
           {/* Middle: Navigation Rail Destinations (Icon on top with Pill indicator, Text label below) */}
-          <nav className="flex flex-col items-center gap-2.5 py-4" aria-label="메인 레일 네비게이션">
+          <nav className="flex flex-col items-center gap-2 py-3" aria-label="메인 레일 네비게이션">
             {/* 1. 홈 (Home) */}
             <button
               type="button"
@@ -229,16 +224,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
               className="group flex flex-col items-center justify-center w-16 py-1 cursor-pointer"
             >
               <div
-                className={`flex h-8 w-14 items-center justify-center rounded-full transition ${
+                className={`flex h-9 w-14 items-center justify-center rounded-full transition ${
                   currentActiveRail === "home"
                     ? "bg-[var(--lh-primary)] text-white shadow-xs"
                     : "text-[var(--lh-ink-secondary)] group-hover:bg-[var(--lh-surface-subtle)] group-hover:text-[var(--lh-ink)]"
                 }`}
               >
-                <Home className="h-4 w-4" />
+                <Home className="h-5 w-5" />
               </div>
               <span
-                className={`mt-1 text-[10px] tracking-tight text-center ${
+                className={`mt-1 text-[11px] tracking-tight text-center ${
                   currentActiveRail === "home"
                     ? "font-medium text-[var(--lh-primary)]"
                     : "font-medium text-[var(--lh-ink-secondary)] group-hover:text-[var(--lh-ink)]"
@@ -248,7 +243,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </span>
             </button>
 
-            {/* 2. 내 과목 (My Courses / Curriculum) -> 클릭 시 2번째 사진처럼 서브 드로어 펼침 */}
+            {/* 2. 내 과목 (My Courses / Curriculum) -> 클릭 시 서브 드로어 자동 펼침 */}
             <button
               type="button"
               onClick={() => handleRailClick("courses")}
@@ -256,13 +251,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
               className="group flex flex-col items-center justify-center w-16 py-1 cursor-pointer relative"
             >
               <div
-                className={`flex h-8 w-14 items-center justify-center rounded-full transition relative ${
+                className={`flex h-9 w-14 items-center justify-center rounded-full transition relative ${
                   currentActiveRail === "courses" || (isPanelExpanded && selectedRailCategory === "courses")
                     ? "bg-[var(--lh-primary)] text-white shadow-xs"
                     : "text-[var(--lh-ink-secondary)] group-hover:bg-[var(--lh-surface-subtle)] group-hover:text-[var(--lh-ink)]"
                 }`}
               >
-                <BookOpen className="h-4 w-4" />
+                <BookOpen className="h-5 w-5" />
                 {courses.length > 0 && (
                   <span className={`absolute -top-1 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full text-[9px] font-medium border ${
                     currentActiveRail === "courses" || (isPanelExpanded && selectedRailCategory === "courses")
@@ -274,7 +269,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 )}
               </div>
               <span
-                className={`mt-1 text-[10px] tracking-tight text-center ${
+                className={`mt-1 text-[11px] tracking-tight text-center ${
                   currentActiveRail === "courses" || (isPanelExpanded && selectedRailCategory === "courses")
                     ? "font-medium text-[var(--lh-primary)]"
                     : "font-medium text-[var(--lh-ink-secondary)] group-hover:text-[var(--lh-ink)]"
@@ -292,16 +287,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
               className="group flex flex-col items-center justify-center w-16 py-1 cursor-pointer"
             >
               <div
-                className={`flex h-8 w-14 items-center justify-center rounded-full transition ${
+                className={`flex h-9 w-14 items-center justify-center rounded-full transition ${
                   currentActiveRail === "ai-chat"
                     ? "bg-[var(--lh-primary)] text-white shadow-xs"
                     : "text-[var(--lh-ink-secondary)] group-hover:bg-[var(--lh-surface-subtle)] group-hover:text-[var(--lh-ink)]"
                 }`}
               >
-                <MessageCircle className="h-4 w-4" />
+                <MessageCircle className="h-5 w-5" />
               </div>
               <span
-                className={`mt-1 text-[10px] tracking-tight text-center ${
+                className={`mt-1 text-[11px] tracking-tight text-center ${
                   currentActiveRail === "ai-chat"
                     ? "font-medium text-[var(--lh-primary)]"
                     : "font-medium text-[var(--lh-ink-secondary)] group-hover:text-[var(--lh-ink)]"
@@ -319,16 +314,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
               className="group flex flex-col items-center justify-center w-16 py-1 cursor-pointer"
             >
               <div
-                className={`flex h-8 w-14 items-center justify-center rounded-full transition ${
+                className={`flex h-9 w-14 items-center justify-center rounded-full transition ${
                   currentActiveRail === "records"
                     ? "bg-[var(--lh-primary)] text-white shadow-xs"
                     : "text-[var(--lh-ink-secondary)] group-hover:bg-[var(--lh-surface-subtle)] group-hover:text-[var(--lh-ink)]"
                 }`}
               >
-                <BarChart3 className="h-4 w-4" />
+                <BarChart3 className="h-5 w-5" />
               </div>
               <span
-                className={`mt-1 text-[10px] tracking-tight text-center ${
+                className={`mt-1 text-[11px] tracking-tight text-center ${
                   currentActiveRail === "records"
                     ? "font-medium text-[var(--lh-primary)]"
                     : "font-medium text-[var(--lh-ink-secondary)] group-hover:text-[var(--lh-ink)]"
@@ -346,13 +341,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
               className="group flex flex-col items-center justify-center w-16 py-1 cursor-pointer relative"
             >
               <div
-                className={`flex h-8 w-14 items-center justify-center rounded-full transition relative ${
+                className={`flex h-9 w-14 items-center justify-center rounded-full transition relative ${
                   currentActiveRail === "review-queue"
                     ? "bg-[var(--lh-primary)] text-white shadow-xs"
                     : "text-[var(--lh-ink-secondary)] group-hover:bg-[var(--lh-surface-subtle)] group-hover:text-[var(--lh-ink)]"
                 }`}
               >
-                <RotateCcw className="h-4 w-4" />
+                <RotateCcw className="h-5 w-5" />
                 {pendingReviewsCount > 0 && (
                   <span className="absolute -top-1 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full text-[9px] font-medium bg-[var(--lh-secondary)] text-white border border-white shadow-xs">
                     {pendingReviewsCount}
@@ -360,7 +355,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 )}
               </div>
               <span
-                className={`mt-1 text-[10px] tracking-tight text-center ${
+                className={`mt-1 text-[11px] tracking-tight text-center ${
                   currentActiveRail === "review-queue"
                     ? "font-medium text-[var(--lh-primary)]"
                     : "font-medium text-[var(--lh-ink-secondary)] group-hover:text-[var(--lh-ink)]"
@@ -371,65 +366,54 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </button>
           </nav>
 
-          {/* Bottom: Utilities & Toggle (Theme, AI Tutor, Expand/Collapse Drawer, Profile) */}
-          <div className="flex flex-col items-center gap-2 border-t border-[var(--lh-line)] pt-3">
-            {/* 테마 토글 버튼 (Light 블루 / Dark 오렌지 포인트) */}
+          {/* Bottom: Settings Icon + Profile Icon */}
+          <div className="flex flex-col items-center gap-1.5 border-t border-[var(--lh-line)] pt-2.5 pb-1">
+            {/* 설정 아이콘 */}
             <button
               type="button"
-              onClick={toggleTheme}
-              title={theme === "dark" ? "라이트 모드로 전환 (블루 포인트)" : "다크 모드로 전환 (주황 포인트)"}
-              className="flex h-9 w-9 items-center justify-center rounded-full text-[var(--lh-ink-secondary)] hover:bg-[var(--lh-surface-subtle)] hover:text-[var(--lh-point)] transition cursor-pointer"
+              onClick={onOpenSettings}
+              title="설정 (테마 시스템, 프로필 계정, 기본 설정)"
+              className="group flex flex-col items-center justify-center w-16 py-0.5 cursor-pointer"
             >
-              {theme === "dark" ? (
-                <Sun className="h-4 w-4 text-[var(--lh-point)]" />
-              ) : (
-                <Moon className="h-4 w-4" />
-              )}
+              <div className="flex h-8.5 w-14 items-center justify-center rounded-full text-[var(--lh-ink-secondary)] transition group-hover:bg-[var(--lh-surface-subtle)] group-hover:text-[var(--lh-ink)]">
+                <Settings className="h-5 w-5" />
+              </div>
+              <span className="mt-0.5 text-[11px] font-medium tracking-tight text-[var(--lh-ink-secondary)] group-hover:text-[var(--lh-ink)] text-center">
+                설정
+              </span>
             </button>
 
-            {/* AI 튜터 */}
-            <button
-              type="button"
-              onClick={onOpenTutor}
-              title="AI 튜터에게 질문하기"
-              className="flex h-9 w-9 items-center justify-center rounded-full text-[var(--lh-ink-secondary)] hover:bg-[var(--lh-surface-subtle)] hover:text-[var(--lh-secondary)] transition cursor-pointer"
-            >
-              <Sparkles className="h-4 w-4" />
-            </button>
-
-            {/* 2번째 사진 펼치기 / 접기 토글 버튼 */}
+            {/* 프로필 아이콘 (설정 바로 밑에 위치) */}
             <button
               type="button"
               onClick={() => {
-                if (userAccount?.isGuest && onOpenAuth) onOpenAuth();
-                else setIsPanelExpanded((prev) => !prev);
+                if (userAccount?.isGuest && onOpenAuth) {
+                  onOpenAuth();
+                } else if (onOpenSettings) {
+                  onOpenSettings();
+                } else {
+                  handleSelectView({ type: "settings" });
+                }
               }}
-              title={isPanelExpanded ? "서브 메뉴 접기 (1번째 사진 모드)" : "서브 메뉴 펼치기 (2번째 사진 모드)"}
-              className={`flex h-9 w-9 items-center justify-center rounded-full transition cursor-pointer ${
-                isPanelExpanded
-                  ? "bg-[var(--lh-surface-subtle)] text-[var(--lh-primary)] border border-[var(--lh-line)] shadow-xs"
-                  : "text-[var(--lh-ink-tertiary)] hover:bg-[var(--lh-surface-subtle)] hover:text-[var(--lh-ink)]"
-              }`}
+              title={userAccount?.isGuest ? "로그인하기" : `${userAccount?.name || "회원"} 프로필`}
+              className="group flex flex-col items-center justify-center w-16 py-0.5 cursor-pointer"
             >
-              {isPanelExpanded ? (
-                <PanelLeftClose className="h-4 w-4" />
-              ) : (
-                <PanelLeftOpen className="h-4 w-4" />
-              )}
-            </button>
-
-            {/* 사용자 계정 / 프로필 */}
-            <button
-              type="button"
-              onClick={() => (userAccount?.isGuest && onOpenAuth ? onOpenAuth() : handleSelectView({ type: "settings" }))}
-              title={userAccount?.isGuest ? "로그인" : `${userAccount?.name || "회원"} 프로필`}
-              className={`mt-1 flex h-9 w-9 items-center justify-center rounded-full text-xs font-medium shadow-xs transition hover:scale-105 cursor-pointer ${
-                userAccount?.isGuest
-                  ? "border border-[var(--lh-line)] bg-[var(--lh-surface)] text-[var(--lh-ink)]"
-                  : "bg-[var(--lh-primary)] text-white"
-              }`}
-            >
-              {userAccount?.isGuest ? <LogIn className="h-4 w-4" /> : userAccount?.name?.slice(0, 1) || "U"}
+              <div
+                className={`flex h-8.5 w-8.5 items-center justify-center rounded-full text-xs font-medium shadow-2xs transition group-hover:scale-105 ${
+                  userAccount?.isGuest
+                    ? "border border-[var(--lh-line)] bg-[var(--lh-surface)] text-[var(--lh-ink-secondary)] group-hover:text-[var(--lh-ink)] group-hover:bg-[var(--lh-surface-subtle)]"
+                    : "bg-[var(--lh-primary)] text-white"
+                }`}
+              >
+                {userAccount?.isGuest ? (
+                  <User className="h-4.5 w-4.5" />
+                ) : (
+                  <span className="text-xs font-medium">{userAccount?.name?.slice(0, 1) || "U"}</span>
+                )}
+              </div>
+              <span className="mt-0.5 text-[11px] font-medium tracking-tight text-[var(--lh-ink-secondary)] group-hover:text-[var(--lh-ink)] text-center truncate max-w-[58px]">
+                {userAccount?.isGuest ? "로그인" : (userAccount?.name || "프로필")}
+              </span>
             </button>
           </div>
         </div>
@@ -455,10 +439,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <button
                 type="button"
                 onClick={() => setIsPanelExpanded(false)}
-                title="서브 메뉴 접기"
-                className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--lh-ink-tertiary)] hover:bg-[var(--lh-surface-subtle)] hover:text-[var(--lh-ink)] hover:shadow-xs transition cursor-pointer"
+                title="사이드바 접기"
+                className="flex h-8 w-8 items-center justify-center rounded-xl border border-[var(--lh-line)] bg-[var(--lh-surface-subtle)] text-[var(--lh-ink-secondary)] hover:bg-[var(--lh-surface)] hover:text-[var(--lh-ink)] hover:border-[var(--lh-point)] shadow-2xs transition cursor-pointer group"
+                aria-label="사이드바 접기"
               >
-                <ChevronLeft className="h-4 w-4" />
+                <PanelLeftClose className="h-4.5 w-4.5 transition-transform group-hover:scale-105" />
               </button>
             </div>
 
