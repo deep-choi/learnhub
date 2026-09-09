@@ -27,11 +27,11 @@ const renderInlineContent = (text: string): React.ReactNode[] => {
       return <MathRenderer key={idx} math={part.slice(2, -2).trim()} />;
     }
     if (part.startsWith("**") && part.endsWith("**")) {
-      return <strong key={idx} className="font-bold text-[#191919]">{part.slice(2, -2)}</strong>;
+      return <strong key={idx} className="font-medium text-[var(--lh-ink)]">{part.slice(2, -2)}</strong>;
     }
     if (part.startsWith("`") && part.endsWith("`")) {
       return (
-        <code key={idx} className="rounded bg-[#F7F6F3] border border-[#E9E9E7] px-1 py-0.5 font-mono text-[13px] text-[#EB5757]">
+        <code key={idx} className="rounded bg-[var(--lh-surface-subtle)] border border-[var(--lh-line)] px-1 py-0.5 font-mono text-[13px] text-[var(--lh-danger)]">
           {part.slice(1, -1)}
         </code>
       );
@@ -55,7 +55,7 @@ export const RichLessonRenderer: React.FC<RichLessonRendererProps> = ({ content,
     blocks.push(
       <List
         key={`list-${blocks.length}`}
-        className={`${currentList.type === "ul" ? "list-disc" : "list-decimal"} my-2 ml-5 space-y-1 text-[15px] sm:text-base leading-[1.8] text-[#2F3437]`}
+        className={`${currentList.type === "ul" ? "list-disc" : "list-decimal"} my-2 ml-5 space-y-1 text-[15px] sm:text-base leading-[1.8] text-[var(--lh-ink)]`}
       >
         {currentList.items.map((item, i) => <li key={i}>{item}</li>)}
       </List>
@@ -67,7 +67,7 @@ export const RichLessonRenderer: React.FC<RichLessonRendererProps> = ({ content,
     if (!codeFence) return;
     flushList();
     blocks.push(
-      <pre key={`code-${blocks.length}`} className="my-3 overflow-x-auto rounded-md border border-[#E9E9E7] bg-[#FBFBFA] p-3 text-xs leading-relaxed text-[#2F3437]">
+      <pre key={`code-${blocks.length}`} className="my-3 overflow-x-auto rounded-md border border-[var(--lh-line)] bg-[var(--lh-surface-subtle)] p-3 text-xs leading-relaxed text-[var(--lh-ink)]">
         <code>{codeFence.join("\n")}</code>
       </pre>
     );
@@ -77,8 +77,8 @@ export const RichLessonRenderer: React.FC<RichLessonRendererProps> = ({ content,
   const pushMathBlock = (math: string, key: string | number) => {
     flushList();
     blocks.push(
-      <div key={`math-${key}`} className="my-3 rounded-md border border-[#E9E9E7] bg-[#FBFBFA] p-3 text-center">
-        <MathRenderer block math={math.trim()} className="text-base sm:text-lg text-[#191919]" />
+      <div key={`math-${key}`} className="my-3 rounded-md border border-[var(--lh-line)] bg-[var(--lh-surface-subtle)] p-3 text-center">
+        <MathRenderer block math={math.trim()} className="text-base sm:text-lg text-[var(--lh-ink)]" />
       </div>
     );
   };
@@ -107,7 +107,7 @@ export const RichLessonRenderer: React.FC<RichLessonRendererProps> = ({ content,
         pendingMath = null;
         const remainder = line.slice(closeIndex + closing.length).trim();
         if (remainder) {
-          blocks.push(<p key={`${i}-remainder`} className="my-2.5 text-[15px] sm:text-base leading-[1.85] text-[#2F3437] break-keep">{renderInlineContent(remainder)}</p>);
+          blocks.push(<p key={`${i}-remainder`} className="my-2.5 text-[15px] sm:text-base leading-[1.85] text-[var(--lh-ink)] break-keep">{renderInlineContent(remainder)}</p>);
         }
       } else {
         pendingMath.lines.push(line);
@@ -139,22 +139,22 @@ export const RichLessonRenderer: React.FC<RichLessonRendererProps> = ({ content,
     }
     if (trimmed.startsWith("### ")) {
       flushList();
-      blocks.push(<h4 key={i} className="mt-4 mb-1.5 text-base font-bold text-[#191919]">{renderInlineContent(trimmed.slice(4))}</h4>);
+      blocks.push(<h4 key={i} className="mt-4 mb-1.5 text-base font-medium text-[var(--lh-ink)]">{renderInlineContent(trimmed.slice(4))}</h4>);
       continue;
     }
     if (trimmed.startsWith("## ")) {
       flushList();
-      blocks.push(<h3 key={i} className="mt-5 mb-2 text-lg font-bold text-[#191919]">{renderInlineContent(trimmed.slice(3))}</h3>);
+      blocks.push(<h3 key={i} className="mt-5 mb-2 text-lg font-medium text-[var(--lh-ink)]">{renderInlineContent(trimmed.slice(3))}</h3>);
       continue;
     }
     if (trimmed.startsWith("# ")) {
       flushList();
-      blocks.push(<h2 key={i} className="mt-6 mb-2.5 text-xl font-extrabold text-[#191919]">{renderInlineContent(trimmed.slice(2))}</h2>);
+      blocks.push(<h2 key={i} className="mt-6 mb-2.5 text-xl font-medium text-[var(--lh-ink)]">{renderInlineContent(trimmed.slice(2))}</h2>);
       continue;
     }
     if (trimmed.startsWith("> ")) {
       flushList();
-      blocks.push(<blockquote key={i} className="my-3 rounded-r-md border-l-2 border-[#191919] bg-[#FBFBFA] py-2 px-3 text-sm italic text-[#787774]">{renderInlineContent(trimmed.slice(2))}</blockquote>);
+      blocks.push(<blockquote key={i} className="my-3 rounded-r-md border-l-2 border-[var(--lh-ink)] bg-[var(--lh-surface-subtle)] py-2 px-3 text-sm italic text-[var(--lh-ink-secondary)]">{renderInlineContent(trimmed.slice(2))}</blockquote>);
       continue;
     }
     if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
@@ -177,7 +177,7 @@ export const RichLessonRenderer: React.FC<RichLessonRendererProps> = ({ content,
     }
 
     flushList();
-    blocks.push(<p key={i} className="my-2.5 text-[15px] sm:text-base leading-[1.85] text-[#2F3437] break-keep">{renderInlineContent(line)}</p>);
+    blocks.push(<p key={i} className="my-2.5 text-[15px] sm:text-base leading-[1.85] text-[var(--lh-ink)] break-keep">{renderInlineContent(line)}</p>);
   }
 
   if (codeFence) pushCodeBlock();

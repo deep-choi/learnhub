@@ -144,36 +144,41 @@ export const PlacementTestModal: React.FC<PlacementTestModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-xs p-4">
-      <div className="w-full max-w-md rounded-lg border border-[#E9E9E7] bg-white p-6 shadow-2xl space-y-6 text-[#2F3437] text-xs">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+      <div className="w-full max-w-md rounded-3xl border border-[var(--lh-line)] bg-[var(--lh-surface)] p-6 sm:p-8 shadow-2xl space-y-6 text-[var(--lh-ink)] text-xs">
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-[#E9E9E7] pb-3">
-          <div className="flex items-center gap-1.5 font-bold text-[#191919]">
-            <Target className="h-4 w-4" />
+        <div className="flex items-center justify-between border-b border-[var(--lh-line)] pb-4">
+          <div className="flex items-center gap-2.5 font-medium text-[var(--lh-ink)] text-sm">
+            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[var(--lh-primary-subtle)] border border-[var(--lh-primary-border)] text-[var(--lh-primary)] shadow-xs">
+              <Target className="h-4 w-4" />
+            </span>
             <span>간단한 수학 체험 진단 (선택)</span>
           </div>
-          <button onClick={onClose} className="text-[#787774] hover:text-[#191919] cursor-pointer">
+          <button
+            onClick={onClose}
+            className="flex min-h-9 min-w-9 items-center justify-center rounded-full text-[var(--lh-ink-secondary)] hover:bg-[var(--lh-surface-subtle)] hover:text-[var(--lh-ink)] transition cursor-pointer"
+          >
             <X className="h-4 w-4" />
           </button>
         </div>
 
         {showSessionChoice ? (
-          <div className="space-y-4 text-center">
-            <div className="rounded-md bg-[#F7F6F3] p-3 text-left text-[11px] text-[#787774] leading-relaxed">
+          <div className="space-y-5 text-center">
+            <div className="rounded-2xl bg-[var(--lh-surface-subtle)] border border-[var(--lh-line)] p-4 text-left text-xs text-[var(--lh-ink-secondary)] leading-relaxed font-normal shadow-xs">
               이전 체험 진단이 진행 중이거나 결과가 남아 있습니다. 이 진단은 전체 실력을 판정하지 않는 참고용 체험입니다.
             </div>
-            <div className="flex gap-2">
+            <div className="flex gap-2.5">
               <button
                 type="button"
                 onClick={() => setShowSessionChoice(false)}
-                className="flex-1 rounded-md border border-[#E9E9E7] bg-white py-2.5 text-xs font-semibold text-[#787774] hover:bg-[#F7F6F3] cursor-pointer"
+                className="flex-1 min-h-11 rounded-full border border-[var(--lh-line)] bg-[var(--lh-surface)] py-2.5 text-xs font-medium text-[var(--lh-ink-secondary)] hover:bg-[var(--lh-surface-subtle)] hover:text-[var(--lh-ink)] shadow-xs transition cursor-pointer"
               >
                 이어보기
               </button>
               <button
                 type="button"
                 onClick={handleRestart}
-                className="flex-1 rounded-md bg-[#191919] py-2.5 text-xs font-semibold text-white hover:bg-[#37352F] cursor-pointer"
+                className="flex-1 min-h-11 rounded-full bg-[var(--lh-primary)] py-2.5 text-xs font-medium text-white hover:bg-[var(--lh-primary-hover)] shadow-xs transition cursor-pointer"
               >
                 새로 시작
               </button>
@@ -182,16 +187,18 @@ export const PlacementTestModal: React.FC<PlacementTestModalProps> = ({
         ) : !isFinished ? (
           /* Ongoing Test */
           <div className="space-y-4">
-            <div className="rounded-md bg-[#F7F6F3] p-2.5 text-[11px] text-[#787774] leading-relaxed">
-              💡 <span className="font-semibold text-[#191919]">틀려도 괜찮아요!</span> 아직 안 배운 문제는 아래의 <b>'아직 안 배웠어요'</b>를 누르면 나에게 딱 맞는 과정부터 편하게 시작해요.
+            <div className="rounded-2xl bg-[var(--lh-surface-subtle)] border border-[var(--lh-line)] p-3.5 text-xs leading-relaxed text-[var(--lh-ink-secondary)] font-normal shadow-xs">
+              모르는 문제는 건너뛰어도 됩니다. 결과는 학습 순서를 제안하는 참고 자료로만 사용됩니다.
             </div>
 
-            <div className="flex items-center justify-between text-[#787774]">
-              <span className="font-semibold text-[#191919]">{currentQ.title}</span>
-              <span className="font-mono text-[11px]">{currentIdx + 1} / {QUESTIONS.length}</span>
+            <div className="flex items-center justify-between text-xs text-[var(--lh-ink-secondary)] font-normal">
+              <span className="font-medium text-[var(--lh-ink)]">{currentQ.title}</span>
+              <span className="font-mono text-xs rounded-full bg-[var(--lh-primary-subtle)] border border-[var(--lh-primary-border)] px-2.5 py-0.5 text-[var(--lh-primary-text)] font-medium">
+                {currentIdx + 1} / {QUESTIONS.length}
+              </span>
             </div>
 
-            <div className="rounded-md border border-[#E9E9E7] bg-white p-4 font-medium text-[#191919] text-sm">
+            <div className="rounded-2xl border border-[var(--lh-line)] bg-[var(--lh-surface)] p-5 font-medium text-[var(--lh-ink)] text-sm sm:text-base leading-relaxed shadow-xs">
               {currentQ.question}
             </div>
 
@@ -200,10 +207,10 @@ export const PlacementTestModal: React.FC<PlacementTestModalProps> = ({
                 <button
                   key={oIdx}
                   onClick={() => handleSelectOption(opt)}
-                  className={`w-full rounded-md border p-3 text-left transition cursor-pointer ${
+                  className={`min-h-12 w-full rounded-2xl border p-3.5 text-left text-xs sm:text-sm transition cursor-pointer shadow-xs ${
                     userAnswers[currentQ.id] === opt
-                      ? "bg-[#191919] text-white border-[#191919] font-semibold"
-                      : "bg-white border-[#E9E9E7] text-[#2F3437] hover:bg-[#F7F6F3]"
+                      ? "bg-[var(--lh-primary)] text-white border-[var(--lh-primary)] font-medium"
+                      : "bg-[var(--lh-surface)] border-[var(--lh-line)] text-[var(--lh-ink)] hover:bg-[var(--lh-surface-subtle)] font-normal"
                   }`}
                 >
                   {oIdx + 1}. {opt}
@@ -217,7 +224,7 @@ export const PlacementTestModal: React.FC<PlacementTestModalProps> = ({
                   setUserAnswers((prev) => ({ ...prev, [currentQ.id]: "아직 안 배웠음" }));
                   handleNext();
                 }}
-                className="text-xs text-[#787774] hover:text-[#191919] underline cursor-pointer"
+                className="text-xs font-medium text-[var(--lh-ink-secondary)] hover:text-[var(--lh-primary)] underline cursor-pointer"
               >
                 아직 안 배웠어요 (건너뛰기)
               </button>
@@ -225,7 +232,7 @@ export const PlacementTestModal: React.FC<PlacementTestModalProps> = ({
               <button
                 onClick={handleNext}
                 disabled={!userAnswers[currentQ.id]}
-                className="flex items-center gap-1 rounded-md bg-[#191919] px-4 py-2 text-white hover:bg-[#37352F] disabled:opacity-30 transition cursor-pointer"
+                className="inline-flex min-h-11 items-center gap-2 rounded-full bg-[var(--lh-primary)] px-6 text-xs font-medium text-white shadow-xs hover:bg-[var(--lh-primary-hover)] transition disabled:opacity-30 cursor-pointer"
               >
                 <span>{currentIdx === QUESTIONS.length - 1 ? "진단 결과 보기" : "다음 문항"}</span>
                 <ChevronRight className="h-3.5 w-3.5" />
@@ -234,35 +241,35 @@ export const PlacementTestModal: React.FC<PlacementTestModalProps> = ({
           </div>
         ) : (
           /* Finished Result & Recommendation */
-          <div className="space-y-5 text-center">
-            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-[#F7F6F3] text-[#191919]">
-              <Award className="h-6 w-6" />
+          <div className="space-y-6 text-center">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-[var(--lh-primary-subtle)] border border-[var(--lh-primary-border)] text-[var(--lh-primary)] shadow-xs">
+              <Award className="h-7 w-7" />
             </div>
 
-            <div className="space-y-1">
-              <div className="text-[11px] font-semibold uppercase tracking-wider text-[#787774]">
+            <div className="space-y-1.5">
+              <div className="text-[11px] font-medium uppercase tracking-wider text-[var(--lh-primary)]">
                 체험 진단 결과: {score} / 3 문항 정답
               </div>
-              <h2 className="text-lg font-bold text-[#191919]">
+              <h2 className="text-xl font-medium text-[var(--lh-ink)]">
                 참고용 시작점: {recommendation.level}
               </h2>
-              <p className="text-[#787774] leading-relaxed pt-1">
+              <p className="text-xs text-[var(--lh-ink-secondary)] leading-relaxed font-normal pt-1">
                 {recommendation.desc}
               </p>
             </div>
 
-            <div className="rounded-md border border-[#E9E9E7] bg-[#FBFBFA] p-4 text-left space-y-2">
-                <div className="font-bold text-[11px] text-[#191919]">선택적 참고 제안:</div>
-              <p className="text-[11px] text-[#787774]">
+            <div className="rounded-2xl border border-[var(--lh-line)] bg-[var(--lh-surface-subtle)] p-4 text-left space-y-1.5 shadow-xs">
+              <div className="font-medium text-xs text-[var(--lh-ink)]">선택적 참고 제안:</div>
+              <p className="text-xs text-[var(--lh-ink-secondary)] leading-relaxed font-normal">
                 세 문항으로 전체 실력을 판정할 수는 없습니다. 이 결과는 수학 학습을 시작할 위치를 정하는 참고용 제안입니다.
               </p>
             </div>
 
             <button
               onClick={handleStartRecommendedCourse}
-              className="w-full rounded-md bg-[#191919] py-2.5 text-xs font-semibold text-white hover:bg-[#37352F] transition cursor-pointer"
+              className="inline-flex min-h-12 w-full items-center justify-center rounded-full bg-[var(--lh-primary)] px-6 text-sm font-medium text-white shadow-xs hover:bg-[var(--lh-primary-hover)] transition cursor-pointer"
             >
-              추천 맞춤 코스로 바로 공부 시작하기 ⏎
+              제안된 과정 시작하기
             </button>
           </div>
         )}

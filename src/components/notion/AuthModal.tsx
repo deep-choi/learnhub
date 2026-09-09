@@ -1,121 +1,136 @@
-import React, { useState } from "react";
-import { X, CheckCircle2, ShieldCheck, Smartphone } from "lucide-react";
-import { StorageService } from "../../services/storage";
-import { UserAccount } from "../../types/learning";
+import React, { useEffect, useRef, useState } from "react";
+import { ShieldCheck, X } from "lucide-react";
+import {
+  getAuthStatus,
+  signInWithGoogle,
+  signInWithPassword,
+  signUpWithPassword,
+} from "../../services/authClient";
+import { LearnHubLogo } from "../common/LearnHubLogo";
 
 interface AuthModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onLoginSuccess: (user: UserAccount) => void;
+  initialError?: string;
 }
 
-export const AuthModal: React.FC<AuthModalProps> = ({
-  isOpen,
-  onClose,
-  onLoginSuccess,
-}) => {
+type AuthMode = "login" | "signup";
+
+export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, initialError }) => {
+  const [mode, setMode] = useState<AuthMode>("login");
   const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
+  const emailInputRef = useRef<HTMLInputElement>(null);
+  const previousActiveElement = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    setErrorMessage(initialError || "");
+    setSuccessMessage("");
+    setIsSubmitting(false);
+    previousActiveElement.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    window.setTimeout(() => emailInputRef.current?.focus(), 0);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      onClose();
+      window.setTimeout(() => previousActiveElement.current?.focus(), 0);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [initialError, isOpen, onClose]);
 
   if (!isOpen) return null;
 
-  const handleCreateLocalProfile = (e: React.FormEvent) => {
-    e.preventDefault();
+  const resetFeedback = () => {
     setErrorMessage("");
+    setSuccessMessage("");
+  };
+
+  const assertConfigured = () => {
+    if (!getAuthStatus().configured) throw new Error("인증 설정을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.");
+  };
+
+  const handleGoogleLogin = async () => {
+    resetFeedback();
     setIsSubmitting(true);
     try {
-      const user = StorageService.createLocalProfile(name);
-      onLoginSuccess(user);
-      onClose();
-    } catch {
-      setErrorMessage("이 기기에 프로필을 저장하지 못했습니다. 저장 공간을 확인한 뒤 다시 시도해 주세요.");
+      assertConfigured();
+      await signInWithGoogle();
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Google 로그인을 시작하지 못했습니다.");
+      setIsSubmitting(false);
+    }
+  };
+
+  const handlePasswordAuth = async (event: React.FormEvent) => {
+    event.preventDefault();
+    resetFeedback();
+    if (password.length < 8) {
+      setErrorMessage("비밀번호는 8자 이상 입력해 주세요.");
+      return;
+    }
+    setIsSubmitting(true);
+    try {
+      assertConfigured();
+      if (mode === "signup") {
+        await signUpWithPassword(email.trim(), password, name.trim() || undefined);
+        setSuccessMessage("회원가입 요청을 완료했습니다. 확인 메일이 오면 링크를 눌러 계정을 활성화해 주세요.");
+      } else {
+        await signInWithPassword(email.trim(), password);
+      }
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "계정 인증을 완료하지 못했습니다.");
     } finally {
       setIsSubmitting(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-xs">
-      <div className="w-full max-w-md rounded-xl border border-[#E9E9E7] bg-white p-6 shadow-2xl text-[#2F3437] animate-fade-in space-y-5">
-        {/* Header */}
-        <div className="flex items-start justify-between border-b border-[#E9E9E7] pb-4">
-          <div className="flex items-center gap-2.5">
-            <span className="text-2xl">🌱</span>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm" role="presentation">
+      <div className="max-h-[calc(100vh-2rem)] w-full max-w-md overflow-y-auto rounded-[28px] border border-[var(--lh-line)] bg-[var(--lh-surface)] p-6 text-[var(--lh-ink)] shadow-2xl sm:p-8" role="dialog" aria-modal="true" aria-labelledby="learnhub-auth-title">
+        <div className="flex items-start justify-between">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-[var(--lh-line)] bg-[var(--lh-surface-subtle)]"><LearnHubLogo size={22} /></div>
             <div>
-              <h2 className="text-lg font-bold text-[#191919]">이 기기에서 LearnHub 시작하기</h2>
-              <p className="text-xs text-[#787774] mt-0.5">
-                현재는 실제 계정이나 클라우드 동기화 없이 이 기기에만 저장됩니다.
-              </p>
+              <h2 id="learnhub-auth-title" className="text-xl font-medium tracking-tight">{mode === "login" ? "다시 만나서 반가워요" : "학습을 시작해 볼까요?"}</h2>
+              <p className="mt-1 text-xs text-[var(--lh-ink-secondary)]">학습 기록을 안전하게 이어서 사용할 수 있어요.</p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="rounded-md p-1.5 text-[#787774] hover:bg-[#F7F6F3] hover:text-[#191919] transition cursor-pointer"
-          >
-            <X className="h-4 w-4" />
-          </button>
+          <button type="button" onClick={onClose} aria-label="인증 창 닫기" className="flex h-10 w-10 items-center justify-center rounded-full text-[var(--lh-ink-secondary)] hover:bg-[var(--lh-surface-subtle)] hover:text-[var(--lh-ink)] cursor-pointer transition"><X className="h-4 w-4" /></button>
         </div>
 
-        {/* Free Experience Guarantee Banner */}
-        <div className="rounded-lg border border-[#E9E9E7] bg-[#FBFBFA] p-3 text-xs text-[#787774] space-y-1">
-            <div className="flex items-center gap-1.5 font-bold text-[#191919]">
-              <CheckCircle2 className="h-3.5 w-3.5 text-[#191919]" />
-              <span>로그인 없이도 모든 학습을 무료로 체험할 수 있어요</span>
-            </div>
-            <p className="text-[11px] leading-relaxed text-[#787774]">
-              학습 기록은 이 브라우저의 로컬 저장소에만 남습니다. 실제 계정 보관이 필요하면 별도 인증 연동이 필요합니다.
-            </p>
-          </div>
+        <div className="mt-6 grid grid-cols-2 rounded-full bg-[var(--lh-surface-subtle)] p-1" role="tablist" aria-label="인증 방식">
+          {(["login", "signup"] as const).map((item) => (
+            <button key={item} type="button" role="tab" aria-selected={mode === item} onClick={() => { setMode(item); resetFeedback(); }} className={`min-h-10 rounded-full text-sm font-medium transition cursor-pointer ${mode === item ? "bg-[var(--lh-surface)] text-[var(--lh-ink)] shadow-sm" : "text-[var(--lh-ink-secondary)] hover:text-[var(--lh-ink)]"}`}>
+              {item === "login" ? "로그인" : "회원가입"}
+            </button>
+          ))}
+        </div>
 
-          {errorMessage && (
-            <p role="alert" className="rounded-md border border-[#F0B8B8] bg-[#FFF7F7] px-3 py-2 text-[11px] text-[#9B1C1C]">
-              {errorMessage}
-            </p>
-          )}
+        {errorMessage && <p role="alert" className="mt-4 rounded-xl border border-[var(--lh-line)] bg-[var(--lh-surface-subtle)] px-4 py-3 text-xs text-[var(--lh-danger)]">{errorMessage}</p>}
+        {successMessage && <p role="status" className="mt-4 rounded-xl border border-[var(--lh-line)] bg-[var(--lh-surface-subtle)] px-4 py-3 text-xs text-[var(--lh-ink)]">{successMessage}</p>}
 
-        <form onSubmit={handleCreateLocalProfile} className="space-y-3">
-          <div>
-            <label className="block text-[11px] font-semibold text-[#787774] mb-1">이름 또는 닉네임 (선택)</label>
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="예: 김민준"
-              className="w-full rounded-md border border-[#E9E9E7] bg-white px-3 py-2 text-xs text-[#191919] placeholder-[#9B9A97] focus:border-[#191919] focus:outline-none"
-            />
-          </div>
-
-          <button
-            type="submit"
-            disabled={isSubmitting}
-            className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-[#191919] py-2.5 text-xs font-semibold text-white hover:bg-[#37352F] transition cursor-pointer"
-          >
-            <Smartphone className="h-3.5 w-3.5" />
-            <span>이 기기에 로컬 프로필 만들기 ⏎</span>
-          </button>
+        <form onSubmit={handlePasswordAuth} className="mt-5 space-y-4">
+          {mode === "signup" && <div className="space-y-1.5"><label htmlFor="learnhub-auth-name" className="text-xs font-medium text-[var(--lh-ink-secondary)]">이름</label><input id="learnhub-auth-name" value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" placeholder="학습자 이름" className="min-h-12 w-full rounded-xl border border-[var(--lh-line)] bg-[var(--lh-surface)] px-4 text-sm outline-none transition focus:border-[var(--lh-line-strong)]" /></div>}
+          <div className="space-y-1.5"><label htmlFor="learnhub-auth-email" className="text-xs font-medium text-[var(--lh-ink-secondary)]">이메일</label><input id="learnhub-auth-email" ref={emailInputRef} type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" placeholder="you@example.com" required className="min-h-12 w-full rounded-xl border border-[var(--lh-line)] bg-[var(--lh-surface)] px-4 text-sm outline-none transition focus:border-[var(--lh-line-strong)]" /></div>
+          <div className="space-y-1.5"><label htmlFor="learnhub-auth-password" className="text-xs font-medium text-[var(--lh-ink-secondary)]">비밀번호</label><input id="learnhub-auth-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={mode === "login" ? "current-password" : "new-password"} placeholder="8자 이상" required minLength={8} className="min-h-12 w-full rounded-xl border border-[var(--lh-line)] bg-[var(--lh-surface)] px-4 text-sm outline-none transition focus:border-[var(--lh-line-strong)]" /></div>
+          <button type="submit" disabled={isSubmitting} className="flex min-h-12 w-full items-center justify-center rounded-full bg-[var(--lh-primary)] px-6 text-sm font-medium text-white transition hover:bg-[var(--lh-primary-hover)] disabled:opacity-50 shadow-xs cursor-pointer">{isSubmitting ? "처리 중…" : mode === "login" ? "로그인" : "계정 만들기"}</button>
         </form>
 
-        {/* Privacy & AI Data Assurance */}
-        <div className="border-t border-[#E9E9E7] pt-3 text-[10px] text-[#9B9A97] space-y-1">
-          <div className="flex items-center gap-1">
-            <ShieldCheck className="h-3 w-3" />
-            <span className="font-semibold text-[#787774]">로컬 저장 안내</span>
-          </div>
-          <p className="leading-relaxed">
-            이 프로필 설정에서는 닉네임 외 개인정보를 수집하거나 저장하지 않습니다. 이 프로필은 보안 계정이 아니며 현재 기기에서만 사용됩니다.
-          </p>
-        </div>
+        <div className="my-5 flex items-center gap-3 text-[10px] uppercase tracking-[0.18em] text-[var(--lh-ink-tertiary)]"><span className="h-px flex-1 bg-[var(--lh-line)]" />또는<span className="h-px flex-1 bg-[var(--lh-line)]" /></div>
 
-        {/* Continue as Guest button */}
-        <div className="pt-1 text-center">
-          <button
-            type="button"
-            onClick={onClose}
-            className="text-[11px] text-[#787774] hover:text-[#191919] hover:underline cursor-pointer"
-          >
-            로그인 없이 게스트로 계속 공부하기 ➔
-          </button>
+        <button type="button" onClick={handleGoogleLogin} disabled={isSubmitting} className="flex min-h-12 w-full items-center justify-center gap-3 rounded-full border border-[var(--lh-line)] bg-[var(--lh-surface)] px-5 text-sm font-medium transition hover:bg-[var(--lh-surface-subtle)] disabled:opacity-50 shadow-xs cursor-pointer">
+          <span aria-hidden="true" className="text-base font-medium">G</span> Google로 계속하기
+        </button>
+
+        <div className="mt-6 space-y-3 border-t border-[var(--lh-line)] pt-5">
+          <div className="flex items-start gap-2 text-xs leading-relaxed text-[var(--lh-ink-secondary)]"><ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-[var(--lh-primary)]" /><span>로그인하면 학습 과정과 기록이 고객 계정에 연결됩니다. 비밀번호는 LearnHub가 직접 저장하지 않습니다.</span></div>
+          <p className="text-center text-[11px] leading-relaxed text-[var(--lh-ink-tertiary)]">서비스 소개는 로그인 없이 볼 수 있으며, 학습 기능은 계정 로그인 후 이용할 수 있습니다.</p>
         </div>
       </div>
     </div>

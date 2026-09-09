@@ -2,33 +2,247 @@
 
 :root {
   color-scheme: light;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, "Apple Color Emoji", Arial, sans-serif, "Segoe UI Emoji", "Segoe UI Symbol";
-  background: #ffffff;
-  color: #2F3437;
+
+  /* LearnHub foundations: OpenAI restraint + Academy learning hierarchy */
+  --lh-canvas: #f8f9fc;
+  --lh-surface: #ffffff;
+  --lh-surface-subtle: #f1f3f7;
+  --lh-surface-strong: #e4e7ec;
+  --lh-ink: #111110;
+  --lh-ink-secondary: #5f5f5a;
+  --lh-ink-tertiary: #858580;
+  --lh-line: #e2e4e9;
+  --lh-line-strong: #c8cad0;
+  --lh-focus: #4169e1;
+  --lh-danger: #b42318;
+
+  /* LIGHT MODE: Point color is Royal Blue (#4169E1) */
+  --lh-point: #4169e1;
+  --lh-point-hover: #3155cb;
+  --lh-point-subtle: #eef3ff;
+  --lh-point-text: #2647b2;
+  --lh-point-border: #bacbf9;
+
+  /* LIGHT MODE: Secondary is Warm Orange (#F38132) */
+  --lh-accent: #f38132;
+  --lh-accent-hover: #dc6e22;
+  --lh-accent-subtle: #fff4ec;
+  --lh-accent-text: #b85511;
+  --lh-accent-border: #fcd5ba;
+
+  --lh-primary: var(--lh-point);
+  --lh-primary-hover: var(--lh-point-hover);
+  --lh-primary-subtle: var(--lh-point-subtle);
+  --lh-primary-text: var(--lh-point-text);
+  --lh-primary-border: var(--lh-point-border);
+
+  --lh-secondary: var(--lh-accent);
+  --lh-secondary-hover: var(--lh-accent-hover);
+  --lh-secondary-subtle: var(--lh-accent-subtle);
+  --lh-secondary-text: var(--lh-accent-text);
+  --lh-secondary-border: var(--lh-accent-border);
+
+  --lh-radius-sm: 12px;
+  --lh-radius-md: 20px;
+  --lh-radius-lg: 28px;
+  --lh-shadow-sm: 0 1px 3px rgba(17, 17, 16, 0.05), 0 1px 2px rgba(17, 17, 16, 0.04);
+  --lh-shadow-md: 0 12px 32px -4px rgba(17, 17, 16, 0.08), 0 4px 12px -2px rgba(17, 17, 16, 0.04);
+
+  font-family: "Pretendard", -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif;
+  font-size: 16px;
+  font-synthesis: none;
+  background: var(--lh-canvas);
+  color: var(--lh-ink);
+}
+
+html.dark {
+  color-scheme: dark;
+
+  /* Deep M3 Dark/Night Mode Surfaces */
+  --lh-canvas: #0c0d12;
+  --lh-surface: #161822;
+  --lh-surface-subtle: #1e212d;
+  --lh-surface-strong: #272b3a;
+  --lh-ink: #f4f5f8;
+  --lh-ink-secondary: #9ea4b4;
+  --lh-ink-tertiary: #6b7282;
+  --lh-line: #262938;
+  --lh-line-strong: #373c4e;
+  --lh-focus: #f38132;
+  --lh-danger: #f87171;
+
+  /* DARK MODE: Primary Point Color switches to WARM ORANGE */
+  --lh-point: #f38132;
+  --lh-point-hover: #e06d1e;
+  --lh-point-subtle: rgba(243, 129, 50, 0.15);
+  --lh-point-text: #ff9e59;
+  --lh-point-border: rgba(243, 129, 50, 0.38);
+
+  /* DARK MODE: Secondary switches to Royal Blue */
+  --lh-accent: #4169e1;
+  --lh-accent-hover: #577df8;
+  --lh-accent-subtle: rgba(65, 105, 225, 0.16);
+  --lh-accent-text: #7b9bfc;
+  --lh-accent-border: rgba(65, 105, 225, 0.38);
+
+  --lh-primary: var(--lh-point);
+  --lh-primary-hover: var(--lh-point-hover);
+  --lh-primary-subtle: var(--lh-point-subtle);
+  --lh-primary-text: var(--lh-point-text);
+  --lh-primary-border: var(--lh-point-border);
+
+  --lh-secondary: var(--lh-accent);
+  --lh-secondary-hover: var(--lh-accent-hover);
+  --lh-secondary-subtle: var(--lh-accent-subtle);
+  --lh-secondary-text: var(--lh-accent-text);
+  --lh-secondary-border: var(--lh-accent-border);
+
+  --lh-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.35);
+  --lh-shadow-md: 0 12px 32px -4px rgba(0, 0, 0, 0.5);
+
+  background: var(--lh-canvas);
+  color: var(--lh-ink);
+}
+
+/* Strict Typography Policy: Pretendard only, weights 400 & 500 only */
+*, *::before, *::after {
+  box-sizing: border-box;
+  font-family: "Pretendard", -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif;
+}
+
+/* Base elements default to weight 400 (Regular) */
+body, p, span, div, input, textarea, select, button, a, label, li {
+  font-weight: 400;
+}
+
+/* All headings, bold tags, and emphasis classes strictly clamped to 500 (Medium) */
+h1, h2, h3, h4, h5, h6, strong, b, th,
+.font-medium, .font-semibold, .font-bold, .font-extrabold, .font-black {
+  font-weight: 500 !important;
+}
+
+.font-normal, .font-regular, .font-light, .font-thin {
+  font-weight: 400 !important;
 }
 
 html {
   min-width: 320px;
-  background: #ffffff;
+  background: var(--lh-canvas);
+  scroll-behavior: smooth;
 }
 
 body {
   min-width: 320px;
   min-height: 100vh;
   margin: 0;
-  background: #ffffff;
-  color: #2F3437;
+  background: var(--lh-canvas);
+  color: var(--lh-ink);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-button,
-input,
-textarea {
-  font: inherit;
+button, input, textarea, select { font: inherit; }
+button, [role="button"], summary { -webkit-tap-highlight-color: transparent; }
+button, [role="button"], input, textarea, select { min-height: 44px; }
+
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+summary:focus-visible,
+[role="button"]:focus-visible {
+  outline: 2px solid var(--lh-focus);
+  outline-offset: 3px;
 }
 
-::selection {
-  background: #2F3437;
+::selection { background: var(--lh-ink); color: #ffffff; }
+
+.lh-page-grid {
+  width: min(100%, 1120px);
+  margin-inline: auto;
+  padding-inline: clamp(20px, 4vw, 56px);
+}
+
+.lh-kicker {
+  color: var(--lh-ink-secondary);
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.lh-card {
+  border: 1px solid var(--lh-line);
+  border-radius: var(--lh-radius-lg);
+  background: var(--lh-surface);
+  box-shadow: var(--lh-shadow-sm);
+}
+
+.lh-page-header {
+  padding-bottom: 24px;
+  border-bottom: 1px solid var(--lh-line);
+}
+
+.lh-page-title {
+  margin: 0;
+  color: var(--lh-ink);
+  font-size: clamp(2rem, 4vw, 2.5rem);
+  font-weight: 500;
+  line-height: 1.1;
+  letter-spacing: -0.03em;
+}
+
+.lh-page-description {
+  max-width: 680px;
+  color: var(--lh-ink-secondary);
+  font-size: 1rem;
+  line-height: 1.65;
+}
+
+.lh-input {
+  min-height: 48px;
+  border: 1px solid var(--lh-line);
+  border-radius: var(--lh-radius-sm);
+  background: var(--lh-surface);
+  color: var(--lh-ink);
+}
+
+.lh-dialog-backdrop {
+  background: rgba(17, 17, 16, 0.42);
+  backdrop-filter: blur(2px);
+}
+
+.lh-button-primary {
+  border-radius: 999px;
+  background: var(--lh-primary);
   color: #ffffff;
+  transition: background-color 160ms ease, transform 160ms ease;
+}
+.lh-button-primary:hover { background: var(--lh-primary-hover); }
+
+.lh-button-secondary {
+  border: 1px solid var(--lh-line);
+  border-radius: 999px;
+  background: var(--lh-surface);
+  color: var(--lh-ink);
+  transition: border-color 160ms ease, background-color 160ms ease;
+}
+.lh-button-secondary:hover {
+  border-color: var(--lh-line-strong);
+  background: var(--lh-surface-subtle);
+}
+
+.lh-cover-tone {
+  background:
+    radial-gradient(circle at 18% 120%, rgba(255, 255, 255, 0.15), transparent 38%),
+    linear-gradient(118deg, #111110 0%, #343431 54%, #5f5f5a 100%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

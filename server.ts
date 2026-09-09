@@ -8,20 +8,29 @@ import { compareAnswers } from "./src/utils/answerComparison";
 import { validateCurriculumPayload, validateLessonPayload } from "./src/domain/contentValidation";
 import { AiGateway, AiGatewayError } from "./server/aiGateway";
 import { isAllowedLoopbackRequest } from "./server/aiPolicy";
-import { isAuthConfigured, verifyAccessToken } from "./server/auth";
-import { createContentReport } from "./server/cloudStore";
+import { configureSupabaseAuth, isAuthConfigured, verifyAccessToken } from "./server/auth";
+import { configureSupabaseCloudStore, createContentReport, getLearningSnapshot, putLearningSnapshot } from "./server/cloudStore";
+import { getSupabasePublicConfig } from "./server/supabaseProvider";
 import { getLearningSupport } from "./src/domain/learningSupport";
+import { validateLearningBackup } from "./src/services/learningBackup";
 
 dotenv.config();
+dotenv.config({ path: ".env.supabase" });
+configureSupabaseAuth();
+configureSupabaseCloudStore();
 
 export const app = express();
-const PORT = 3000;
+const configuredPort = Number(process.env.PORT);
+const PORT = Number.isInteger(configuredPort) && configuredPort >= 1 && configuredPort <= 65_535 ? configuredPort : 3000;
 const LEARNING_TYPES = ["concept", "problem_solving", "memorization", "language", "practical"] as const;
 const QUIZ_TYPES = ["multiple_choice", "short_answer"] as const;
 const REPORT_CATEGORIES = ["wrong_answer", "inaccurate", "unclear", "rendering", "other"] as const;
 
 app.disable("x-powered-by");
-app.use(express.json({ limit: "64kb" }));
+app.use((req, res, next) => {
+  const isSnapshotPut = req.method === "PUT" && req.path === "/api/learning-snapshot";
+  return express.json({ limit: isSnapshotPut ? "8mb" : "64kb" })(req, res, next);
+});
 app.use((req, res, next) => {
   const supplied = req.header("x-request-id") || "";
   const requestId = /^[A-Za-z0-9._:-]{1,80}$/.test(supplied) ? supplied : randomUUID();
@@ -51,11 +60,26 @@ const isLoopbackRequest = (req: Request) => isAllowedLoopbackRequest({
 });
 const bearerToken = (req: Request) => /^Bearer\s+([^\s]{1,4096})$/i.exec(req.header("authorization") || "")?.[1] || null;
 
+app.get("/api/public-config", (_req, res) => {
+  const config = getSupabasePublicConfig();
+  if (!config) return res.status(503).json({ error: "공개 설정이 아직 준비되지 않았습니다.", code: "PUBLIC_CONFIG_NOT_CONFIGURED" });
+  return res.json(config);
+});
+
 const requireAiAccess = async (req: Request, res: Response): Promise<boolean> => {
+  // Allow non-production loopback requests (guest / trial demo mode)
+  if (process.env.NODE_ENV !== "production" && isLoopbackRequest(req)) {
+    const token = bearerToken(req);
+    if (token) {
+      const user = await verifyAccessToken(token).catch(() => null);
+      if (user) res.locals.userId = user.id;
+    }
+    return true;
+  }
+
   let configured = false;
   try { configured = isAuthConfigured(); } catch { configured = false; }
   if (!configured) {
-    if (process.env.NODE_ENV !== "production" && isLoopbackRequest(req)) return true;
     res.status(503).json({ error: "인증 설정이 필요합니다.", code: "AUTH_NOT_CONFIGURED" });
     return false;
   }
@@ -65,6 +89,27 @@ const requireAiAccess = async (req: Request, res: Response): Promise<boolean> =>
   if (!user) { res.status(401).json({ error: "인증을 확인할 수 없습니다.", code: "AUTH_INVALID" }); return false; }
   res.locals.userId = user.id;
   return true;
+};
+
+const requireConfiguredUser = async (req: Request, res: Response): Promise<{ id: string; token: string } | null> => {
+  let configured = false;
+  try { configured = isAuthConfigured(); } catch { configured = false; }
+  if (!configured) {
+    res.status(503).json({ error: "인증 설정이 필요합니다.", code: "AUTH_NOT_CONFIGURED" });
+    return null;
+  }
+  const token = bearerToken(req);
+  if (!token) {
+    res.status(401).json({ error: "인증이 필요합니다.", code: "AUTH_REQUIRED" });
+    return null;
+  }
+  const user = await verifyAccessToken(token).catch(() => null);
+  if (!user) {
+    res.status(401).json({ error: "인증을 확인할 수 없습니다.", code: "AUTH_INVALID" });
+    return null;
+  }
+  res.locals.userId = user.id;
+  return { id: user.id, token };
 };
 
 const sendAiError = (res: Response, error: unknown) => {
@@ -197,6 +242,41 @@ app.post("/api/ai/generate-review", async (req, res) => {
   return runAi(req, res, "generate-review", prompt, { responseMimeType: "application/json", responseSchema: reviewSchema }, 1800, validateReviewPayload);
 });
 
+app.get("/api/learning-snapshot", async (req, res) => {
+  const auth = await requireConfiguredUser(req, res);
+  if (!auth) return;
+  try {
+    const snapshot = await getLearningSnapshot(auth.id, auth.token);
+    if (!snapshot) return res.status(404).json({ error: "학습 스냅샷이 없습니다.", code: "SNAPSHOT_NOT_FOUND" });
+    return res.json(snapshot);
+  } catch {
+    return res.status(503).json({ error: "학습 스냅샷을 읽지 못했습니다.", code: "SNAPSHOT_UNAVAILABLE" });
+  }
+});
+
+app.put("/api/learning-snapshot", async (req, res) => {
+  const auth = await requireConfiguredUser(req, res);
+  if (!auth) return;
+  const body = req.body;
+  if (!isRecord(body) || !hasOnlyKeys(body, ["snapshot", "expectedRevision"]) || body.snapshot === undefined ||
+    !(body.expectedRevision === null || (typeof body.expectedRevision === "number" && Number.isInteger(body.expectedRevision) && body.expectedRevision >= 0))) {
+    return invalidBody(res, "학습 스냅샷 요청 형식이 올바르지 않습니다.");
+  }
+  let serializedSnapshot = "";
+  try { serializedSnapshot = JSON.stringify(body.snapshot); } catch { return invalidBody(res, "학습 스냅샷을 읽을 수 없습니다."); }
+  if (Buffer.byteLength(serializedSnapshot, "utf8") > 8_000_000) return res.status(413).json({ error: "학습 스냅샷이 너무 큽니다.", code: "SNAPSHOT_TOO_LARGE" });
+  const validation = validateLearningBackup(body.snapshot);
+  if (!validation.ok) return res.status(400).json({ error: "학습 스냅샷 검증에 실패했습니다.", code: "INVALID_SNAPSHOT", details: validation.errors.slice(0, 10) });
+  const expectedRevision: number | null = body.expectedRevision === null ? null : body.expectedRevision as number;
+  try {
+    const result = await putLearningSnapshot(auth.id, validation.value, expectedRevision, auth.token);
+    return res.json(result);
+  } catch (error) {
+    if (error instanceof Error && error.message === "Learning snapshot conflict") return res.status(409).json({ error: "학습 스냅샷이 다른 기기에서 변경되었습니다.", code: "SNAPSHOT_CONFLICT" });
+    return res.status(503).json({ error: "학습 스냅샷을 저장하지 못했습니다.", code: "SNAPSHOT_UNAVAILABLE" });
+  }
+});
+
 app.post("/api/content-reports", async (req, res) => {
   let configured = false;
   try { configured = isAuthConfigured(); } catch { configured = false; }
@@ -209,7 +289,7 @@ app.post("/api/content-reports", async (req, res) => {
   const body = req.body;
   if (!isRecord(body) || !hasOnlyKeys(body, ["category", "description", "courseId", "lessonId", "stepId"]) || !isAllowed(body.category, REPORT_CATEGORIES) || boundedString(body, "description", 4_000) === null || !optionalBoundedString(body, "courseId", 160) || !optionalBoundedString(body, "lessonId", 160) || !optionalBoundedString(body, "stepId", 160)) return invalidBody(res, "콘텐츠 신고 내용을 확인해 주세요.");
   try {
-    const result = await createContentReport(user.id, { category: body.category as (typeof REPORT_CATEGORIES)[number], description: body.description as string, ...(typeof body.courseId === "string" ? { courseId: body.courseId } : {}), ...(typeof body.lessonId === "string" ? { lessonId: body.lessonId } : {}), ...(typeof body.stepId === "string" ? { stepId: body.stepId } : {}) });
+    const result = await createContentReport(user.id, { category: body.category as (typeof REPORT_CATEGORIES)[number], description: body.description as string, ...(typeof body.courseId === "string" ? { courseId: body.courseId } : {}), ...(typeof body.lessonId === "string" ? { lessonId: body.lessonId } : {}), ...(typeof body.stepId === "string" ? { stepId: body.stepId } : {}) }, token);
     return res.status(201).json(result);
   } catch { return res.status(503).json({ error: "콘텐츠 신고를 저장하지 못했습니다.", code: "REPORTING_UNAVAILABLE" }); }
 });

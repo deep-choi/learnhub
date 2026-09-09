@@ -92,13 +92,12 @@ GPT-5.6 Luna High 3명이 아래를 수정했다. 제품 코드는 서브에이�
 | 복습 | 실제 다음 날 예약·날짜 필터·문항 저장, 중복 병합, 오답 재예약, 유효한 객관식 선택지 검증 | 개인별 최적 간격을 계산하는 복습 모델은 아님 |
 | 튜터·필기 | 레슨별 대화 범위, 본문+선택 문장+최근 대화 전달, 텍스트/손글씨의 로컬 저장 경로 | 계정/기기 동기화·동시 수정 충돌 해결 없음; 복원은 사용자 확인 필요 |
 | 지도·탐색 | 지도는 수학 예시임을 명시, 실제 연결 없는 이동 제한, 일부 추천을 실제 기록 기준으로 변경; 검색 키보드 조작·표 가로 접근 보완 | 전 분야의 실제 선수 개념 지도는 없음; 모바일/접근성 전체 통과를 의미하지 않음 |
-| 타이머 | 닫기가 최소화이며 계속 실행된다는 안내 | 전역 남은 시간 표시·OS 백그라운드 신뢰성은 미구현/미검증 |
 
 변경 담당 파일:
 
 - A: `src/services/storage.ts`, `src/types/learning.ts`, `src/App.tsx`, `src/components/HomeView.tsx`, `src/components/CreateCourseModal.tsx`, `src/components/ProfileView.tsx`, `src/components/notion/AuthModal.tsx`, `src/components/notion/TopBar.tsx`, `src/components/notion/PlacementTestModal.tsx`, `tests/storage.test.ts`.
 - B: `src/components/notion/NotionLessonCanvas.tsx`, `src/components/notion/LessonCompletionModal.tsx`, `src/components/notion/ScratchpadCanvas.tsx`, `src/components/notion/RichLessonRenderer.tsx`, `src/components/AiTutorDrawer.tsx`, `server.ts`, `src/utils/answerComparison.ts`, `tests/answerComparison.test.ts`.
-- C: `src/components/ReviewView.tsx`, `src/components/SkillMatrixView.tsx`, `src/components/notion/KnowledgeMapView.tsx`, `src/components/notion/MistakeArchiveView.tsx`, `src/components/notion/Sidebar.tsx`, `src/components/notion/CommandPaletteModal.tsx`, `src/components/notion/FocusTimerModal.tsx`, `src/utils/reviewSession.ts`, `tests/review.test.ts`.
+- C: `src/components/ReviewView.tsx`, `src/components/SkillMatrixView.tsx`, `src/components/notion/KnowledgeMapView.tsx`, `src/components/notion/MistakeArchiveView.tsx`, `src/components/notion/Sidebar.tsx`, `src/components/notion/CommandPaletteModal.tsx`, `src/utils/reviewSession.ts`, `tests/review.test.ts`.
 
 최종 자동 검사 결과: 모든 서브에이전트 수정과 앱의 튜터/필기 연결이 끝난 뒤 재실행했다.
 

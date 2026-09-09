@@ -1,21 +1,23 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import {
   ChevronRight,
   Maximize2,
   Minimize2,
+  Moon,
   PanelLeft,
-  Share2,
   Sparkles,
+  Sun,
 } from "lucide-react";
 import { NotionPageView } from "./Sidebar";
 import { UserAccount } from "../../types/learning";
+import { LearnHubLogo } from "../common/LearnHubLogo";
+import { THEME_CHANGED_EVENT, ThemeMode, getStoredTheme, toggleTheme } from "../../services/theme";
 
 interface TopBarProps {
   activeView: NotionPageView;
   isSidebarOpen: boolean;
   onToggleSidebar: () => void;
   onOpenTutor: () => void;
-  onOpenTimer: () => void;
   isZenMode: boolean;
   onToggleZenMode: () => void;
   userAccount?: UserAccount;
@@ -27,18 +29,36 @@ export const TopBar: React.FC<TopBarProps> = ({
   isSidebarOpen,
   onToggleSidebar,
   onOpenTutor,
-  onOpenTimer,
   isZenMode,
   onToggleZenMode,
   userAccount,
   onOpenAuth,
 }) => {
+  const [theme, setThemeState] = useState<ThemeMode>(() => getStoredTheme());
+
+  useEffect(() => {
+    const handleThemeChange = (e: Event) => {
+      const customEvent = e as CustomEvent<{ theme: ThemeMode }>;
+      if (customEvent.detail?.theme) {
+        setThemeState(customEvent.detail.theme);
+      }
+    };
+    window.addEventListener(THEME_CHANGED_EVENT, handleThemeChange);
+    return () => window.removeEventListener(THEME_CHANGED_EVENT, handleThemeChange);
+  }, []);
+
   const getBreadcrumbs = () => {
     switch (activeView.type) {
       case "home":
         return [{ label: "공부 홈" }, { label: "오늘의 학습" }];
+      case "courses":
+        return [{ label: "내 과목" }, { label: "학습 로드맵" }];
+      case "course-detail":
+        return [{ label: "내 과목" }, { label: activeView.course.title }];
       case "records":
         return [{ label: "기록" }, { label: "학습 기록" }];
+      case "ai-chat":
+        return [{ label: "AI" }, { label: "대화" }];
       case "lesson":
         return [
           { label: activeView.course.title },
@@ -61,30 +81,37 @@ export const TopBar: React.FC<TopBarProps> = ({
   const crumbs = getBreadcrumbs();
 
   return (
-    <header className="sticky top-0 z-30 flex h-11 w-full items-center justify-between border-b border-[#E9E9E7] bg-white px-3 text-xs text-[#787774]">
+    <header className="sticky top-0 z-30 flex h-16 w-full items-center justify-between border-b border-[var(--lh-line)] bg-[var(--lh-surface)]/90 px-4 text-sm text-[var(--lh-ink-secondary)] backdrop-blur-xl sm:px-6 transition-colors duration-200">
       {/* Left: Sidebar Toggle & Breadcrumbs */}
-      <div className="flex items-center gap-1.5 truncate">
+      <div className="flex items-center gap-2.5 truncate">
         <button
           type="button"
           onClick={onToggleSidebar}
           aria-label={isSidebarOpen ? "사이드바 접기" : "사이드바 열기"}
           title="사이드바 토글 (⌘\)"
-          className="rounded-sm p-1 hover:bg-[#F7F6F3] hover:text-[#191919] transition cursor-pointer"
+          className="flex h-10 w-10 items-center justify-center rounded-full text-[var(--lh-ink-tertiary)] transition hover:bg-[var(--lh-surface-subtle)] hover:text-[var(--lh-ink)] cursor-pointer"
         >
-          <PanelLeft className="h-3.5 w-3.5" />
+          <PanelLeft className="h-4 w-4" />
         </button>
 
-        <span className="text-[#D3D3D0]">/</span>
+        {!isSidebarOpen && (
+          <div className="flex items-center gap-2 pr-1">
+            <LearnHubLogo size={20} />
+            <span className="text-xs font-medium text-[var(--lh-ink)] hidden sm:inline">LearnHub</span>
+          </div>
+        )}
 
-        <nav className="flex items-center gap-1 truncate max-w-[160px] sm:max-w-none">
+        <span className="text-[var(--lh-line-strong)]">/</span>
+
+        <nav className="flex items-center gap-1.5 truncate max-w-[160px] sm:max-w-none">
           {crumbs.map((crumb, idx) => (
             <React.Fragment key={idx}>
-              {idx > 0 && <ChevronRight className="h-3 w-3 text-[#D3D3D0] shrink-0" />}
+              {idx > 0 && <ChevronRight className="h-3 w-3 shrink-0 text-[var(--lh-ink-tertiary)]" />}
               <span
                 className={`truncate ${
                   idx === crumbs.length - 1
-                    ? "font-semibold text-[#191919]"
-                    : "hidden sm:inline hover:text-[#191919] transition cursor-pointer"
+                    ? "rounded-full bg-[var(--lh-surface-subtle)] px-3 py-1 text-xs font-medium text-[var(--lh-ink)]"
+                    : "hidden text-xs font-medium text-[var(--lh-ink-secondary)] hover:text-[var(--lh-ink)] sm:inline transition cursor-pointer"
                 }`}
               >
                 {crumb.label}
@@ -94,36 +121,42 @@ export const TopBar: React.FC<TopBarProps> = ({
         </nav>
       </div>
 
-      {/* Right Actions */}
-      <div className="flex items-center gap-1 shrink-0">
-        <button
-          type="button"
-          onClick={onOpenTimer}
-          className="flex items-center gap-1 rounded-sm px-2 py-1 text-[#787774] hover:bg-[#F7F6F3] hover:text-[#191919] transition cursor-pointer"
-          title="25분 집중 타이머"
-        >
-          <span>⏱️</span>
-          <span className="font-mono text-[11px] hidden sm:inline">25분 집중</span>
-        </button>
-
+      {/* Right Actions: M3 Pill Chips & Buttons */}
+      <div className="flex items-center gap-2 shrink-0">
         <button
           type="button"
           onClick={onOpenTutor}
           aria-label="AI 선생님께 질문"
-          className="flex items-center gap-1.5 rounded-sm px-2 py-1 text-[#191919] hover:bg-[#F7F6F3] transition cursor-pointer"
+          className="flex items-center gap-2 rounded-full bg-[var(--lh-primary)] hover:bg-[var(--lh-primary-hover)] px-4 py-2 text-xs font-medium text-white shadow-xs transition cursor-pointer"
         >
-          <span className="flex h-3.5 w-3.5 items-center justify-center rounded-full bg-[#191919] text-[7px] text-white">
-            ✦
-          </span>
-          <span className="font-semibold text-[11px] hidden sm:inline">AI 선생님께 질문</span>
-          <span className="font-semibold text-[11px] sm:hidden">AI 질문</span>
+          <Sparkles className="h-3.5 w-3.5" />
+          <span className="hidden sm:inline">AI 튜터</span>
+          <span className="sm:hidden">AI</span>
+        </button>
+
+        {/* Theme Toggle Button (Light = Royal Blue, Dark = Warm Orange) */}
+        <button
+          type="button"
+          onClick={() => {
+            const next = toggleTheme();
+            setThemeState(next);
+          }}
+          title={theme === "dark" ? "라이트 모드로 전환 (블루 포인트)" : "다크 모드로 전환 (오렌지 포인트)"}
+          aria-label="화면 테마 전환"
+          className="flex h-9 w-9 items-center justify-center rounded-full border border-[var(--lh-line)] bg-[var(--lh-surface)] text-[var(--lh-ink-secondary)] shadow-xs transition hover:bg-[var(--lh-surface-subtle)] hover:text-[var(--lh-primary)] cursor-pointer"
+        >
+          {theme === "dark" ? (
+            <Sun className="h-4 w-4 text-[var(--lh-primary)]" />
+          ) : (
+            <Moon className="h-4 w-4 text-[var(--lh-primary)]" />
+          )}
         </button>
 
         <button
           type="button"
           onClick={onToggleZenMode}
           title={isZenMode ? "젠 모드 해제" : "집중 젠 모드"}
-          className="rounded-sm p-1 text-[#787774] hover:bg-[#F7F6F3] hover:text-[#191919] transition cursor-pointer"
+          className="hidden h-9 w-9 items-center justify-center rounded-full border border-[var(--lh-line)] bg-[var(--lh-surface)] text-[var(--lh-ink-tertiary)] shadow-xs transition hover:bg-[var(--lh-surface-subtle)] hover:text-[var(--lh-ink)] cursor-pointer md:flex"
         >
           {isZenMode ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
         </button>
@@ -132,18 +165,16 @@ export const TopBar: React.FC<TopBarProps> = ({
           <button
             type="button"
             onClick={onOpenAuth}
-            className="flex items-center gap-1 rounded-sm bg-[#F7F6F3] border border-[#E9E9E7] px-2 py-1 text-[11px] font-semibold text-[#191919] hover:bg-[#EFEFED] transition cursor-pointer ml-1"
+            className="ml-1 flex items-center gap-1.5 rounded-full border border-[var(--lh-line)] bg-[var(--lh-surface)] px-3.5 py-2 text-xs font-medium text-[var(--lh-ink)] shadow-xs transition hover:bg-[var(--lh-surface-subtle)] cursor-pointer"
           >
-            <span>🌱 체험 중</span>
-            <span className="text-[10px] text-[#787774] hidden md:inline">• 로그인하고 저장 ➔</span>
+            <span>로그인</span>
           </button>
         ) : (
           <div
-            title="현재는 이 기기에만 저장되는 로컬 프로필입니다."
-            className="flex items-center gap-1 rounded-sm border border-[#E9E9E7] px-2 py-1 text-[11px] font-semibold text-[#191919] ml-1"
+            title="계정 및 학습 기록"
+            className="ml-1 flex items-center gap-1 rounded-full border border-[var(--lh-line)] bg-[var(--lh-surface)] px-3.5 py-2 text-xs font-medium text-[var(--lh-ink)] shadow-xs"
           >
-            <span>👤</span>
-            <span className="hidden sm:inline">{userAccount?.name} · 이 기기</span>
+            <span className="hidden sm:inline">{userAccount?.name}</span>
           </div>
         )}
       </div>

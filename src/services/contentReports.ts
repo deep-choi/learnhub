@@ -1,4 +1,4 @@
-import { getAccessToken } from "./authClient";
+import { authorizedFetch, getAccessToken } from "./authClient";
 
 export type ContentReportCategory = "wrong_answer" | "inaccurate" | "unclear" | "rendering" | "other";
 
@@ -22,11 +22,26 @@ export interface ContentReportDraft extends ContentReportPayload {
   createdAt: string;
 }
 const DRAFT_STORAGE_KEY = "learnhub_content_report_drafts_v1";
+const REPORT_TIMEOUT_MS = 8000;
+const REPORT_CATEGORIES: ContentReportCategory[] = ["wrong_answer", "inaccurate", "unclear", "rendering", "other"];
+const isSafeId = (value: unknown): value is string => typeof value === "string" && value.trim().length > 0 && value.length <= 200;
+const isValidDraft = (value: unknown): value is ContentReportDraft => {
+  if (!value || typeof value !== "object") return false;
+  const draft = value as Partial<ContentReportDraft>;
+  return REPORT_CATEGORIES.includes(draft.category as ContentReportCategory)
+    && typeof draft.description === "string" && draft.description.trim().length > 0 && draft.description.length <= 1000
+    && typeof draft.createdAt === "string" && !Number.isNaN(Date.parse(draft.createdAt))
+    && (draft.courseId === undefined || isSafeId(draft.courseId))
+    && (draft.lessonId === undefined || isSafeId(draft.lessonId))
+    && (draft.stepId === undefined || isSafeId(draft.stepId));
+};
 
 const readDrafts = (): ContentReportDraft[] => {
   try {
-    const existing: unknown = JSON.parse(localStorage.getItem(DRAFT_STORAGE_KEY) || "[]");
-    return Array.isArray(existing) ? existing.filter((draft): draft is ContentReportDraft => Boolean(draft && typeof draft === "object")) : [];
+    const raw = localStorage.getItem(DRAFT_STORAGE_KEY) || "";
+    if (raw.length > 200_000) return [];
+    const existing: unknown = JSON.parse(raw || "[]");
+    return Array.isArray(existing) ? existing.filter(isValidDraft).slice(-20) : [];
   } catch {
     return [];
   }
@@ -65,11 +80,14 @@ export async function submitContentReport(
   }
   if (!token?.trim()) return draftReport({ ...payload, description });
 
-  const fetchImpl = options.fetchImpl || fetch;
+  const fetchImpl = options.fetchImpl || authorizedFetch;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), REPORT_TIMEOUT_MS);
   try {
     const response = await fetchImpl("/api/content-reports", {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      headers: { "Content-Type": "application/json" },
+      signal: controller.signal,
       body: JSON.stringify({
         category: payload.category,
         description,
@@ -84,6 +102,8 @@ export async function submitContentReport(
     }
   } catch {
     // A failed request is a local draft, never a sent report.
+  } finally {
+    clearTimeout(timeoutId);
   }
   return draftReport({ ...payload, description });
 }

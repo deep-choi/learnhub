@@ -1,5 +1,5 @@
-﻿import React, { useState, useEffect } from "react";
-import { Search, BookOpen, Compass, RotateCcw, TrendingUp, History, X } from "lucide-react";
+import React, { useState, useEffect } from "react";
+import { Search, BookOpen, MessageCircle, Compass, RotateCcw, TrendingUp, X } from "lucide-react";
 import { Course } from "../../types/learning";
 import { NotionPageView } from "./Sidebar";
 
@@ -55,10 +55,11 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
   );
 
   const quickViews: NotionPageView[] = [
+    { type: "courses" },
+    { type: "ai-chat" },
     { type: "knowledge-map" },
-    { type: "skill-matrix" },
     { type: "review-queue" },
-    { type: "mistake-archive" },
+    { type: "skill-matrix" },
   ];
   const totalItems = quickViews.length + filteredLessons.length;
 
@@ -90,11 +91,11 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center pt-20 bg-black/25 backdrop-blur-xs p-4">
-      <div className="w-full max-w-lg rounded-lg border border-[#E9E9E7] bg-white shadow-2xl overflow-hidden text-xs text-[#2F3437]">
-        {/* Input */}
-        <div className="flex items-center gap-2 border-b border-[#E9E9E7] px-3.5 py-3">
-          <Search className="h-4 w-4 text-[#9B9A97]" />
+    <div className="lh-dialog-backdrop fixed inset-0 z-50 flex items-start justify-center p-4 pt-16 sm:pt-20">
+      <div className="w-full max-w-xl overflow-hidden rounded-3xl border border-[var(--lh-line)] bg-[var(--lh-surface)] p-3 text-sm text-[var(--lh-ink)] shadow-2xl space-y-2">
+        {/* Input: Chunky Pill Search Box */}
+        <div className="flex items-center gap-3 rounded-full border border-[var(--lh-line)] bg-[var(--lh-surface-subtle)] px-4 py-2 focus-within:border-[var(--lh-primary)] focus-within:bg-[var(--lh-surface)] transition shadow-xs">
+          <Search className="h-4 w-4 text-[var(--lh-primary)]" />
           <input
             type="text"
             autoFocus
@@ -105,74 +106,97 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
             aria-controls="command-palette-results"
             aria-activedescendant={`command-palette-item-${activeIndex}`}
             aria-label="교과목과 레슨 검색"
-            placeholder="교과목, 레슨, 지식 지도 검색..."
-            className="flex-1 bg-transparent text-xs text-[#191919] placeholder-[#9B9A97] focus:outline-none"
+            placeholder="과목, 레슨, 화면 검색"
+            className="flex-1 bg-transparent text-sm sm:text-base text-[var(--lh-ink)] placeholder-[var(--lh-ink-tertiary)] outline-none font-normal"
           />
-          <kbd className="rounded border border-[#D3D3D0] bg-[#F7F6F3] px-1 text-[9px] font-mono text-[#787774]">
+          <kbd className="rounded-full border border-[var(--lh-line)] bg-[var(--lh-surface)] px-2 py-0.5 text-[10px] font-mono text-[var(--lh-ink-secondary)] shadow-xs">
             ESC
           </kbd>
         </div>
 
         {/* Quick Nav Options */}
-        <div id="command-palette-results" className="max-h-80 overflow-y-auto p-2 space-y-1" role="listbox">
-          <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-[#9B9A97]">
+        <div id="command-palette-results" className="max-h-80 overflow-y-auto p-1 space-y-1" role="listbox">
+          <div className="px-3 py-1.5 text-[10px] font-medium uppercase tracking-wider text-[var(--lh-ink-tertiary)]">
             빠른 이동
           </div>
 
           <button
             id="command-palette-item-0"
             onClick={() => {
-              onSelectView({ type: "knowledge-map" });
+              onSelectView({ type: "courses" });
               onClose();
             }}
             aria-selected={activeIndex === 0}
-            className={`flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left transition ${activeIndex === 0 ? "bg-[#F7F6F3]" : "hover:bg-[#F7F6F3]"}`}
+            className={`flex w-full items-center gap-3 rounded-2xl px-3.5 py-2.5 text-left transition cursor-pointer ${
+              activeIndex === 0 ? "bg-[var(--lh-primary-subtle)] font-medium text-[var(--lh-primary-text)]" : "hover:bg-[var(--lh-surface-subtle)] text-[var(--lh-ink-secondary)] hover:text-[var(--lh-ink)] font-normal"
+            }`}
           >
-            <Compass className="h-3.5 w-3.5 text-[#787774]" />
-            <span className="font-medium">교과 지식 지도 (선수 결손 추적)</span>
+            <BookOpen className="h-4 w-4 text-[var(--lh-primary)]" />
+            <span className="text-xs sm:text-sm">학습 로드맵 탐색 (내 과목)</span>
           </button>
 
           <button
             id="command-palette-item-1"
             onClick={() => {
-              onSelectView({ type: "skill-matrix" });
+              onSelectView({ type: "ai-chat" });
               onClose();
             }}
             aria-selected={activeIndex === 1}
-            className={`flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left transition ${activeIndex === 1 ? "bg-[#F7F6F3]" : "hover:bg-[#F7F6F3]"}`}
+            className={`flex w-full items-center gap-3 rounded-2xl px-3.5 py-2.5 text-left transition cursor-pointer ${
+              activeIndex === 1 ? "bg-[var(--lh-primary-subtle)] font-medium text-[var(--lh-primary-text)]" : "hover:bg-[var(--lh-surface-subtle)] text-[var(--lh-ink-secondary)] hover:text-[var(--lh-ink)] font-normal"
+            }`}
           >
-            <TrendingUp className="h-3.5 w-3.5 text-[#787774]" />
-            <span className="font-medium">개념별 지식 매트릭스 (0~100%)</span>
+            <MessageCircle className="h-4 w-4 text-[var(--lh-primary)]" />
+            <span className="text-xs sm:text-sm">AI와 대화하기</span>
           </button>
 
           <button
             id="command-palette-item-2"
             onClick={() => {
-              onSelectView({ type: "review-queue" });
+              onSelectView({ type: "knowledge-map" });
               onClose();
             }}
             aria-selected={activeIndex === 2}
-            className={`flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left transition ${activeIndex === 2 ? "bg-[#F7F6F3]" : "hover:bg-[#F7F6F3]"}`}
+            className={`flex w-full items-center gap-3 rounded-2xl px-3.5 py-2.5 text-left transition cursor-pointer ${
+              activeIndex === 2 ? "bg-[var(--lh-primary-subtle)] font-medium text-[var(--lh-primary-text)]" : "hover:bg-[var(--lh-surface-subtle)] text-[var(--lh-ink-secondary)] hover:text-[var(--lh-ink)] font-normal"
+            }`}
           >
-            <RotateCcw className="h-3.5 w-3.5 text-[#787774]" />
-            <span className="font-medium">에빙하우스 망각곡선 복습</span>
+            <Compass className="h-4 w-4 text-[var(--lh-primary)]" />
+            <span className="text-xs sm:text-sm">지식 지도</span>
           </button>
 
           <button
             id="command-palette-item-3"
             onClick={() => {
-              onSelectView({ type: "mistake-archive" });
+              onSelectView({ type: "review-queue" });
               onClose();
             }}
             aria-selected={activeIndex === 3}
-            className={`flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left transition ${activeIndex === 3 ? "bg-[#F7F6F3]" : "hover:bg-[#F7F6F3]"}`}
+            className={`flex w-full items-center gap-3 rounded-2xl px-3.5 py-2.5 text-left transition cursor-pointer ${
+              activeIndex === 3 ? "bg-[var(--lh-secondary-subtle)] font-medium text-[var(--lh-secondary-text)]" : "hover:bg-[var(--lh-surface-subtle)] text-[var(--lh-ink-secondary)] hover:text-[var(--lh-ink)] font-normal"
+            }`}
           >
-            <History className="h-3.5 w-3.5 text-[#787774]" />
-            <span className="font-medium">오답 및 사유 아카이브</span>
+            <RotateCcw className="h-4 w-4 text-[var(--lh-secondary)]" />
+            <span className="text-xs sm:text-sm">예정된 복습</span>
+          </button>
+
+          <button
+            id="command-palette-item-4"
+            onClick={() => {
+              onSelectView({ type: "skill-matrix" });
+              onClose();
+            }}
+            aria-selected={activeIndex === 4}
+            className={`flex w-full items-center gap-3 rounded-2xl px-3.5 py-2.5 text-left transition cursor-pointer ${
+              activeIndex === 4 ? "bg-[var(--lh-primary-subtle)] font-medium text-[var(--lh-primary-text)]" : "hover:bg-[var(--lh-surface-subtle)] text-[var(--lh-ink-secondary)] hover:text-[var(--lh-ink)] font-normal"
+            }`}
+          >
+            <TrendingUp className="h-4 w-4 text-[var(--lh-primary)]" />
+            <span className="text-xs sm:text-sm">개념별 학습 현황</span>
           </button>
 
           {/* Lessons list */}
-          <div className="pt-2 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-[#9B9A97]">
+          <div className="pt-2 px-3 py-1.5 text-[10px] font-medium uppercase tracking-wider text-[var(--lh-ink-tertiary)]">
             교과 레슨 ({filteredLessons.length})
           </div>
 
@@ -190,19 +214,19 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
                 onClose();
               }}
               aria-selected={activeIndex === quickViews.length + filteredLessons.indexOf(item)}
-              className={`flex w-full items-center justify-between rounded-md px-2.5 py-2 text-left transition ${
+              className={`flex w-full items-center justify-between rounded-2xl px-3.5 py-2.5 text-left transition cursor-pointer ${
                 activeIndex === quickViews.length + filteredLessons.indexOf(item)
-                  ? "bg-[#F7F6F3]"
-                  : "hover:bg-[#F7F6F3]"
+                  ? "bg-[var(--lh-primary-subtle)] text-[var(--lh-primary-text)]"
+                  : "hover:bg-[var(--lh-surface-subtle)]"
               }`}
             >
               <div className="truncate pr-2">
-                <span className="font-medium text-[#191919]">{item.lesson.title}</span>
-                <span className="block text-[10px] text-[#787774] truncate">
+                <span className="font-medium text-xs sm:text-sm text-[var(--lh-ink)]">{item.lesson.title}</span>
+                <span className="block text-[11px] text-[var(--lh-ink-secondary)] truncate font-normal">
                   {item.course.title} • {item.chapterTitle}
                 </span>
               </div>
-              <span className="text-[10px] text-[#9B9A97] shrink-0 font-mono">
+              <span className="rounded-full border border-[var(--lh-line)] bg-[var(--lh-surface)] px-2.5 py-0.5 text-[10px] font-mono font-medium text-[var(--lh-ink-tertiary)] shrink-0">
                 {item.lesson.estimatedMinutes}분
               </span>
             </button>

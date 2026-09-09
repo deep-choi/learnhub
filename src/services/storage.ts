@@ -1,5 +1,6 @@
 import { Course, UserSkill, UserProgress, ReviewQuestion, LessonContent, LessonMeta, MistakeItem, UserAccount } from "../types/learning";
 import { INITIAL_COURSES, INITIAL_SKILLS, INITIAL_REVIEWS, INITIAL_PROGRESS } from "../data/initialData";
+import { PRESET_ROADMAP_CONTENTS } from "../data/roadmapData";
 
 const INITIAL_MISTAKES: MistakeItem[] = [
   {
@@ -340,8 +341,10 @@ export class StorageService {
     try {
       const data = localStorage.getItem(`${KEYS.LESSONS_CACHE}_${lessonId}`);
       if (data) return JSON.parse(data);
+      if (PRESET_ROADMAP_CONTENTS[lessonId]) return PRESET_ROADMAP_CONTENTS[lessonId];
       return null;
     } catch {
+      if (PRESET_ROADMAP_CONTENTS[lessonId]) return PRESET_ROADMAP_CONTENTS[lessonId];
       return null;
     }
   }

@@ -1,6 +1,7 @@
-﻿import React, { useState } from "react";
+import React, { useState } from "react";
 import { ReviewQuestion, UserSkill } from "../types/learning";
 import { StorageService } from "../services/storage";
+import { authorizedFetch } from "../services/authClient";
 import { compareAnswers } from "../utils/answerComparison";
 import {
   getDueReviewItems,
@@ -171,7 +172,7 @@ export const ReviewView: React.FC<ReviewViewProps> = ({
     setIsGeneratingMore(true);
 
     try {
-      const res = await fetch("/api/ai/generate-review", {
+      const res = await authorizedFetch("/api/ai/generate-review", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -183,6 +184,10 @@ export const ReviewView: React.FC<ReviewViewProps> = ({
         }),
       });
 
+      if (res.status === 401) {
+        window.dispatchEvent(new CustomEvent("learnhub:request-auth"));
+        throw new Error("auth_required");
+      }
       if (!res.ok) throw new Error();
 
       const data = await res.json();
@@ -237,40 +242,40 @@ export const ReviewView: React.FC<ReviewViewProps> = ({
       setResults({});
       setUserAnswers({});
       setCompletedSession(false);
-    } catch {
-      alert("AI 복습 세션 생성 중 오류가 발생했습니다.");
+    } catch (error) {
+      alert(error instanceof Error && error.message === "auth_required" ? "로그인 후 새 AI 복습 문제를 만들 수 있습니다." : "AI 복습 세션 생성 중 오류가 발생했습니다.");
     } finally {
       setIsGeneratingMore(false);
     }
   };
 
   return (
-    <div className="max-w-2xl mx-auto space-y-6 pb-16 text-[#2F3437]">
-      {/* Notion Header Banner */}
-      <section className="rounded-lg border border-[#E9E9E7] bg-white p-6 space-y-3">
-        <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-[#787774]">
-          <RotateCcw className="w-3.5 h-3.5" />
-           <span>SCHEDULED REVIEW • 예약 복습</span>
+    <div className="mx-auto w-full max-w-[780px] space-y-8 overflow-x-hidden px-5 py-12 pb-24 text-sm text-[var(--lh-ink)] sm:px-8">
+      {/* Header Banner */}
+      <section className="space-y-3 border-b border-[var(--lh-line)] pb-6">
+        <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-[var(--lh-primary)]">
+          <RotateCcw className="h-4 w-4" />
+          <span>SCHEDULED REVIEW • 예약 복습</span>
         </div>
 
         <div className="space-y-1">
-          <h1 className="text-2xl font-bold tracking-tight text-[#191919]">
-            예정된 복습 큐
+          <h1 className="text-3xl font-medium tracking-[-0.03em] text-[var(--lh-ink)] sm:text-4xl">
+            예정된 복습
           </h1>
-          <p className="text-xs leading-relaxed text-[#787774]">
+          <p className="text-sm leading-relaxed text-[var(--lh-ink-secondary)] font-normal">
             저장된 복습 예정 시각이 지난 문항을 점검합니다. 오답은 다음 복습 일정으로 다시 예약됩니다.
           </p>
         </div>
 
         {weakSkills.length > 0 && (
-          <div className="pt-2 flex flex-wrap items-center gap-1.5 text-xs">
-            <span className="text-[11px] font-semibold text-[#787774]">
-              결손 추적 중:
+          <div className="pt-2 flex flex-wrap items-center gap-2 text-xs">
+            <span className="text-xs font-medium text-[var(--lh-ink-secondary)]">
+              다시 볼 개념:
             </span>
             {weakSkills.map((s) => (
               <span
                 key={s.conceptId}
-                className="text-[11px] bg-[#F7F6F3] border border-[#E9E9E7] px-2 py-0.5 rounded-sm font-medium text-[#191919]"
+                className="rounded-full border border-[var(--lh-secondary-border)] bg-[var(--lh-secondary-subtle)] px-3.5 py-1 text-xs font-medium text-[var(--lh-secondary-text)] shadow-xs"
               >
                 {s.conceptName} ({s.understanding}%)
               </span>
@@ -279,70 +284,70 @@ export const ReviewView: React.FC<ReviewViewProps> = ({
         )}
       </section>
 
-      {/* Completion View */}
+      {/* Completion View: Chunky M3 Card */}
       {completedSession ? (
-        <div className="rounded-lg border border-[#E9E9E7] bg-white p-8 text-center space-y-4">
-          <div className="w-12 h-12 rounded-full bg-[#F7F6F3] text-[#191919] mx-auto flex items-center justify-center">
-            <Award className="w-6 h-6" />
+        <div className="rounded-3xl border border-[var(--lh-line)] bg-[var(--lh-surface)] p-8 sm:p-12 text-center space-y-5 shadow-xs">
+          <div className="h-16 w-16 rounded-full bg-[var(--lh-primary-subtle)] border border-[var(--lh-primary-border)] text-[var(--lh-primary)] mx-auto flex items-center justify-center shadow-xs">
+            <Award className="h-8 w-8" />
           </div>
 
-          <div className="space-y-1">
-            <h2 className="text-lg font-bold text-[#191919]">
+          <div className="space-y-1.5">
+            <h2 className="text-xl font-medium text-[var(--lh-ink)]">
               오늘의 복습 큐를 모두 마쳤습니다
             </h2>
-            <p className="text-[#787774] text-xs">
-              개념별 이해도가 장기 기억 보존 데이터베이스에 안전하게 갱신되었습니다.
+            <p className="text-sm text-[var(--lh-ink-secondary)] font-normal">
+              복습 기록이 이 기기에 저장되었습니다.
             </p>
           </div>
 
           <button
             onClick={handleGenerateAiReviewSession}
             disabled={isGeneratingMore || weakSkills.length === 0}
-            className="bg-[#191919] hover:bg-[#37352F] text-white font-medium px-4 py-2 rounded-md text-xs inline-flex items-center gap-2 disabled:opacity-40 transition-colors"
+            className="inline-flex min-h-12 items-center gap-2 rounded-full bg-[var(--lh-primary)] px-6 text-sm font-medium text-white shadow-xs hover:bg-[var(--lh-primary-hover)] transition disabled:opacity-40 cursor-pointer"
           >
             {isGeneratingMore ? (
               <>
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <Loader2 className="h-4 w-4 animate-spin" />
                 <span>추가 복습 문항 생성 중...</span>
               </>
             ) : (
-              <span>취약 개념 추가 복습 큐 생성 ⏎</span>
+              <span>추가 복습 문제 만들기</span>
             )}
           </button>
         </div>
       ) : reviews.length > 0 && currentQ ? (
-        /* Active Review Card */
-        <article className="rounded-lg border border-[#E9E9E7] bg-white p-6 space-y-5">
-          <div className="flex items-center justify-between border-b border-[#E9E9E7] pb-3 text-xs text-[#787774]">
-            <span className="font-semibold text-[#191919]">
+        /* Active Review Card: Chunky M3 Surface Card */
+        <article className="rounded-3xl border border-[var(--lh-line)] bg-[var(--lh-surface)] p-6 sm:p-8 space-y-6 shadow-xs">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--lh-line)] pb-3.5 text-xs text-[var(--lh-ink-secondary)]">
+            <span className="font-medium text-[var(--lh-ink)] text-sm">
               {currentQ.courseTitle} • {currentQ.conceptName}
             </span>
-            <span className="font-mono font-bold">
+            <span className="rounded-full bg-[var(--lh-primary-subtle)] border border-[var(--lh-primary-border)] px-3 py-1 font-mono font-medium text-[var(--lh-primary-text)]">
               {currentIdx + 1} / {reviews.length}
             </span>
           </div>
 
           {/* Question Text */}
           <div className="space-y-2">
-            <div className="flex items-center gap-2 text-sm font-bold text-[#191919]">
-              <HelpCircle className="w-4 h-4" />
+            <div className="flex items-start gap-2.5 text-base font-medium text-[var(--lh-ink)] leading-relaxed">
+              <HelpCircle className="h-5 w-5 shrink-0 mt-0.5 text-[var(--lh-primary)]" />
               <span>{currentQ.question}</span>
             </div>
           </div>
 
           {/* Multiple choice or Input */}
           {currentQ.quizType === "multiple_choice" && currentQ.options ? (
-            <div className="space-y-2">
+            <div className="space-y-2.5">
               {currentQ.options.map((opt, oIdx) => (
                 <button
                   key={oIdx}
                   onClick={() =>
                     setUserAnswers((prev) => ({ ...prev, [currentQ.id]: opt }))
                   }
-                  className={`w-full p-3 rounded-md text-xs text-left transition-colors font-medium border ${
+                  className={`min-h-12 w-full rounded-2xl p-4 text-sm text-left transition font-medium border cursor-pointer ${
                     userAnswers[currentQ.id] === opt
-                      ? "bg-[#191919] text-white border-[#191919]"
-                      : "bg-white border-[#E9E9E7] text-[#2F3437] hover:bg-[#F7F6F3]"
+                      ? "bg-[var(--lh-primary)] text-white border-[var(--lh-primary)] shadow-xs"
+                      : "bg-[var(--lh-surface)] border-[var(--lh-line)] text-[var(--lh-ink)] hover:bg-[var(--lh-surface-subtle)]"
                   }`}
                 >
                   {oIdx + 1}. {opt}
@@ -357,7 +362,8 @@ export const ReviewView: React.FC<ReviewViewProps> = ({
                 setUserAnswers((prev) => ({ ...prev, [currentQ.id]: e.target.value }))
               }
               placeholder="정답을 직접 입력하세요..."
-              className="w-full rounded-md border border-[#E9E9E7] bg-white px-3.5 py-2.5 text-xs text-[#191919] placeholder-[#9B9A97] focus:border-[#191919] focus:outline-none"
+              aria-label="복습 답안"
+              className="min-h-12 w-full rounded-2xl border border-[var(--lh-line)] bg-[var(--lh-surface)] px-4 py-3 text-sm text-[var(--lh-ink)] placeholder-[var(--lh-ink-tertiary)] focus:border-[var(--lh-primary)] focus:outline-none transition font-medium"
             />
           )}
 
@@ -366,54 +372,62 @@ export const ReviewView: React.FC<ReviewViewProps> = ({
             <button
               onClick={() => handleCheckAnswer(currentQ)}
               disabled={!userAnswers[currentQ.id]}
-              className="bg-[#191919] hover:bg-[#37352F] disabled:opacity-40 text-white font-medium px-4 py-2 rounded-md text-xs transition-colors"
+              className="min-h-12 rounded-full bg-[var(--lh-primary)] px-7 text-sm font-medium text-white shadow-xs hover:bg-[var(--lh-primary-hover)] transition disabled:opacity-40 cursor-pointer"
             >
-              정답 검증 ⏎
+              답안 확인하기
             </button>
           ) : (
-            <div className="space-y-3 border-t border-[#E9E9E7] pt-4">
-                <div
-                  className={`p-3.5 rounded-md border text-xs space-y-1 ${
-                    results[currentQ.id].status === "correct"
-                      ? "bg-[#F7F6F3] border-[#E9E9E7] text-[#191919]"
-                      : "bg-[#FBFBFA] border-[#D3D3D0] text-[#191919]"
-                  }`}
-                >
-                  <div className="font-bold flex items-center gap-1.5">
+            <div className="space-y-4 border-t border-[var(--lh-line)] pt-5">
+              <div
+                className={`rounded-2xl border p-5 text-xs space-y-2 ${
+                  results[currentQ.id].status === "correct"
+                    ? "border-[var(--lh-primary-border)] bg-[var(--lh-primary-subtle)]"
+                    : results[currentQ.id].status === "incorrect"
+                    ? "border-[var(--lh-secondary-border)] bg-[var(--lh-secondary-subtle)]"
+                    : "border-[var(--lh-line)] bg-[var(--lh-surface-subtle)]"
+                }`}
+              >
+                <div className="font-medium flex items-center gap-2 text-sm">
                   {results[currentQ.id].status === "correct" ? (
                     <>
-                      <CheckCircle2 className="w-4 h-4 text-[#191919]" />
-                      <span>정답입니다. 기억 보존율이 상승했습니다.</span>
+                      <CheckCircle2 className="h-5 w-5 text-[var(--lh-primary)]" />
+                      <span className="text-[var(--lh-primary-text)]">정답입니다. 기억 보존율이 상승했습니다.</span>
                     </>
                   ) : results[currentQ.id].status === "unknown" ? (
                     <>
-                      <HelpCircle className="w-4 h-4 text-[#787774]" />
-                      <span>자동 채점 미지원 문항입니다.</span>
+                      <HelpCircle className="h-5 w-5 text-[var(--lh-ink-secondary)]" />
+                      <span className="text-[var(--lh-ink)]">자동 채점 미지원 문항입니다.</span>
                     </>
                   ) : (
                     <>
-                      <XCircle className="w-4 h-4 text-[#787774]" />
-                      <span>오답입니다. 정답: {currentQ.answer}</span>
+                      <XCircle className="h-5 w-5 text-[var(--lh-secondary)]" />
+                      <span className="text-[var(--lh-secondary-text)]">오답입니다. 정답: {currentQ.answer}</span>
                     </>
                   )}
                 </div>
-                <p className="text-[#787774] leading-relaxed">
+                <p className={`text-xs leading-relaxed font-normal ${
+                  results[currentQ.id].status === "correct"
+                    ? "text-[var(--lh-primary-text)]"
+                    : results[currentQ.id].status === "incorrect"
+                    ? "text-[var(--lh-secondary-text)]"
+                    : "text-[var(--lh-ink-secondary)]"
+                }`}>
                   {results[currentQ.id].explanation}
                 </p>
               </div>
 
               <button
                 onClick={handleNextQuestion}
-                className="bg-[#191919] hover:bg-[#37352F] text-white font-medium px-4 py-2 rounded-md text-xs inline-flex items-center gap-1.5 transition-colors"
+                className="inline-flex min-h-12 items-center gap-2 rounded-full bg-[var(--lh-primary)] px-7 text-sm font-medium text-white shadow-xs hover:bg-[var(--lh-primary-hover)] transition cursor-pointer"
               >
                 <span>다음 복습 문항</span>
-                <ArrowRight className="w-3.5 h-3.5" />
+                <ArrowRight className="h-4 w-4" />
               </button>
             </div>
           )}
         </article>
       ) : (
-        <div className="rounded-lg border border-[#E9E9E7] bg-white p-8 text-center text-xs text-[#787774]">
+        <div className="rounded-3xl border border-[var(--lh-line)] bg-[var(--lh-surface)] p-12 text-center text-xs text-[var(--lh-ink-secondary)] shadow-xs">
           현재 예정된 복습 큐가 비어있습니다.
         </div>
       )}

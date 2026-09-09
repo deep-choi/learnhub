@@ -10,6 +10,12 @@ export interface AuthVerifierAdapter {
 
 let verifier: AccessTokenVerifier | null = null;
 
+export const configureSupabaseAuth = (): void => {
+  if (isSupabaseConfigured()) verifier = verifySupabaseAccessToken;
+};
+
+configureSupabaseAuth();
+
 /** Configure a real verifier at the server composition boundary. */
 export const configureAuthVerifier = (adapter: AuthVerifierAdapter | AccessTokenVerifier | null): void => {
   verifier = typeof adapter === "function" ? adapter : adapter?.verifyAccessToken || null;
@@ -36,3 +42,4 @@ export const verifyAccessToken = async (token: string): Promise<VerifiedUser | n
 export const clearAuthVerifier = (): void => {
   verifier = null;
 };
+import { isSupabaseConfigured, verifySupabaseAccessToken } from "./supabaseProvider";

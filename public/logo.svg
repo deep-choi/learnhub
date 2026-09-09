@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none">
+  <!-- LearnHub Official Emblem: Royal Blue (#4169E1) & Warm Orange (#F38132) -->
+  <circle cx="25" cy="25" r="25" fill="#4169E1" />
+  <circle cx="75" cy="25" r="25" fill="#F38132" />
+  <circle cx="25" cy="75" r="25" fill="#F38132" />
+  <circle cx="75" cy="75" r="25" fill="#4169E1" />
+</svg>

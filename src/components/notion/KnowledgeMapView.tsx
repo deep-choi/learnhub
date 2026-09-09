@@ -1,6 +1,6 @@
 import React from "react";
-import { ArrowRight, AlertTriangle, CheckCircle2, Circle, Compass, GitCommit, HelpCircle } from "lucide-react";
-import { Course, LessonMeta } from "../../types/learning";
+import { ArrowRight, AlertTriangle, CheckCircle2, Circle, Network } from "lucide-react";
+import { Course } from "../../types/learning";
 import { NotionPageView } from "./Sidebar";
 
 interface KnowledgeMapViewProps {
@@ -76,52 +76,59 @@ export const KnowledgeMapView: React.FC<KnowledgeMapViewProps> = ({ courses, onS
   };
 
   return (
-    <div className="mx-auto w-full max-w-[760px] py-10 px-4 text-[#2F3437]">
+    <div className="mx-auto w-full max-w-[880px] px-5 py-12 text-[var(--lh-ink)] sm:px-8">
       {/* Header */}
-      <div className="space-y-3 border-b border-[#E9E9E7] pb-6">
-        <div className="flex items-center gap-2">
-          <span className="text-3xl">🗺️</span>
+      <div className="space-y-3 border-b border-[var(--lh-line)] pb-6">
+        <div className="flex items-start gap-3">
+          <span className="mt-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--lh-primary)] text-white shadow-xs">
+            <Network className="h-5 w-5" />
+          </span>
           <div>
-            <h1 className="text-2xl font-bold tracking-tight text-[#191919]">
-              수학 예시 지식 지도 & 결손 역추적
+            <h1 className="text-3xl font-medium tracking-[-0.03em] text-[var(--lh-ink)] sm:text-4xl">
+              수학 지식 지도
             </h1>
-            <p className="text-xs text-[#787774]">
+            <p className="mt-2 max-w-2xl text-base leading-relaxed text-[var(--lh-ink-secondary)] font-normal">
               현재 지도는 수학 예시 데이터입니다. 실제 과목에 연결된 레슨만 열 수 있으며, 다른 과목의 학습 경로를 가정하지 않습니다.
             </p>
           </div>
         </div>
 
-        {/* Prescription Box for Deficient Concept */}
-        <div className="rounded-md border border-[#191919] bg-[#FBFBFA] p-4 text-xs space-y-2">
-          <div className="flex items-center gap-1.5 font-bold text-[#191919]">
-            <AlertTriangle className="h-4 w-4 text-[#191919]" />
-            <span>AI 결손 역추적 진단 결과</span>
+        {/* Prescription Box for Deficient Concept: Chunky M3 Card */}
+        <div className="rounded-3xl border border-[var(--lh-secondary-border)] bg-[var(--lh-secondary-subtle)] p-6 text-sm space-y-3 shadow-xs">
+          <div className="flex items-center gap-2 font-medium text-[var(--lh-ink)]">
+            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[var(--lh-secondary-subtle)] border border-[var(--lh-secondary-border)] shadow-xs">
+              <AlertTriangle className="h-4 w-4 text-[var(--lh-secondary)]" />
+            </span>
+            <span className="text-base font-medium text-[var(--lh-secondary-text)]">다시 확인할 개념</span>
           </div>
-          <p className="text-[#787774] leading-relaxed">
-              현재 수학 예시의 <strong>[고등 순간변화율(45%)]</strong>에서 정체되어 있습니다. AI 분석 결과, 상위 공식 미분법으로 넘어가기 전
-            중등 <strong>[일차함수의 기울기]</strong>와 고등 <strong>[평균변화율]</strong>의 인과 연결을 재확인해야 완전히 극복됩니다.
+          <p className="text-xs sm:text-sm text-[var(--lh-ink-secondary)] leading-relaxed font-normal">
+            현재 수학 예시의 <strong className="text-[var(--lh-secondary)] font-medium">[고등 순간변화율(45%)]</strong>에서 정체되어 있습니다. AI 분석 결과, 상위 공식 미분법으로 넘어가기 전
+            중등 <strong className="text-[var(--lh-ink)] font-medium">[일차함수의 기울기]</strong>와 고등 <strong className="text-[var(--lh-ink)] font-medium">[평균변화율]</strong>의 인과 연결을 재확인해야 완전히 극복됩니다.
           </p>
-          <button
-            onClick={() => handleJumpToLesson("course-high-math-01", "순간변화율과 접선의 기울기")}
-            className="inline-flex items-center gap-1 font-semibold text-[#191919] hover:underline pt-1"
-          >
-            취약 개념 [순간변화율] 집중 소크라틱 레슨으로 즉시 이동 ⏎
-          </button>
+          <div className="pt-1">
+            <button
+              onClick={() => handleJumpToLesson("course-high-math-01", "순간변화율과 접선의 기울기")}
+              className="inline-flex min-h-10 items-center gap-2 rounded-full bg-[var(--lh-primary)] hover:bg-[var(--lh-primary-hover)] px-5 py-2 text-xs font-medium text-white shadow-xs transition cursor-pointer"
+            >
+              <span>순간변화율 레슨 열기</span>
+              <ArrowRight className="h-3.5 w-3.5" />
+            </button>
+          </div>
         </div>
       </div>
 
       {/* Roadmap Tree */}
-      <div className="mt-8 space-y-8">
+      <div className="mt-8 space-y-10">
         {roadmapStages.map((stage, sIdx) => (
-          <div key={sIdx} className="space-y-3">
-            <div className="flex items-center gap-2">
-              <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[#191919] text-[10px] font-bold text-white">
+          <div key={sIdx} className="space-y-4">
+            <div className="flex items-center gap-2.5">
+              <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[var(--lh-primary)] text-xs font-medium text-white shadow-xs">
                 {sIdx + 1}
               </span>
-              <h2 className="text-sm font-bold text-[#191919]">{stage.stage}</h2>
+              <h2 className="text-base font-medium tracking-tight text-[var(--lh-ink)]">{stage.stage}</h2>
             </div>
 
-            <div className="ml-2.5 border-l border-[#E9E9E7] pl-5 space-y-2.5">
+            <div className="ml-3.5 border-l-2 border-[var(--lh-line)] pl-5 space-y-3">
               {stage.nodes.map((node) => {
                 const isDeficient = node.status === "deficient";
                 const isMastered = node.status === "mastered";
@@ -149,29 +156,29 @@ export const KnowledgeMapView: React.FC<KnowledgeMapViewProps> = ({ courses, onS
                     tabIndex={findMappedLesson(stage.courseId, node.name) ? 0 : undefined}
                     role={findMappedLesson(stage.courseId, node.name) ? "button" : undefined}
                     aria-disabled={!findMappedLesson(stage.courseId, node.name)}
-                    className={`rounded-md border p-3.5 text-xs transition flex items-center justify-between cursor-pointer ${
+                    className={`flex min-h-20 cursor-pointer flex-col items-start justify-between gap-3 rounded-2xl border p-4 sm:p-5 text-sm transition shadow-xs sm:flex-row sm:items-center ${
                       isDeficient
-                        ? "border-[#191919] bg-white shadow-xs hover:bg-[#FBFBFA]"
+                        ? "border-[var(--lh-secondary-border)] bg-[var(--lh-secondary-subtle)] shadow-xs hover:border-[var(--lh-secondary)]"
                         : isLocked
-                        ? "border-[#E9E9E7] bg-[#FBFBFA] opacity-60 hover:opacity-100 hover:border-[#787774]"
-                        : "border-[#E9E9E7] bg-[#FBFBFA] hover:border-[#191919] hover:bg-white"
+                        ? "border-[var(--lh-line)] bg-[var(--lh-surface-subtle)] opacity-60 hover:opacity-100 hover:border-[var(--lh-ink-secondary)]"
+                        : "border-[var(--lh-line)] bg-[var(--lh-surface)] hover:border-[var(--lh-primary-border)] hover:bg-[var(--lh-surface-subtle)]"
                     }`}
                   >
                     <div className="space-y-1">
                       <div className="flex items-center gap-2">
-                        {isMastered && <CheckCircle2 className="h-4 w-4 text-[#191919]" />}
-                        {isDeficient && <AlertTriangle className="h-4 w-4 text-[#191919]" />}
-                        {node.status === "developing" && <Circle className="h-4 w-4 text-[#787774]" />}
-                        {isLocked && <Circle className="h-4 w-4 text-[#D3D3D0]" />}
+                        {isMastered && <CheckCircle2 className="h-4 w-4 text-emerald-600" />}
+                        {isDeficient && <AlertTriangle className="h-4 w-4 text-[var(--lh-secondary)]" />}
+                        {node.status === "developing" && <Circle className="h-4 w-4 text-[var(--lh-primary)]" />}
+                        {isLocked && <Circle className="h-4 w-4 text-[var(--lh-line)]" />}
 
-                        <span className="font-bold text-[#191919]">{node.name}</span>
+                        <span className="font-medium text-sm text-[var(--lh-ink)]">{node.name}</span>
                         {isLocked && (
-                          <span className="rounded-sm bg-[#F7F6F3] border border-[#E9E9E7] px-1.5 py-0.2 text-[9px] text-[#787774]">
+                          <span className="rounded-full bg-[var(--lh-surface-subtle)] border border-[var(--lh-line)] px-2.5 py-0.5 text-[10px] font-medium text-[var(--lh-ink-secondary)]">
                             잠김
                           </span>
                         )}
                       </div>
-                      <div className="text-[11px] text-[#787774] pl-6">
+                      <div className="pl-6 text-xs leading-relaxed text-[var(--lh-ink-secondary)] font-normal">
                          {!findMappedLesson(stage.courseId, node.name)
                            ? "수학 예시 지표 • 현재 과목 레슨 연결 없음"
                            : isLocked
@@ -181,18 +188,18 @@ export const KnowledgeMapView: React.FC<KnowledgeMapViewProps> = ({ courses, onS
                     </div>
 
                     <div className="flex items-center gap-3">
-                      <div className="flex items-center gap-1.5 font-mono">
-                        <div className="h-1.5 w-16 bg-[#E9E9E7] rounded-full overflow-hidden">
+                      <div className="flex items-center gap-2 font-mono">
+                        <div className="h-2 w-20 bg-[var(--lh-surface-subtle)] border border-[var(--lh-line)] rounded-full overflow-hidden">
                           <div
-                            className="h-full bg-[#191919]"
+                            className={`h-full rounded-full transition-all ${isDeficient ? "bg-[var(--lh-secondary)]" : "bg-[var(--lh-primary)]"}`}
                             style={{ width: `${node.pct}%` }}
                           />
                         </div>
-                        <span className="font-bold text-xs">{node.pct}%</span>
+                        <span className="font-medium text-xs text-[var(--lh-ink)]">{node.pct}%</span>
                       </div>
 
                       {isDeficient && (
-                        <span className="rounded-sm bg-[#191919] px-2 py-0.5 text-[10px] font-bold text-white">
+                        <span className="rounded-full bg-[var(--lh-secondary)] px-3 py-1 text-[11px] font-medium text-white shadow-xs">
                           보충 필수
                         </span>
                       )}

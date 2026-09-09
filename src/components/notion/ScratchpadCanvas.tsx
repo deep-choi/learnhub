@@ -100,7 +100,7 @@ export const ScratchpadCanvas: React.FC<ScratchpadCanvasProps> = ({
     const ctx = canvasRef.current?.getContext("2d");
     if (!ctx) return;
     const { x, y } = getPoint(e);
-    ctx.strokeStyle = tool === "pen" ? "#191919" : "#FFFFFF";
+    ctx.strokeStyle = tool === "pen" ? "var(--lh-ink)" : "var(--lh-surface)";
     ctx.lineWidth = tool === "pen" ? 2 : 14;
     ctx.lineTo(x, y);
     ctx.stroke();
@@ -122,28 +122,28 @@ export const ScratchpadCanvas: React.FC<ScratchpadCanvasProps> = ({
   };
 
   return (
-    <div className="fixed bottom-6 right-6 z-40 shadow-2xl rounded-lg border border-[#E9E9E7] bg-white overflow-hidden text-xs text-[#2F3437] select-none">
-      <div className="flex items-center justify-between bg-[#F7F6F3] border-b border-[#E9E9E7] px-3 py-2">
-        <div className="flex items-center gap-1.5 font-bold text-[11px] text-[#191919]">
-          <PenTool className="h-3.5 w-3.5" />
-          <span>수식 계산 연습장</span>
-          <span className="font-normal text-[10px] text-[#9B9A97]">
-            {saveStatus === "saved" ? (hasLessonScope ? "이 브라우저에 저장됨" : "이 브라우저에 임시 저장됨") : saveStatus === "error" ? "저장 실패" : ""}
+    <div className="fixed bottom-6 right-6 z-40 max-w-[calc(100vw-3rem)] select-none overflow-hidden rounded-[var(--lh-radius-md)] border border-[var(--lh-line)] bg-[var(--lh-surface)] text-sm text-[var(--lh-ink)] shadow-[var(--lh-shadow-md)]">
+      <div className="flex items-center justify-between bg-[var(--lh-surface-subtle)] border-b border-[var(--lh-line)] px-3 py-2">
+        <div className="flex items-center gap-2 font-medium text-[var(--lh-ink)]">
+          <PenTool className="h-3.5 w-3.5 text-[var(--lh-primary)]" />
+          <span>수식 연습장</span>
+          <span className="font-normal text-[10px] text-[var(--lh-ink-tertiary)]">
+            {saveStatus === "saved" ? (hasLessonScope ? "현재 레슨에 임시 저장됨" : "임시 저장됨") : saveStatus === "error" ? "저장 실패" : ""}
           </span>
         </div>
 
         <div className="flex items-center gap-1">
-          <button type="button" onClick={() => setIsMinimized(!isMinimized)} className="p-1 text-[#787774] hover:text-[#191919]" title="접기" aria-label="연습장 접기">
+          <button type="button" onClick={() => setIsMinimized(!isMinimized)} className="p-1 text-[var(--lh-ink-secondary)] hover:text-[var(--lh-ink)] cursor-pointer" title="접기" aria-label="연습장 접기">
             <Minimize2 className="h-3.5 w-3.5" />
           </button>
-          <button type="button" onClick={onClose} className="p-1 text-[#787774] hover:text-[#191919]" title="닫기" aria-label="연습장 닫기">
+          <button type="button" onClick={onClose} className="p-1 text-[var(--lh-ink-secondary)] hover:text-[var(--lh-ink)] cursor-pointer" title="닫기" aria-label="연습장 닫기">
             <X className="h-3.5 w-3.5" />
           </button>
         </div>
       </div>
 
       {!isMinimized && (
-        <div className="p-2 space-y-2 bg-white">
+        <div className="p-2 space-y-2 bg-[var(--lh-surface)]">
           <canvas
             ref={canvasRef}
             onMouseDown={startDrawing}
@@ -153,20 +153,20 @@ export const ScratchpadCanvas: React.FC<ScratchpadCanvasProps> = ({
             onTouchStart={startDrawing}
             onTouchMove={draw}
             onTouchEnd={() => setIsDrawing(false)}
-            className="rounded border border-[#E9E9E7] bg-white cursor-crosshair touch-none"
+            className="rounded border border-[var(--lh-line)] bg-[var(--lh-surface)] cursor-crosshair touch-none"
             aria-label="수식 계산 연습장"
           />
 
           <div className="flex items-center justify-between pt-1">
             <div className="flex items-center gap-1">
-              <button type="button" onClick={() => setTool("pen")} className={`flex items-center gap-1 px-2.5 py-1 rounded-sm border text-[11px] transition ${tool === "pen" ? "bg-[#191919] text-white border-[#191919] font-semibold" : "bg-white border-[#E9E9E7] text-[#787774] hover:bg-[#F7F6F3]"}`}>
+              <button type="button" onClick={() => setTool("pen")} className={`flex min-h-11 items-center gap-2 rounded-full border px-3 text-sm transition cursor-pointer ${tool === "pen" ? "bg-[var(--lh-primary)] text-white border-[var(--lh-primary)] font-medium" : "bg-[var(--lh-surface)] border-[var(--lh-line)] text-[var(--lh-ink-secondary)] hover:bg-[var(--lh-surface-subtle)] font-normal"}`}>
                 <PenTool className="h-3 w-3" /><span>펜</span>
               </button>
-              <button type="button" onClick={() => setTool("eraser")} className={`flex items-center gap-1 px-2.5 py-1 rounded-sm border text-[11px] transition ${tool === "eraser" ? "bg-[#191919] text-white border-[#191919] font-semibold" : "bg-white border-[#E9E9E7] text-[#787774] hover:bg-[#F7F6F3]"}`}>
+              <button type="button" onClick={() => setTool("eraser")} className={`flex min-h-11 items-center gap-2 rounded-full border px-3 text-sm transition cursor-pointer ${tool === "eraser" ? "bg-[var(--lh-primary)] text-white border-[var(--lh-primary)] font-medium" : "bg-[var(--lh-surface)] border-[var(--lh-line)] text-[var(--lh-ink-secondary)] hover:bg-[var(--lh-surface-subtle)] font-normal"}`}>
                 <Eraser className="h-3 w-3" /><span>지우개</span>
               </button>
             </div>
-            <button type="button" onClick={clearCanvas} className="flex items-center gap-1 px-2 py-1 text-[11px] text-[#787774] hover:text-[#191919] transition">
+            <button type="button" onClick={clearCanvas} className="flex items-center gap-1 px-2 py-1 text-[11px] text-[var(--lh-ink-secondary)] hover:text-[var(--lh-primary)] transition cursor-pointer">
               <RotateCcw className="h-3 w-3" /><span>전체 지우기</span>
             </button>
           </div>

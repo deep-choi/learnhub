@@ -110,69 +110,71 @@ export const MistakeArchiveView: React.FC<MistakeArchiveViewProps> = ({
   const resolvedCount = items.filter((i) => i.isResolved).length;
 
   return (
-    <div className="mx-auto w-full max-w-[760px] py-10 px-4 text-[#2F3437]">
+    <div className="mx-auto w-full max-w-[880px] px-5 py-12 text-[var(--lh-ink)] sm:px-8">
       {/* 1. Header */}
-      <div className="space-y-4 border-b border-[#E9E9E7] pb-6">
-        <div className="flex items-center gap-2.5">
-          <span className="text-3xl">📝</span>
+      <div className="space-y-4 border-b border-[var(--lh-line)] pb-6">
+        <div className="flex items-start gap-3">
+          <span className="mt-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--lh-primary-subtle)] border border-[var(--lh-primary-border)] text-[var(--lh-primary)]">
+            <History className="h-5 w-5" />
+          </span>
           <div>
-            <h1 className="text-2xl font-bold tracking-tight text-[#191919]">
-              나만의 오답 공책
+            <h1 className="text-3xl font-medium tracking-[-0.03em] text-[var(--lh-ink)] sm:text-4xl">
+              오답 기록
             </h1>
-            <p className="text-sm text-[#787774] mt-0.5">
-              틀린 문제는 실패가 아니에요. 다시 보면 실력이 쑥쑥 자라요.
+            <p className="mt-2 max-w-2xl text-sm sm:text-base leading-relaxed text-[var(--lh-ink-secondary)] font-normal">
+              틀린 이유와 정답을 비교하고 필요한 문제만 다시 학습하세요.
             </p>
           </div>
         </div>
 
-        {/* Stats Row */}
+        {/* Stats Row: Chunky M3 Stat Tiles */}
         <div className="grid grid-cols-3 gap-3 pt-2">
-          <div className="rounded-md border border-[#E9E9E7] bg-white p-3">
-            <span className="block text-[11px] font-semibold text-[#787774]">
+          <div className="rounded-2xl border border-[var(--lh-line)] bg-[var(--lh-surface)] p-5 shadow-xs flex flex-col justify-between">
+            <span className="block text-xs font-medium uppercase tracking-wider text-[var(--lh-ink-tertiary)]">
               기록된 문제
             </span>
-            <span className="mt-1 block font-mono text-xl font-bold text-[#191919]">
+            <span className="mt-1 block font-mono text-2xl font-medium text-[var(--lh-ink)] sm:text-3xl">
               {items.length}개
             </span>
           </div>
-          <div className="rounded-md border border-[#E9E9E7] bg-white p-3">
-            <span className="block text-[11px] font-semibold text-[#787774]">
+          <div className="rounded-2xl border border-[var(--lh-line)] bg-[var(--lh-surface)] p-5 shadow-xs flex flex-col justify-between">
+            <span className="block text-xs font-medium uppercase tracking-wider text-[var(--lh-secondary-text)]">
               다시 볼 문제
             </span>
-            <span className="mt-1 block font-mono text-xl font-bold text-[#191919]">
+            <span className="mt-1 block font-mono text-2xl font-medium text-[var(--lh-secondary)] sm:text-3xl">
               {unresolvedCount}개
             </span>
           </div>
-          <div className="rounded-md border border-[#E9E9E7] bg-white p-3">
-            <span className="block text-[11px] font-semibold text-[#787774]">
+          <div className="rounded-2xl border border-[var(--lh-line)] bg-[var(--lh-surface)] p-5 shadow-xs flex flex-col justify-between">
+            <span className="block text-xs font-medium uppercase tracking-wider text-[var(--lh-ink-tertiary)]">
               해결한 문제
             </span>
-            <span className="mt-1 block font-mono text-xl font-bold text-[#787774]">
+            <span className="mt-1 block font-mono text-2xl font-medium text-[var(--lh-primary)] sm:text-3xl">
               {resolvedCount}개
             </span>
           </div>
         </div>
 
-        {/* Filter & View Switcher */}
-        <div className="flex flex-wrap items-center justify-between gap-2 pt-2 text-xs">
+        {/* Filter & View Switcher: M3 Pill Controls */}
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-3 text-xs">
           {/* View Mode */}
           <div className="flex items-center gap-1.5">
             <button
               onClick={() => setActiveTab("table")}
-              className={`px-2.5 py-1 rounded-sm border transition cursor-pointer ${
+              className={`min-h-10 rounded-full border px-4 text-xs font-medium transition cursor-pointer shadow-xs ${
                 activeTab === "table"
-                  ? "bg-[#191919] text-white border-[#191919] font-medium"
-                  : "bg-white border-[#E9E9E7] text-[#787774] hover:bg-[#F7F6F3]"
+                  ? "bg-[var(--lh-primary)] text-white border-[var(--lh-primary)]"
+                  : "bg-[var(--lh-surface)] border-[var(--lh-line)] text-[var(--lh-ink-secondary)] hover:bg-[var(--lh-surface-subtle)]"
               }`}
             >
               표로 보기
             </button>
             <button
               onClick={() => setActiveTab("board")}
-              className={`px-2.5 py-1 rounded-sm border transition cursor-pointer ${
+              className={`min-h-10 rounded-full border px-4 text-xs font-medium transition cursor-pointer shadow-xs ${
                 activeTab === "board"
-                  ? "bg-[#191919] text-white border-[#191919] font-medium"
-                  : "bg-white border-[#E9E9E7] text-[#787774] hover:bg-[#F7F6F3]"
+                  ? "bg-[var(--lh-primary)] text-white border-[var(--lh-primary)]"
+                  : "bg-[var(--lh-surface)] border-[var(--lh-line)] text-[var(--lh-ink-secondary)] hover:bg-[var(--lh-surface-subtle)]"
               }`}
             >
               원인별로 모아보기
@@ -182,15 +184,15 @@ export const MistakeArchiveView: React.FC<MistakeArchiveViewProps> = ({
           {/* Filters */}
           <div className="flex items-center gap-2">
             {/* Status Filter */}
-            <div className="flex items-center rounded-md border border-[#E9E9E7] bg-white p-0.5 text-[11px]">
+            <div className="flex items-center rounded-full border border-[var(--lh-line)] bg-[var(--lh-surface)] p-1 text-xs shadow-xs">
               {(["all", "unresolved", "resolved"] as const).map((st) => (
                 <button
                   key={st}
                   onClick={() => setFilterStatus(st)}
-                  className={`rounded-xs px-2 py-0.5 transition cursor-pointer ${
+                  className={`min-h-8 rounded-full px-3 text-xs transition cursor-pointer ${
                     filterStatus === st
-                      ? "bg-[#191919] text-white font-medium"
-                      : "text-[#787774] hover:text-[#191919]"
+                      ? "bg-[var(--lh-primary)] text-white font-medium"
+                      : "text-[var(--lh-ink-secondary)] hover:text-[var(--lh-ink)] font-normal"
                   }`}
                 >
                   {st === "all" ? "전체" : st === "unresolved" ? "다시 볼 문제" : "해결한 문제"}
@@ -202,7 +204,7 @@ export const MistakeArchiveView: React.FC<MistakeArchiveViewProps> = ({
             <select
               value={filterTag}
               onChange={(e) => setFilterTag(e.target.value)}
-              className="rounded-md border border-[#E9E9E7] bg-white px-2 py-1 text-[11px] text-[#787774] focus:outline-none focus:border-[#191919]"
+              className="min-h-10 rounded-full border border-[var(--lh-line)] bg-[var(--lh-surface)] px-3.5 text-xs font-medium text-[var(--lh-ink-secondary)] shadow-xs"
             >
               <option value="all">전체 원인</option>
               <option value="개념 미숙">개념 이해 필요</option>
@@ -216,80 +218,135 @@ export const MistakeArchiveView: React.FC<MistakeArchiveViewProps> = ({
       {/* 2. Content */}
       <div className="mt-6 space-y-4">
         {filteredItems.length === 0 ? (
-          <div className="rounded-lg border border-[#E9E9E7] bg-[#FBFBFA] p-10 text-center text-xs text-[#787774] space-y-2">
-            <p className="font-semibold text-[#191919]">아직 오답 공책이 비어있어요.</p>
-            <p>문제를 풀다가 헷갈리거나 틀린 문제는 여기에 자동으로 모여요.</p>
+          <div className="rounded-3xl border border-[var(--lh-line)] bg-[var(--lh-surface-subtle)] p-12 text-center text-xs text-[var(--lh-ink-secondary)] space-y-2 shadow-xs">
+            <p className="text-base font-medium text-[var(--lh-ink)]">저장된 오답이 없습니다.</p>
+            <p className="font-normal">퀴즈에서 틀린 문제는 이 화면에 자동으로 정리됩니다.</p>
           </div>
         ) : activeTab === "table" ? (
-          <div className="overflow-x-auto rounded-lg border border-[#E9E9E7] bg-white">
+          <>
+          <div className="grid gap-4 md:hidden">
+            {filteredItems.map((item) => (
+              <article key={item.id} className={`rounded-3xl border border-[var(--lh-line)] bg-[var(--lh-surface)] p-6 shadow-xs space-y-4 ${item.isResolved ? "opacity-60" : ""}`}>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-xs font-medium uppercase tracking-wider text-[var(--lh-ink-tertiary)]">{item.course}</p>
+                    <h2 className="mt-1 text-base font-medium text-[var(--lh-ink)]">{item.concept}</h2>
+                  </div>
+                  <label className="flex min-h-9 shrink-0 items-center gap-2 rounded-full border border-[var(--lh-line)] bg-[var(--lh-surface-subtle)] px-3 py-1 text-xs font-medium text-[var(--lh-ink-secondary)]">
+                    <input type="checkbox" checked={!!item.isResolved} onChange={() => handleToggleResolved(item.id)} />
+                    해결
+                  </label>
+                </div>
+                <p className="text-sm font-medium leading-relaxed text-[var(--lh-ink)]">{item.question}</p>
+                <dl className="grid gap-2.5 rounded-2xl border border-[var(--lh-line)] bg-[var(--lh-surface-subtle)] p-4 text-xs">
+                  <div>
+                    <dt className="text-[10px] font-medium uppercase text-[var(--lh-ink-tertiary)]">틀린 이유</dt>
+                    <dd className="mt-1 font-medium text-[var(--lh-secondary-text)]">{item.misconceptionTag}</dd>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 pt-1 border-t border-[var(--lh-line)]">
+                    <div>
+                      <dt className="text-[10px] font-medium uppercase text-[var(--lh-ink-tertiary)]">내 답</dt>
+                      <dd className="mt-1 font-mono text-[var(--lh-ink-secondary)] line-through">{item.wrongAnswer}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-[10px] font-medium uppercase text-[var(--lh-ink-tertiary)]">정답</dt>
+                      <dd className="mt-1 font-mono font-medium text-[var(--lh-primary)]">{item.correctAnswer}</dd>
+                    </div>
+                  </div>
+                </dl>
+                <p className="text-xs leading-relaxed text-[var(--lh-ink-secondary)] font-normal">{item.explanation}</p>
+                <div className="flex gap-2 border-t border-[var(--lh-line)] pt-4">
+                  {onSelectView && (
+                    <button
+                      type="button"
+                      onClick={() => handleJumpToLesson(item)}
+                      className="flex min-h-11 flex-1 items-center justify-center gap-2 rounded-full bg-[var(--lh-primary)] px-4 text-xs font-medium text-white shadow-xs hover:bg-[var(--lh-primary-hover)] transition cursor-pointer"
+                    >
+                      <span>다시 학습하기</span>
+                      <ArrowRight className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={(e) => handleDelete(item.id, e)}
+                    aria-label="오답 기록 삭제"
+                    className="flex h-11 w-11 items-center justify-center rounded-full border border-[var(--lh-line)] bg-[var(--lh-surface)] text-[var(--lh-ink-secondary)] shadow-xs hover:bg-[var(--lh-surface-subtle)] cursor-pointer"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+              </article>
+            ))}
+          </div>
+          <div className="hidden overflow-x-auto rounded-3xl border border-[var(--lh-line)] bg-[var(--lh-surface)] shadow-xs md:block">
             <table className="min-w-[720px] w-full text-left text-xs">
-              <thead className="border-b border-[#E9E9E7] bg-[#F7F6F3] text-[11px] font-semibold text-[#787774]">
+              <thead className="border-b border-[var(--lh-line)] bg-[var(--lh-surface-subtle)] text-xs font-medium text-[var(--lh-ink-secondary)]">
                 <tr>
-                  <th className="w-10 px-3 py-2.5 text-center">완료</th>
-                  <th className="px-4 py-2.5">문제 및 쉬운 설명</th>
-                  <th className="px-4 py-2.5">틀린 이유</th>
-                  <th className="px-4 py-2.5">내가 쓴 답 ➔ 정답</th>
-                  <th className="px-4 py-2.5 text-right">다시 풀기</th>
+                  <th className="w-12 px-4 py-3.5 text-center">완료</th>
+                  <th className="px-5 py-3.5">문제 및 쉬운 설명</th>
+                  <th className="px-5 py-3.5">틀린 이유</th>
+                  <th className="px-5 py-3.5">내가 쓴 답 ➔ 정답</th>
+                  <th className="px-5 py-3.5 text-right">다시 풀기</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-[#E9E9E7]">
+              <tbody className="divide-y divide-[var(--lh-line)]">
                 {filteredItems.map((item) => (
                   <tr
                     key={item.id}
                     className={`transition ${
-                      item.isResolved ? "bg-[#FBFBFA] opacity-60" : "hover:bg-[#F7F6F3]"
+                      item.isResolved ? "bg-[var(--lh-surface-subtle)] opacity-60" : "hover:bg-[var(--lh-surface-subtle)]"
                     }`}
                   >
                     {/* Resolved Checkbox */}
-                    <td className="px-3 py-3 text-center align-top">
+                    <td className="px-4 py-4 text-center align-top">
                       <input
                         type="checkbox"
                         checked={!!item.isResolved}
                         onChange={() => handleToggleResolved(item.id)}
-                        className="rounded border-[#D3D3D0] text-[#191919] focus:ring-0 cursor-pointer"
+                        className="rounded border-[var(--lh-line)] text-[var(--lh-primary)] focus:ring-0 cursor-pointer"
                         title={item.isResolved ? "완료 취소" : "이해 완료 체크"}
                       />
                     </td>
 
                     {/* Question & Explanation */}
-                    <td className="px-4 py-3 align-top space-y-1">
+                    <td className="px-5 py-4 align-top space-y-1.5">
                       <div className="flex items-center gap-2">
-                        <span className="font-bold text-[#191919]">{item.concept}</span>
-                        <span className="text-[10px] text-[#9B9A97]">{item.course}</span>
+                        <span className="font-medium text-[var(--lh-ink)] text-sm">{item.concept}</span>
+                        <span className="text-[10px] font-medium uppercase tracking-wider text-[var(--lh-ink-tertiary)]">{item.course}</span>
                       </div>
-                      <div className="text-xs text-[#2F3437] font-medium">{item.question}</div>
-                      <div className="text-[11px] text-[#787774] leading-relaxed">
-                        <span className="font-semibold text-[#191919]">친절한 설명: </span>
+                      <div className="text-xs text-[var(--lh-ink)] font-medium">{item.question}</div>
+                      <div className="text-xs text-[var(--lh-ink-secondary)] leading-relaxed font-normal">
+                        <span className="font-medium text-[var(--lh-ink)]">친절한 설명: </span>
                         {item.explanation}
                       </div>
                       {item.hint && (
-                        <div className="rounded-sm bg-[#F7F6F3] p-1.5 text-[10px] text-[#787774]">
-                          💡 AI 힌트: {item.hint}
+                        <div className="rounded-xl bg-[var(--lh-primary-subtle)] p-2.5 text-[11px] text-[var(--lh-primary-text)] font-normal border border-[var(--lh-primary-border)]">
+                          AI 힌트: {item.hint}
                         </div>
                       )}
                     </td>
 
                     {/* Tag */}
-                    <td className="px-4 py-3 align-top whitespace-nowrap">
-                      <span className="inline-block rounded-sm bg-[#F7F6F3] border border-[#E9E9E7] px-1.5 py-0.5 text-[10px] font-semibold text-[#191919]">
+                    <td className="px-5 py-4 align-top whitespace-nowrap">
+                      <span className="inline-block rounded-full bg-[var(--lh-secondary-subtle)] border border-[var(--lh-secondary-border)] px-3 py-1 text-[10px] font-medium text-[var(--lh-secondary-text)]">
                         {item.misconceptionTag}
                       </span>
                     </td>
 
                     {/* Answers */}
-                    <td className="px-4 py-3 align-top font-mono text-xs whitespace-nowrap">
-                      <span className="text-[#787774] line-through">{item.wrongAnswer}</span>
-                      <span className="mx-1 text-[#D3D3D0]">➔</span>
-                      <span className="font-bold text-[#191919]">{item.correctAnswer}</span>
+                    <td className="px-5 py-4 align-top font-mono text-xs whitespace-nowrap">
+                      <span className="text-[var(--lh-ink-secondary)] line-through">{item.wrongAnswer}</span>
+                      <span className="mx-1.5 text-[var(--lh-line)] font-sans">➔</span>
+                      <span className="font-medium text-[var(--lh-primary)]">{item.correctAnswer}</span>
                     </td>
 
                     {/* Action */}
-                    <td className="px-4 py-3 align-top text-right whitespace-nowrap space-x-1">
+                    <td className="px-5 py-4 align-top text-right whitespace-nowrap space-x-1">
                       {onSelectView && (
                         <button
                           onClick={() => handleJumpToLesson(item)}
                           title="해당 레슨으로 복습 이동"
-                          className="rounded-sm border border-[#E9E9E7] bg-white px-2 py-1 text-[10px] font-semibold text-[#191919] hover:bg-[#F7F6F3] transition cursor-pointer"
+                          className="rounded-full border border-[var(--lh-primary-border)] bg-[var(--lh-primary-subtle)] px-3.5 py-1.5 text-xs font-medium text-[var(--lh-primary-text)] hover:bg-[var(--lh-primary)] hover:text-white shadow-xs transition cursor-pointer"
                         >
                           다시 풀기 ➔
                         </button>
@@ -297,9 +354,9 @@ export const MistakeArchiveView: React.FC<MistakeArchiveViewProps> = ({
                       <button
                         onClick={(e) => handleDelete(item.id, e)}
                         title="기록 삭제"
-                        className="rounded-sm p-1 text-[#D3D3D0] hover:text-[#787774] transition cursor-pointer"
+                        className="rounded-full p-2 text-[var(--lh-ink-tertiary)] hover:bg-[var(--lh-surface-subtle)] hover:text-[var(--lh-ink)] transition cursor-pointer"
                       >
-                        <Trash2 className="h-3 w-3 inline" />
+                        <Trash2 className="h-3.5 w-3.5 inline" />
                       </button>
                     </td>
                   </tr>
@@ -307,8 +364,9 @@ export const MistakeArchiveView: React.FC<MistakeArchiveViewProps> = ({
               </tbody>
             </table>
           </div>
+          </>
         ) : (
-          /* Board View */
+          /* Board View: Chunky M3 Columns & Cards */
           <div className="grid gap-4 sm:grid-cols-3">
             {(["개념 미숙", "계산 착오", "조건 누락"] as const).map((tag) => {
               const matched = filteredItems.filter((i) => i.misconceptionTag === tag);
@@ -320,54 +378,54 @@ export const MistakeArchiveView: React.FC<MistakeArchiveViewProps> = ({
               return (
                 <div
                   key={tag}
-                  className="rounded-lg border border-[#E9E9E7] bg-[#FBFBFA] p-3 space-y-3"
+                  className="rounded-3xl border border-[var(--lh-line)] bg-[var(--lh-surface-subtle)] p-4 sm:p-5 space-y-3"
                 >
-                  <div className="flex items-center justify-between border-b border-[#E9E9E7] pb-2">
-                    <span className="font-bold text-xs text-[#191919]">{labelMap[tag] || tag}</span>
-                    <span className="rounded-sm bg-white border border-[#E9E9E7] px-1.5 py-0.2 font-mono text-[10px] text-[#787774]">
+                  <div className="flex items-center justify-between border-b border-[var(--lh-line)] pb-2.5">
+                    <span className="font-medium text-xs text-[var(--lh-ink)]">{labelMap[tag] || tag}</span>
+                    <span className="rounded-full bg-[var(--lh-surface)] border border-[var(--lh-secondary-border)] px-2 py-0.5 font-mono text-[10px] font-medium text-[var(--lh-secondary-text)] shadow-xs">
                       {matched.length}개
                     </span>
                   </div>
 
-                  <div className="space-y-2">
+                  <div className="space-y-3">
                     {matched.map((item) => (
                       <div
                         key={item.id}
-                        className={`rounded-md border border-[#E9E9E7] bg-white p-3 space-y-2 text-xs shadow-xs transition ${
+                        className={`rounded-2xl border border-[var(--lh-line)] bg-[var(--lh-surface)] p-4 space-y-2.5 text-xs shadow-xs transition ${
                           item.isResolved ? "opacity-50" : ""
                         }`}
                       >
-                        <div className="flex items-start justify-between gap-1">
-                          <span className="font-bold text-[#191919] text-[11px] leading-tight">
+                        <div className="flex items-start justify-between gap-2">
+                          <span className="font-medium text-[var(--lh-ink)] text-xs leading-tight">
                             {item.concept}
                           </span>
                           <input
                             type="checkbox"
                             checked={!!item.isResolved}
                             onChange={() => handleToggleResolved(item.id)}
-                            className="rounded border-[#D3D3D0] text-[#191919] focus:ring-0 cursor-pointer"
+                            className="rounded border-[var(--lh-line)] text-[var(--lh-primary)] focus:ring-0 cursor-pointer"
                             title={item.isResolved ? "완료 취소" : "이해 완료 체크"}
                           />
                         </div>
 
-                        <p className="text-[11px] font-medium text-[#2F3437]">{item.question}</p>
+                        <p className="text-xs font-medium text-[var(--lh-ink)] leading-relaxed">{item.question}</p>
 
-                        <div className="rounded-sm bg-[#F7F6F3] p-1.5 font-mono text-[10px]">
-                          <span className="text-[#787774] line-through">{item.wrongAnswer}</span>
-                          <span className="mx-1 text-[#D3D3D0]">➔</span>
-                          <span className="font-bold text-[#191919]">{item.correctAnswer}</span>
+                        <div className="rounded-xl bg-[var(--lh-surface-subtle)] p-2.5 font-mono text-xs border border-[var(--lh-line)]">
+                          <span className="text-[var(--lh-ink-secondary)] line-through">{item.wrongAnswer}</span>
+                          <span className="mx-1.5 text-[var(--lh-line)] font-sans">➔</span>
+                          <span className="font-medium text-[var(--lh-primary)]">{item.correctAnswer}</span>
                         </div>
 
-                        <p className="text-[10px] text-[#787774] leading-relaxed">
+                        <p className="text-[11px] text-[var(--lh-ink-secondary)] leading-relaxed font-normal">
                           {item.explanation}
                         </p>
 
-                        <div className="flex items-center justify-between pt-1 border-t border-[#F0F0EE] text-[10px]">
-                          <span className="text-[#9B9A97]">{item.date}</span>
+                        <div className="flex items-center justify-between pt-2 border-t border-[var(--lh-line)] text-[10px]">
+                          <span className="text-[var(--lh-ink-tertiary)] font-normal">{item.date}</span>
                           {onSelectView && (
                             <button
                               onClick={() => handleJumpToLesson(item)}
-                              className="font-semibold text-[#191919] hover:underline cursor-pointer"
+                              className="font-medium text-[var(--lh-primary)] hover:underline cursor-pointer"
                             >
                               다시 공부하기 ➔
                             </button>
@@ -376,7 +434,7 @@ export const MistakeArchiveView: React.FC<MistakeArchiveViewProps> = ({
                       </div>
                     ))}
                     {matched.length === 0 && (
-                      <div className="py-6 text-center text-[11px] text-[#9B9A97]">
+                      <div className="py-8 text-center text-xs text-[var(--lh-ink-tertiary)] font-normal">
                         틀린 문제 없음
                       </div>
                     )}

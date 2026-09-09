@@ -14,7 +14,6 @@ import { NotionLessonCanvas } from "./components/notion/NotionLessonCanvas";
 import { KnowledgeMapView } from "./components/notion/KnowledgeMapView";
 import { MistakeArchiveView } from "./components/notion/MistakeArchiveView";
 import { CommandPaletteModal } from "./components/notion/CommandPaletteModal";
-import { FocusTimerModal } from "./components/notion/FocusTimerModal";
 import { SkillMatrixView } from "./components/SkillMatrixView";
 import { ReviewView } from "./components/ReviewView";
 import { ProfileView } from "./components/ProfileView";
@@ -25,7 +24,26 @@ import { ScratchpadCanvas } from "./components/notion/ScratchpadCanvas";
 import { AuthModal } from "./components/notion/AuthModal";
 import { INITIAL_COURSES } from "./data/initialData";
 import { trackLearningEvent } from "./services/learningAnalytics";
+import { getAuthStatus } from "./services/authClient";
+import { LEARNHUB_AUTH_CHANGED_EVENT } from "./services/supabaseClient";
 import { PenTool } from "lucide-react";
+import { AiChatView } from "./components/AiChatView";
+import { LessonAiInputBar } from "./components/LessonAiInputBar";
+import { CoursesView } from "./components/CoursesView";
+import { CourseDetailView } from "./components/CourseDetailView";
+
+const getInitialView = (): NotionPageView => ({ type: "home" });
+
+const getAuthCallbackError = (): string => {
+  if (typeof window === "undefined") return "";
+  const params = new URLSearchParams(window.location.search);
+  const code = params.get("error_code");
+  if (!params.get("error") && !code) return "";
+  if (code === "bad_oauth_callback") {
+    return "OAuth Callback 주소를 직접 열 수 없습니다. LearnHub의 ‘Google로 계속하기’ 버튼에서 로그인을 시작해 주세요.";
+  }
+  return params.get("error_description") || "로그인을 완료하지 못했습니다. 잠시 후 다시 시도해 주세요.";
+};
 
 const getResumeLesson = (course: Course) => {
   for (const chapter of course.chapters) {
@@ -62,7 +80,7 @@ export default function App() {
   });
 
   // Navigation State - Defaults to Home Dashboard
-  const [activeView, setActiveView] = useState<NotionPageView>({ type: "home" });
+  const [activeView, setActiveView] = useState<NotionPageView>(getInitialView);
   const [isSidebarOpen, setIsSidebarOpen] = useState(() =>
     typeof window === "undefined" ? true : window.innerWidth >= 768,
   );
@@ -71,13 +89,15 @@ export default function App() {
   // Modals & Drawers
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [initialSubject, setInitialSubject] = useState("");
+  const [pendingSubjectAfterAuth, setPendingSubjectAfterAuth] = useState("");
   const [isSearchOpen, setIsSearchOpen] = useState(false);
-  const [isTimerOpen, setIsTimerOpen] = useState(false);
   const [isTutorOpen, setIsTutorOpen] = useState(false);
   const [isPlacementTestOpen, setIsPlacementTestOpen] = useState(false);
   const [isScratchpadOpen, setIsScratchpadOpen] = useState(false);
-  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [authCallbackError, setAuthCallbackError] = useState(getAuthCallbackError);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(() => Boolean(getAuthCallbackError()));
   const [tutorQuoteContext, setTutorQuoteContext] = useState("");
+  const [pendingViewAfterAuth, setPendingViewAfterAuth] = useState<NotionPageView | null>(null);
 
   const refreshDataState = () => {
     const loadedCourses = StorageService.getCourses();
@@ -96,7 +116,53 @@ export default function App() {
   const reloadData = refreshDataState;
 
   useEffect(() => {
+    if (!authCallbackError || typeof window === "undefined") return;
+    window.history.replaceState({}, document.title, `${window.location.pathname}${window.location.hash}`);
+  }, [authCallbackError]);
+
+  useEffect(() => {
     reloadData();
+    const handleAuthChanged = (event: Event) => {
+      const authEvent = (event as CustomEvent<{ event?: string }>).detail?.event;
+      const authStatus = getAuthStatus();
+      if (authStatus.signedIn && authStatus.userId) {
+        const existingAccount = StorageService.getUser();
+        const account: UserAccount = {
+          id: authStatus.userId,
+          name: authStatus.name?.trim() || authStatus.email?.split("@")[0] || "LearnHub 학습자",
+          email: authStatus.email,
+          isGuest: false,
+          isLocalOnly: false,
+          provider: authStatus.provider === "google" ? "google" : "email",
+          createdAt: existingAccount.id === authStatus.userId ? existingAccount.createdAt : new Date().toISOString(),
+        };
+        StorageService.setUser(account);
+        setUserAccount(account);
+        setAuthCallbackError("");
+        setIsAuthModalOpen(false);
+        if (pendingViewAfterAuth) {
+          setActiveView(pendingViewAfterAuth);
+          setPendingViewAfterAuth(null);
+        }
+      } else {
+        StorageService.logout();
+        refreshDataState();
+        setActiveView({ type: "home" });
+      }
+      if (authStatus.signedIn && pendingSubjectAfterAuth) {
+        setIsCreateModalOpen(true);
+        setPendingSubjectAfterAuth("");
+        setActiveView({ type: "home" });
+      }
+    };
+    window.addEventListener(LEARNHUB_AUTH_CHANGED_EVENT, handleAuthChanged);
+    return () => window.removeEventListener(LEARNHUB_AUTH_CHANGED_EVENT, handleAuthChanged);
+  }, [activeView.type, pendingSubjectAfterAuth, pendingViewAfterAuth]);
+
+  useEffect(() => {
+    const handleRequestAuth = () => setIsAuthModalOpen(true);
+    window.addEventListener("learnhub:request-auth", handleRequestAuth);
+    return () => window.removeEventListener("learnhub:request-auth", handleRequestAuth);
   }, []);
 
   // Global Keyboard Shortcuts (⌘K for search, ⌘\ for sidebar)
@@ -134,6 +200,16 @@ export default function App() {
   };
 
   const handleSelectView = (view: NotionPageView, source = "navigation") => {
+    if (
+      view.type !== "home" &&
+      view.type !== "courses" &&
+      view.type !== "course-detail" &&
+      !getAuthStatus().signedIn
+    ) {
+      setPendingViewAfterAuth(view);
+      setIsAuthModalOpen(true);
+      return;
+    }
     if (view.type === "lesson") {
       openLesson(view.course, view.lesson, view.chapterTitle, source, hasCompletedLesson(view.course));
       return;
@@ -146,6 +222,11 @@ export default function App() {
   };
 
   const handleOpenLearning = () => {
+    if (!getAuthStatus().signedIn) {
+      setPendingViewAfterAuth({ type: "home" });
+      setIsAuthModalOpen(true);
+      return;
+    }
     const course = courses.find((candidate) => !isSampleCourse(candidate));
     const resume = course ? getResumeLesson(course) : null;
     if (!course || !resume) {
@@ -167,6 +248,14 @@ export default function App() {
         "course-created",
         false,
       );
+    }
+  };
+
+  const handleEnrollRoadmap = (course: Course) => {
+    if (!courses.some((c) => c.id === course.id)) {
+      StorageService.addCourse(course);
+      reloadData();
+      trackLearningEvent("course_created", { courseId: course.id, sample: false, source: "roadmap" });
     }
   };
 
@@ -200,24 +289,32 @@ export default function App() {
 
   const handleOpenTutor = () => {
     if (activeView.type !== "lesson") {
-      window.alert("질문할 레슨을 먼저 열어주세요.");
+      handleSelectView({ type: "ai-chat" }, "ai-tutor");
       return;
     }
     setTutorQuoteContext("");
     setIsTutorOpen(true);
   };
 
-  const handleLogout = () => {
-    StorageService.logout();
-    setActiveView({ type: "home" });
-    reloadData();
+  const handleOpenCreateCourse = (subject?: string) => {
+    const trimmedSubject = subject?.trim() || "";
+    setInitialSubject(trimmedSubject);
+    const authStatus = getAuthStatus();
+    if (!authStatus.signedIn) {
+      setPendingSubjectAfterAuth(trimmedSubject);
+      setIsAuthModalOpen(true);
+      return;
+    }
+    setPendingSubjectAfterAuth("");
+    setIsCreateModalOpen(true);
   };
 
   const currentLessonData =
     activeView.type === "lesson" ? activeView : null;
+  const isAuthenticated = getAuthStatus().signedIn && !userAccount.isGuest;
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-white text-[#2F3437] font-sans selection:bg-[#2F3437] selection:text-white">
+    <div className="flex h-screen w-screen overflow-hidden bg-[var(--lh-canvas)] text-[var(--lh-ink)] font-sans">
       {/* 1. Left Notion Sidebar */}
       {!isZenMode && (
         <Sidebar
@@ -225,14 +322,10 @@ export default function App() {
           activeView={activeView}
           onSelectView={(view) => handleSelectView(view, "sidebar")}
           onOpenLearning={handleOpenLearning}
-          onOpenCreateCourse={() => {
-            setInitialSubject("");
-            setIsCreateModalOpen(true);
-          }}
+          onOpenCreateCourse={() => handleOpenCreateCourse()}
           onOpenSearch={() => setIsSearchOpen(true)}
-          onOpenTimer={() => setIsTimerOpen(true)}
            onOpenTutor={handleOpenTutor}
-          onOpenPlacementTest={() => setIsPlacementTestOpen(true)}
+          onOpenPlacementTest={() => isAuthenticated ? setIsPlacementTestOpen(true) : setIsAuthModalOpen(true)}
           pendingReviewsCount={reviews.length}
           isOpen={isSidebarOpen}
           onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
@@ -242,14 +335,13 @@ export default function App() {
       )}
 
       {/* 2. Main Workspace Canvas Area */}
-      <div className="flex flex-1 flex-col overflow-hidden">
+      <div className="relative flex flex-1 flex-col overflow-hidden">
         {/* Top Breadcrumb & Actions Bar */}
         <TopBar
           activeView={activeView}
           isSidebarOpen={isSidebarOpen}
           onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
            onOpenTutor={handleOpenTutor}
-          onOpenTimer={() => setIsTimerOpen(true)}
           isZenMode={isZenMode}
           onToggleZenMode={() => setIsZenMode(!isZenMode)}
           userAccount={userAccount}
@@ -257,12 +349,9 @@ export default function App() {
         />
 
         {/* Scrollable Viewport */}
-        <main className="flex-1 overflow-y-auto bg-white">
-          <div className="border-b border-[#E9E9E7] bg-[#FBFBFA] px-4 py-2 text-center text-[11px] text-[#787774]">
-            이 LearnHub 체험판은 여러 분야 주제로 학습 코스를 만들고, 기록은 현재 기기에만 저장합니다. 수학 체험 진단은 선택 기능이며 전체 실력 판정이 아닙니다.
-          </div>
+        <main className="flex-1 overflow-y-auto bg-[var(--lh-canvas)]">
           {activeView.type === "home" && (
-            <div className="mx-auto max-w-[760px] py-10 px-4">
+            <div>
               <HomeView
                 courses={courses}
                 progress={progress}
@@ -278,12 +367,31 @@ export default function App() {
                   openLesson(course, lesson, chapterTitle, "home-continue", hasCompletedLesson(course))
                 }
                 onStartReview={() => handleSelectView({ type: "review-queue" }, "home-review")}
-                onOpenCreateCourse={(subject) => {
-                  setInitialSubject(subject?.trim() || "");
-                  setIsCreateModalOpen(true);
-                }}
+                onOpenCreateCourse={handleOpenCreateCourse}
               />
             </div>
+          )}
+
+          {activeView.type === "courses" && (
+            <CoursesView
+              courses={courses}
+              onSelectCourse={(course) => handleSelectView({ type: "course-detail", course })}
+              onStartLesson={(course, lesson, chapterTitle) =>
+                openLesson(course, lesson, chapterTitle, "roadmap-start", hasCompletedLesson(course))
+              }
+              onEnrollRoadmap={handleEnrollRoadmap}
+              onOpenCreateCourse={handleOpenCreateCourse}
+            />
+          )}
+
+          {activeView.type === "course-detail" && (
+            <CourseDetailView
+              course={activeView.course}
+              onBack={() => handleSelectView({ type: "courses" })}
+              onStartLesson={(course, lesson, chapterTitle) =>
+                openLesson(course, lesson, chapterTitle, "course-detail-start", hasCompletedLesson(course))
+              }
+            />
           )}
 
           {activeView.type === "lesson" && (
@@ -304,6 +412,8 @@ export default function App() {
             />
           )}
 
+          {activeView.type === "ai-chat" && <AiChatView />}
+
           {activeView.type === "knowledge-map" && (
             <KnowledgeMapView
               courses={courses}
@@ -318,12 +428,11 @@ export default function App() {
               courses={courses}
               reviews={reviews}
               onSelectView={(view) => handleSelectView(view, "records")}
-              onDataChanged={refreshDataState}
             />
           )}
 
           {activeView.type === "skill-matrix" && (
-            <div className="mx-auto max-w-[760px] py-10 px-4">
+            <div className="mx-auto max-w-3xl px-4 py-12">
               <SkillMatrixView
                 skills={skills}
                 progress={progress}
@@ -334,13 +443,7 @@ export default function App() {
           )}
 
           {activeView.type === "review-queue" && (
-            <div className="mx-auto max-w-[760px] py-10 px-4">
-              <ReviewView
-                reviews={reviews}
-                skills={skills}
-                onReviewFinished={reloadData}
-              />
-            </div>
+            <ReviewView reviews={reviews} skills={skills} onReviewFinished={reloadData} />
           )}
 
           {activeView.type === "mistake-archive" && (
@@ -351,21 +454,25 @@ export default function App() {
           )}
 
           {activeView.type === "settings" && (
-            <div className="mx-auto max-w-[760px] py-10 px-4">
-              <ProfileView
-                onResetData={reloadData}
-                userAccount={userAccount}
-                onLogout={handleLogout}
-              />
-            </div>
+            <ProfileView
+              onDataChanged={refreshDataState}
+            />
           )}
         </main>
+
+        {activeView.type === "lesson" && (
+          <div className="pointer-events-none absolute inset-x-0 bottom-4 z-20 px-4">
+            <div className="pointer-events-auto">
+              <LessonAiInputBar onAsk={(question) => { setTutorQuoteContext(question); setIsTutorOpen(true); }} />
+            </div>
+          </div>
+        )}
       </div>
 
       {/* 3. Global AI Socratic Drawer */}
       {currentLessonData && (
         <AiTutorDrawer
-          key={`${currentLessonData.course.id}:${currentLessonData.lesson.id}`}
+          key={`tutor:${currentLessonData.course.id}:${currentLessonData.lesson.id}`}
           isOpen={isTutorOpen}
           onClose={() => {
             setIsTutorOpen(false);
@@ -379,9 +486,10 @@ export default function App() {
           conceptName={currentLessonData.lesson.conceptName}
           currentStepContent={
             tutorQuoteContext
-              ? `사용자가 본문에서 다음 문장을 직접 인용하여 질문했습니다: "${tutorQuoteContext}"`
-              : `${currentLessonData.course.title}의 ${currentLessonData.lesson.title} 학습 내용에 대한 소크라틱 질의응답 세션입니다.`
+              ? `사용자가 현재 레슨에서 다음 내용을 질문했습니다: "${tutorQuoteContext}"`
+              : `${currentLessonData.course.title}의 ${currentLessonData.lesson.title} 학습 내용에 대한 질의응답 세션입니다.`
           }
+          initialQuestion={tutorQuoteContext}
         />
       )}
 
@@ -400,24 +508,20 @@ export default function App() {
         onSelectView={(view) => handleSelectView(view, "search")}
       />
 
-      <FocusTimerModal
-        isOpen={isTimerOpen}
-        onClose={() => setIsTimerOpen(false)}
-      />
-
       {/* 5. Floating Scratchpad Trigger */}
-      <button
+      {isAuthenticated && <button
         onClick={() => setIsScratchpadOpen(!isScratchpadOpen)}
-        className="fixed bottom-5 right-5 z-30 flex items-center gap-1.5 rounded-full bg-[#191919] px-3.5 py-2 text-xs font-semibold text-white shadow-xl hover:bg-[#37352F] transition cursor-pointer"
+        className="fixed bottom-5 right-5 z-30 flex items-center gap-2 rounded-full border border-white/10 bg-[var(--lh-ink)] px-4 py-2.5 text-xs font-medium text-white shadow-[var(--lh-shadow-md)] transition hover:bg-[var(--lh-ink-secondary)] cursor-pointer"
+        aria-label="수식 연습장 열기"
       >
         <PenTool className="h-3.5 w-3.5" />
         <span>수식 연습장</span>
-      </button>
+      </button>}
 
       <ScratchpadCanvas
         key={
           activeView.type === "lesson"
-            ? `${activeView.course.id}:${activeView.lesson.id}`
+            ? `scratchpad:${activeView.course.id}:${activeView.lesson.id}`
             : "global"
         }
         isOpen={isScratchpadOpen}
@@ -440,14 +544,18 @@ export default function App() {
         }}
       />
 
-      <AuthModal
-        isOpen={isAuthModalOpen}
-        onClose={() => setIsAuthModalOpen(false)}
-        onLoginSuccess={(user) => {
-          setUserAccount(user);
-          reloadData();
-        }}
-      />
+      <div className="relative z-[60]">
+        <AuthModal
+          isOpen={isAuthModalOpen}
+          initialError={authCallbackError}
+          onClose={() => {
+            setIsAuthModalOpen(false);
+            setAuthCallbackError("");
+            setPendingViewAfterAuth(null);
+            setPendingSubjectAfterAuth("");
+          }}
+        />
+      </div>
     </div>
   );
 }

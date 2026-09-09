@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { Course, LessonMeta, LessonContent, QuizData } from "../../types/learning";
 import { StorageService } from "../../services/storage";
 import type { AccessTokenGetter } from "../../services/contentReports";
+import { authorizedFetch } from "../../services/authClient";
 import { validateLessonPayload } from "../../domain/contentValidation";
 import { getLearningSupport } from "../../domain/learningSupport";
 import { ContentReportDialog } from "../ContentReportDialog";
@@ -9,6 +10,7 @@ import { RichLessonRenderer } from "./RichLessonRenderer";
 import { LessonCompletionModal } from "./LessonCompletionModal";
 import {
   Award,
+  AlertTriangle,
   BookOpen,
   Brain,
   CheckCircle2,
@@ -19,6 +21,7 @@ import {
   MessageSquare,
   Sparkles,
   Tag,
+  Target,
   XCircle,
 } from "lucide-react";
 
@@ -115,6 +118,15 @@ export const NotionLessonCanvas: React.FC<NotionLessonCanvasProps> = ({
   }, [noteStorageKey]);
 
   useEffect(() => {
+    if (!showQuizWarningModal) return;
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setShowQuizWarningModal(false);
+    };
+    document.addEventListener("keydown", handleEscape);
+    return () => document.removeEventListener("keydown", handleEscape);
+  }, [showQuizWarningModal]);
+
+  useEffect(() => {
     let cancelled = false;
     const controller = new AbortController();
 
@@ -134,7 +146,7 @@ export const NotionLessonCanvas: React.FC<NotionLessonCanvasProps> = ({
       }
 
       try {
-        const res = await fetch("/api/ai/generate-lesson", {
+        const res = await authorizedFetch("/api/ai/generate-lesson", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -149,6 +161,10 @@ export const NotionLessonCanvas: React.FC<NotionLessonCanvasProps> = ({
           signal: controller.signal,
         });
 
+        if (res.status === 401) {
+          window.dispatchEvent(new CustomEvent("learnhub:request-auth"));
+          throw new Error("로그인 후 새 AI 학습 내용을 불러올 수 있습니다.");
+        }
         if (!res.ok) throw new Error(`lesson_request_${res.status}`);
         const data = await res.json();
         const validationErrors = validateLessonPayload(data, course.learningType);
@@ -170,9 +186,11 @@ export const NotionLessonCanvas: React.FC<NotionLessonCanvasProps> = ({
         };
         StorageService.cacheLessonContent(lessonMeta.id, loaded);
         if (!cancelled) setContent(loaded);
-      } catch {
+      } catch (error) {
         if (!cancelled) {
-          setLoadError("이 레슨 내용을 불러오지 못했습니다. 현재 과목의 내용은 바뀌지 않았어요.");
+          setLoadError(error instanceof Error && error.message.startsWith("로그인 후")
+            ? error.message
+            : "이 레슨 내용을 불러오지 못했습니다. 현재 과목의 내용은 바뀌지 않았어요.");
         }
       } finally {
         if (!cancelled) setIsLoading(false);
@@ -258,7 +276,7 @@ export const NotionLessonCanvas: React.FC<NotionLessonCanvasProps> = ({
 
     setIsEvaluating(true);
     try {
-      const res = await fetch("/api/ai/evaluate-quiz", {
+      const res = await authorizedFetch("/api/ai/evaluate-quiz", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -272,6 +290,10 @@ export const NotionLessonCanvas: React.FC<NotionLessonCanvasProps> = ({
 
       const data = await res.json().catch(() => ({}));
       if (lessonKeyRef.current !== evaluationLessonKey) return;
+      if (res.status === 401) {
+        window.dispatchEvent(new CustomEvent("learnhub:request-auth"));
+        throw new Error("로그인 후 AI 채점을 사용할 수 있습니다.");
+      }
       if (!res.ok || data.status === "pending") {
         throw new Error("evaluation_pending");
       }
@@ -371,25 +393,25 @@ export const NotionLessonCanvas: React.FC<NotionLessonCanvasProps> = ({
 
   if (isLoading) {
     return (
-      <div className="flex h-[70vh] flex-col items-center justify-center space-y-3 text-[#787774]">
-        <Loader2 className="h-5 w-5 animate-spin text-[#191919]" />
-        <span className="text-xs">노션 교과 캔버스 로딩 중...</span>
+      <div className="flex h-[70vh] flex-col items-center justify-center space-y-3 text-[var(--lh-ink-secondary)]">
+        <Loader2 className="h-6 w-6 animate-spin text-[var(--lh-primary)]" />
+        <span className="text-sm font-medium">레슨을 준비하는 중...</span>
       </div>
     );
   }
 
   if (loadError || !content) {
     return (
-      <div className="mx-auto flex min-h-[50vh] w-full max-w-[560px] flex-col items-center justify-center gap-4 px-4 text-center text-[#787774]">
-        <div className="text-2xl">⚠️</div>
+      <div className="mx-auto flex min-h-[50vh] w-full max-w-[560px] flex-col items-center justify-center gap-4 px-4 text-center text-[var(--lh-ink-secondary)]">
+        <AlertTriangle className="h-6 w-6 text-[var(--lh-secondary)]" />
         <div>
-          <h2 className="text-base font-bold text-[#191919]">레슨을 준비하지 못했습니다</h2>
-          <p className="mt-2 text-xs leading-relaxed">{loadError || "현재 과목의 레슨 내용이 비어 있습니다."}</p>
+          <h2 className="text-lg font-medium text-[var(--lh-ink)]">레슨을 준비하지 못했습니다</h2>
+          <p className="mt-2 text-sm leading-relaxed">{loadError || "현재 과목의 레슨 내용이 비어 있습니다."}</p>
         </div>
         <button
           type="button"
           onClick={() => setLoadAttempt((attempt) => attempt + 1)}
-          className="rounded-md bg-[#191919] px-4 py-2 text-xs font-semibold text-white hover:bg-[#37352F] cursor-pointer"
+          className="min-h-11 rounded-full bg-[var(--lh-primary)] hover:bg-[var(--lh-primary-hover)] px-6 text-sm font-medium text-white cursor-pointer shadow-xs transition"
         >
           다시 시도
         </button>
@@ -400,72 +422,76 @@ export const NotionLessonCanvas: React.FC<NotionLessonCanvasProps> = ({
   return (
     <div
       onMouseUp={handleMouseUp}
-      className="relative mx-auto w-full max-w-[760px] py-10 px-4 text-[#2F3437] select-text"
+      className="relative mx-auto w-full max-w-[760px] overflow-x-hidden px-5 pb-36 pt-12 text-base leading-relaxed text-[var(--lh-ink)] select-text sm:px-8"
     >
-      {/* Floating Selection Tooltip (Notion Style AI Bubble) */}
+      {/* Floating Selection Tooltip (AI Bubble in Dynamic Primary) */}
       {tooltipPos && (
         <div
           style={{ top: `${tooltipPos.y + window.scrollY - 36}px`, left: `${tooltipPos.x}px` }}
-          className="fixed -translate-x-1/2 z-50 flex items-center gap-1 rounded-md bg-[#191919] px-2.5 py-1 text-white shadow-xl text-[11px] animate-fade-in cursor-pointer"
+          className="fixed -translate-x-1/2 z-50 flex items-center gap-1.5 rounded-full bg-[var(--lh-primary)] px-3.5 py-1.5 text-white shadow-xl text-xs animate-fade-in cursor-pointer hover:bg-[var(--lh-primary-hover)] transition"
           onClick={handleTriggerTutorForSelection}
         >
-          <Sparkles className="h-3 w-3 text-white" />
+          <Sparkles className="h-3.5 w-3.5 text-white" />
           <span className="font-medium">선택 문장 AI에게 질문하기</span>
         </div>
       )}
 
       {/* 1. Notion Page Icon & Title */}
-      <div className="space-y-4 border-b border-[#E9E9E7] pb-8">
+      <div className="space-y-4 border-b border-[var(--lh-line)] pb-8">
         <div className="flex items-center gap-3">
-          <span className="text-4xl">📚</span>
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--lh-ink)] text-white"><BookOpen className="h-5 w-5" /></span>
           <div className="flex items-center gap-2">
-            <span className="rounded-sm bg-[#F7F6F3] border border-[#E9E9E7] px-2 py-0.5 text-[11px] font-semibold text-[#787774]">
+            <span className="rounded-sm bg-[var(--lh-surface-subtle)] border border-[var(--lh-line)] px-2 py-0.5 text-[11px] font-medium text-[var(--lh-ink-secondary)]">
               {course.subject}
             </span>
-            <span className="text-[11px] text-[#9B9A97]">약 {lessonMeta.estimatedMinutes}분 소요</span>
+            <span className="text-[11px] text-[var(--lh-ink-tertiary)]">약 {lessonMeta.estimatedMinutes}분 소요</span>
           </div>
         </div>
 
-        <h1 className="text-3xl font-extrabold tracking-tight text-[#191919] sm:text-4xl">
+        <h1 className="text-3xl font-medium tracking-[-0.03em] text-[var(--lh-ink)] sm:text-4xl">
           {lessonMeta.title}
         </h1>
 
-        {/* Notion Property Table */}
-        <div className="space-y-1.5 rounded-md border border-[#E9E9E7] bg-[#FBFBFA] p-3 text-xs">
-          <div className="flex items-center gap-4 text-[#787774]">
-            <span className="w-24 shrink-0 font-medium text-[11px] text-[#9B9A97]">소속 챕터</span>
-            <span className="text-[#191919] font-medium">{chapterTitle}</span>
+        {/* M3 Property Card */}
+        <div className="space-y-2 rounded-2xl border border-[var(--lh-line)] bg-[var(--lh-surface-subtle)] p-4 text-xs">
+          <div className="flex items-center gap-4 text-[var(--lh-ink-secondary)]">
+            <span className="w-24 shrink-0 font-medium uppercase tracking-wider text-[10px] text-[var(--lh-ink-tertiary)]">소속 챕터</span>
+            <span className="text-[var(--lh-ink)] font-medium">{chapterTitle}</span>
           </div>
-          <div className="flex items-center gap-4 text-[#787774]">
-            <span className="w-24 shrink-0 font-medium text-[11px] text-[#9B9A97]">핵심 개념 ID</span>
-            <span className="font-mono text-[11px] text-[#2F3437]">{lessonMeta.conceptId}</span>
+          <div className="flex items-center gap-4 text-[var(--lh-ink-secondary)]">
+            <span className="w-24 shrink-0 font-medium uppercase tracking-wider text-[10px] text-[var(--lh-ink-tertiary)]">핵심 개념 ID</span>
+            <span className="font-mono text-xs text-[var(--lh-ink)]">{lessonMeta.conceptId}</span>
           </div>
-          <div className="flex items-center gap-4 text-[#787774]">
-            <span className="w-24 shrink-0 font-medium text-[11px] text-[#9B9A97]">학습 완결 상태</span>
-            <span className="font-medium text-[#191919]">
-              {isCompleted ? "● 이수 완료 (Saved)" : "○ 사유 진행 중 (In Progress)"}
+          <div className="flex items-center gap-4 text-[var(--lh-ink-secondary)]">
+            <span className="w-24 shrink-0 font-medium uppercase tracking-wider text-[10px] text-[var(--lh-ink-tertiary)]">학습 완결 상태</span>
+            <span className="inline-flex items-center rounded-full bg-[var(--lh-surface)] px-2.5 py-0.5 font-medium text-[var(--lh-ink)] border border-[var(--lh-line)] shadow-xs">
+              {isCompleted ? "완료됨" : "학습 중"}
             </span>
           </div>
         </div>
       </div>
 
-      {/* 2. Learning contract: a small, observable target without extra setup */}
+      {/* 2. Learning contract: M3 Target Card */}
       <div className="mt-8 space-y-8 leading-relaxed">
-        <div className="group relative flex items-start gap-3 rounded-md border border-[#E9E9E7] bg-[#F7F6F3] p-4 text-xs text-[#2F3437]">
-          <span className="text-base shrink-0">💡</span>
-          <div className="space-y-1">
-            <span className="font-bold text-[#191919]">{lessonSupport.label} · 이번 레슨의 목표</span>
-            <p className="mt-1 text-[#2F3437]">{lessonSupport.successCriteria[0]}</p>
-            <p className="text-[11px] text-[#787774]">가능 범위: {primaryLimitation}</p>
+        <div className="group relative flex items-start gap-4 rounded-3xl border border-[var(--lh-line)] bg-[var(--lh-surface)] p-6 shadow-xs text-sm text-[var(--lh-ink)]">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--lh-surface-subtle)] text-[var(--lh-ink)]">
+            <Target className="h-5 w-5" />
+          </span>
+          <div className="space-y-1.5 flex-1">
+            <span className="text-xs font-medium uppercase tracking-wider text-[var(--lh-ink-tertiary)]">
+              {lessonSupport.label} · 이번 레슨의 목표
+            </span>
+            <p className="text-base font-medium text-[var(--lh-ink)]">{lessonSupport.successCriteria[0]}</p>
+            <p className="text-xs text-[var(--lh-ink-secondary)]">가능 범위: {primaryLimitation}</p>
             <button
               type="button"
               onClick={() => setShowSupportDetails((open) => !open)}
-              className="pt-1 text-[11px] font-medium text-[#787774] underline hover:text-[#191919]"
+              className="pt-1 text-xs font-medium text-[var(--lh-ink-secondary)] underline hover:text-[var(--lh-ink)] cursor-pointer"
             >
               {showSupportDetails ? "상세 기준 접기" : "학습 방식 상세 보기"}
             </button>
             {showSupportDetails && (
-              <div className="space-y-2 border-t border-[#E9E9E7] pt-2 text-[11px] text-[#787774]">
+              <div className="space-y-2 border-t border-[var(--lh-line)] pt-3 text-xs text-[var(--lh-ink-secondary)]">
                 <p>바로 해볼 일: {lessonSupport.adultTaskSuggestions[0]}</p>
                 <p>추가 성공 기준: {lessonSupport.successCriteria[1]}</p>
                 <p>지원하는 방식: {lessonSupport.supported[0]}</p>
@@ -475,25 +501,25 @@ export const NotionLessonCanvas: React.FC<NotionLessonCanvasProps> = ({
         </div>
 
         {/* Steps Blocks */}
-        {content?.steps.map((step) => (
-          <div key={step.id} className="group relative space-y-3">
-            <h2 className="text-xl font-bold tracking-tight text-[#191919]">
+        {content?.steps.map((step, stepIndex) => (
+          <div key={`${step.id}-${stepIndex}`} className="group relative space-y-4">
+            <h2 className="text-xl font-medium tracking-tight text-[var(--lh-ink)] sm:text-2xl">
               {step.title}
             </h2>
 
             <RichLessonRenderer content={step.content} />
 
             {step.codeSnippet && (
-              <div className="rounded-md border border-[#E9E9E7] bg-[#FBFBFA] p-3 space-y-1">
-                <div className="text-[11px] font-semibold text-[#787774]">코드 예시 · 실행하지 않는 참고용 텍스트</div>
-                <pre className="overflow-x-auto whitespace-pre-wrap rounded bg-white p-2 font-mono text-xs leading-relaxed text-[#2F3437]"><code>{step.codeSnippet}</code></pre>
+              <div className="rounded-2xl border border-[var(--lh-line)] bg-[var(--lh-surface-subtle)] p-4 space-y-2 shadow-xs">
+                <div className="text-xs font-medium text-[var(--lh-ink-secondary)]">코드 예시 · 실행하지 않는 참고용 텍스트</div>
+                <pre className="overflow-x-auto whitespace-pre-wrap rounded-xl bg-[var(--lh-surface)] p-3 font-mono text-xs leading-relaxed text-[var(--lh-ink)] border border-[var(--lh-line)]"><code>{step.codeSnippet}</code></pre>
               </div>
             )}
 
             {step.audioScript && (
-              <div className="rounded-md border border-[#E9E9E7] bg-[#FBFBFA] p-3 space-y-1 text-xs">
-                <div className="text-[11px] font-semibold text-[#787774]">발음·대화 예시 · 텍스트 읽기</div>
-                <p className="whitespace-pre-wrap leading-relaxed text-[#2F3437]">{step.audioScript}</p>
+              <div className="rounded-2xl border border-[var(--lh-line)] bg-[var(--lh-surface-subtle)] p-4 space-y-2 text-xs shadow-xs">
+                <div className="text-xs font-medium text-[var(--lh-ink-secondary)]">발음·대화 예시 · 텍스트 읽기</div>
+                <p className="whitespace-pre-wrap leading-relaxed text-[var(--lh-ink)] font-medium">{step.audioScript}</p>
               </div>
             )}
 
@@ -505,43 +531,43 @@ export const NotionLessonCanvas: React.FC<NotionLessonCanvasProps> = ({
                     `"${step.title}" 내용이 조금 어려워요. 초등학생이나 비전공자도 단번에 이해할 수 있게 쉬운 비유와 일상 예시로 친절하게 설명해 주세요.`
                   )
                 }
-                className="inline-flex items-center gap-1.5 rounded-full border border-[#E9E9E7] bg-[#FBFBFA] px-3.5 py-1 text-xs text-[#787774] hover:bg-white hover:text-[#191919] hover:border-[#D3D3D0] transition cursor-pointer"
+                className="inline-flex items-center gap-2 rounded-full border border-[var(--lh-primary-border)] bg-[var(--lh-primary-subtle)] px-4 py-2 text-xs font-medium text-[var(--lh-primary-text)] shadow-xs hover:bg-[var(--lh-primary)] hover:text-white transition cursor-pointer group"
               >
-                <span className="text-[#191919] font-bold">✦</span>
+                <Sparkles className="h-4 w-4 text-[var(--lh-primary)] group-hover:text-white transition" />
                 <span>이 부분 쉬운 예시로 설명해줘</span>
               </button>
               <button
                 type="button"
                 onClick={() => setReportStepId(step.id)}
-                className="text-[11px] text-[#9B9A97] underline hover:text-[#191919]"
+                className="text-xs text-[var(--lh-ink-tertiary)] underline hover:text-[var(--lh-ink)] cursor-pointer"
               >
                 내용 오류 신고
               </button>
             </div>
 
-            {/* Quiz Checkpoint Block */}
+            {/* Quiz Checkpoint Block: Chunky M3 Card */}
             {step.quiz && (
-              <div className="mt-6 rounded-md border border-[#E9E9E7] bg-white p-5 space-y-4 shadow-xs">
-                <div className="flex items-center justify-between border-b border-[#E9E9E7] pb-2 text-xs">
-                  <span className="font-bold text-[#191919] flex items-center gap-1.5">
-                    <HelpCircle className="h-3.5 w-3.5" />
+              <div className="mt-6 rounded-3xl border border-[var(--lh-line)] bg-[var(--lh-surface)] p-6 sm:p-7 space-y-5 shadow-xs">
+                <div className="flex items-center justify-between border-b border-[var(--lh-line)] pb-3 text-xs">
+                  <span className="font-medium text-[var(--lh-ink)] flex items-center gap-2 text-sm">
+                    <HelpCircle className="h-4 w-4 text-[var(--lh-primary)]" />
                     <span>확인 퀴즈 (스스로 점검)</span>
                   </span>
-                  <span className="text-[11px] text-[#787774]">틀려도 괜찮아요</span>
+                  <span className="text-xs text-[var(--lh-ink-secondary)]">정답과 해설을 확인할 수 있습니다.</span>
                 </div>
 
-                <p className="text-sm font-semibold text-[#191919]">{step.quiz.question}</p>
+                <p className="text-base font-medium text-[var(--lh-ink)] leading-relaxed">{step.quiz.question}</p>
 
                 {step.quiz.quizType === "multiple_choice" && step.quiz.options ? (
-                  <div className="space-y-1.5">
+                  <div className="space-y-2">
                     {step.quiz.options.map((opt, oIdx) => (
                       <button
                         key={oIdx}
                         onClick={() => setUserAnswers((prev) => ({ ...prev, [step.id]: opt }))}
-                        className={`w-full rounded-md p-2.5 text-xs text-left border transition cursor-pointer ${
+                        className={`min-h-12 w-full rounded-2xl p-3.5 text-sm text-left border transition cursor-pointer ${
                           userAnswers[step.id] === opt
-                            ? "bg-[#191919] text-white border-[#191919] font-medium"
-                            : "bg-white border-[#E9E9E7] text-[#2F3437] hover:bg-[#F7F6F3]"
+                            ? "bg-[var(--lh-primary)] text-white border-[var(--lh-primary)] font-medium shadow-xs"
+                            : "bg-[var(--lh-surface)] border-[var(--lh-line)] text-[var(--lh-ink)] hover:bg-[var(--lh-surface-subtle)] font-medium"
                         }`}
                       >
                         {oIdx + 1}. {opt}
@@ -551,9 +577,9 @@ export const NotionLessonCanvas: React.FC<NotionLessonCanvasProps> = ({
                       <button
                         onClick={() => handleEvaluateQuiz(step.id, step.quiz!)}
                         disabled={isEvaluating}
-                        className="mt-2 rounded-md bg-[#191919] px-4 py-2 text-xs font-medium text-white hover:bg-[#37352F] disabled:opacity-30 cursor-pointer"
+                        className="mt-2 min-h-11 rounded-full bg-[var(--lh-primary)] hover:bg-[var(--lh-primary-hover)] px-6 text-sm font-medium text-white shadow-xs disabled:opacity-30 cursor-pointer transition"
                       >
-                        {isEvaluating ? "채점 중..." : "답안 제출 ⏎"}
+                        {isEvaluating ? "채점 중..." : "답안 확인하기"}
                       </button>
                     )}
                   </div>
@@ -566,15 +592,17 @@ export const NotionLessonCanvas: React.FC<NotionLessonCanvasProps> = ({
                         setUserAnswers((prev) => ({ ...prev, [step.id]: e.target.value }))
                       }
                       placeholder="정답 수치를 직접 입력하세요 (예: 8)..."
-                      className="flex-1 rounded-md border border-[#E9E9E7] px-3 py-2 text-xs focus:border-[#191919] focus:outline-none"
+                      className="min-h-12 flex-1 rounded-2xl border border-[var(--lh-line)] bg-[var(--lh-surface)] text-[var(--lh-ink)] px-4 py-3 text-sm focus:border-[var(--lh-primary)] focus:outline-none"
                     />
-                    {!quizResults[step.id] && <button
-                      onClick={() => handleEvaluateQuiz(step.id, step.quiz!)}
-                      disabled={!userAnswers[step.id] || isEvaluating}
-                      className="rounded-md bg-[#191919] px-4 py-2 text-xs font-medium text-white hover:bg-[#37352F] disabled:opacity-30 cursor-pointer"
-                    >
-                      {isEvaluating ? "채점 중..." : "제출 ⏎"}
-                    </button>}
+                    {!quizResults[step.id] && (
+                      <button
+                        onClick={() => handleEvaluateQuiz(step.id, step.quiz!)}
+                        disabled={!userAnswers[step.id] || isEvaluating}
+                        className="min-h-12 rounded-full bg-[var(--lh-primary)] hover:bg-[var(--lh-primary-hover)] px-6 text-sm font-medium text-white shadow-xs disabled:opacity-30 cursor-pointer transition"
+                      >
+                        {isEvaluating ? "채점 중..." : "답안 확인"}
+                      </button>
+                    )}
                   </div>
                 )}
 
@@ -588,58 +616,53 @@ export const NotionLessonCanvas: React.FC<NotionLessonCanvasProps> = ({
                           [step.id]: step.quiz?.hints?.[0] || "천천히 개념의 정의를 되짚어보세요.",
                         }));
                       }}
-                      className="text-xs text-[#9B9A97] hover:text-[#191919] underline cursor-pointer"
+                      className="inline-flex min-h-9 items-center rounded-full border border-[var(--lh-line)] bg-[var(--lh-surface-subtle)] px-4 py-1.5 text-xs font-medium text-[var(--lh-ink-secondary)] hover:text-[var(--lh-primary)] hover:bg-[var(--lh-primary-subtle)] transition cursor-pointer"
                     >
                       아직 헷갈려요 (힌트 보기)
                     </button>
                   </div>
                 )}
 
-                {/* Quiz Result */}
+                {/* Quiz Hint Box */}
                 {quizHints[step.id] && !quizResults[step.id] && (
-                  <div className="rounded-sm border border-[#E9E9E7] bg-white p-2.5 text-[11px] text-[#2F3437] leading-relaxed">
-                    <span className="font-bold mr-1 text-[#191919]">✦ 힌트:</span>
+                  <div className="rounded-2xl border border-[var(--lh-primary-border)] bg-[var(--lh-primary-subtle)] p-4 text-xs text-[var(--lh-primary-text)] leading-relaxed">
+                    <span className="font-medium mr-1 text-[var(--lh-primary-text)]">힌트:</span>
                     <span>{quizHints[step.id]}</span>
                   </div>
                 )}
 
+                {/* Quiz Result Box */}
                 {quizResults[step.id] && (
-                  <div
-                    className={`rounded-md p-3 text-xs space-y-2 border ${
-                      quizResults[step.id].status === "correct"
-                        ? "bg-[#F7F6F3] border-[#E9E9E7] text-[#191919]"
-                        : "bg-[#FBFBFA] border-[#D3D3D0] text-[#191919]"
-                    }`}
-                  >
+                  <div className="rounded-2xl p-5 text-xs space-y-3 border border-[var(--lh-line)] bg-[var(--lh-surface-subtle)]">
                     <div className="flex items-center justify-between">
-                      <div className="font-bold flex items-center gap-1.5">
+                      <div className="font-medium flex items-center gap-2 text-sm">
                         {quizResults[step.id].status === "correct" ? (
                           <>
-                            <CheckCircle2 className="h-3.5 w-3.5 text-[#191919]" />
-                            <span>정답입니다.</span>
+                            <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                            <span className="text-emerald-700">정답입니다.</span>
                           </>
                         ) : quizResults[step.id].status === "incorrect" ? (
                           <>
-                            <XCircle className="h-3.5 w-3.5 text-[#787774]" />
-                            <span>오답입니다. (오답 아카이브 자동 보관)</span>
+                            <XCircle className="h-4 w-4 text-[var(--lh-secondary)]" />
+                            <span className="text-[var(--lh-secondary-text)]">오답입니다. (오답 노트에 자동 보관되었습니다)</span>
                           </>
                         ) : (
                           <>
-                            <Lightbulb className="h-3.5 w-3.5 text-[#787774]" />
+                            <Lightbulb className="h-4 w-4 text-[var(--lh-ink-secondary)]" />
                             <span>아직 채점하지 않았어요.</span>
                           </>
                         )}
                       </div>
                       {quizResults[step.id].misconceptionTag && (
-                        <span className="rounded-sm bg-white border border-[#E9E9E7] px-1.5 py-0.5 text-[10px] font-semibold text-[#787774]">
+                        <span className="rounded-full bg-[var(--lh-secondary-subtle)] border border-[var(--lh-secondary-border)] px-3 py-1 text-[11px] font-medium text-[var(--lh-secondary-text)]">
                           {quizResults[step.id].misconceptionTag}
                         </span>
                       )}
                     </div>
-                    <p className="text-[#787774] leading-relaxed">{quizResults[step.id].feedback}</p>
+                    <p className="text-xs text-[var(--lh-ink-secondary)] leading-relaxed font-medium">{quizResults[step.id].feedback}</p>
                     {quizResults[step.id].hint && quizResults[step.id].status !== "correct" && (
-                      <div className="rounded-sm border border-[#E9E9E7] bg-white p-2.5 text-[11px] text-[#2F3437] leading-relaxed">
-                        <span className="font-bold mr-1 text-[#191919]">✦ AI 소크라틱 힌트:</span>
+                      <div className="rounded-xl border border-[var(--lh-line)] bg-[var(--lh-surface)] p-3 text-xs text-[var(--lh-ink)] leading-relaxed">
+                        <span className="font-medium mr-1 text-[var(--lh-ink)]">AI 튜터 힌트:</span>
                         <span>{quizResults[step.id].hint}</span>
                       </div>
                     )}
@@ -651,7 +674,7 @@ export const NotionLessonCanvas: React.FC<NotionLessonCanvasProps> = ({
                           delete next[step.id];
                           return next;
                         })}
-                        className="rounded-md border border-[#E9E9E7] bg-white px-3 py-1.5 text-[11px] font-semibold text-[#787774] hover:bg-[#F7F6F3] cursor-pointer"
+                        className="rounded-full border border-[var(--lh-line)] bg-[var(--lh-surface)] px-4 py-2 text-xs font-medium text-[var(--lh-ink)] hover:bg-[var(--lh-surface-subtle)] shadow-xs cursor-pointer transition"
                       >
                         다시 풀기 / 다시 채점
                       </button>
@@ -663,14 +686,14 @@ export const NotionLessonCanvas: React.FC<NotionLessonCanvasProps> = ({
           </div>
         ))}
 
-        {/* Personal Study Notes */}
-        <div className="rounded-md border border-[#E9E9E7] bg-white p-4 space-y-2">
+        {/* Personal Study Notes: Chunky M3 Card */}
+        <div className="rounded-3xl border border-[var(--lh-line)] bg-[var(--lh-surface)] p-6 space-y-3 shadow-xs">
           <div className="flex items-center justify-between text-xs">
-            <span className="font-bold text-[#191919] flex items-center gap-1.5">
-              <span>📝</span>
-              <span>나만의 한 줄 정리 (자동 저장)</span>
+            <span className="font-medium text-[var(--lh-ink)] flex items-center gap-2 text-sm">
+              <MessageSquare className="h-4 w-4" />
+              <span>한 줄 정리</span>
             </span>
-            <span className="text-[10px] text-[#9B9A97]">
+            <span className="rounded-full bg-[var(--lh-surface-subtle)] px-2.5 py-1 text-[10px] font-medium text-[var(--lh-ink-tertiary)]">
               {noteSaveStatus === "saved" ? "이 기기에 저장됨" : noteSaveStatus === "error" ? "저장 실패" : "입력하면 이 기기에 저장돼요"}
             </span>
           </div>
@@ -688,38 +711,41 @@ export const NotionLessonCanvas: React.FC<NotionLessonCanvasProps> = ({
               }
             }}
             placeholder="이 개념을 공부하며 알게 된 핵심이나 기억하고 싶은 점을 편하게 적어두세요..."
-            className="w-full rounded-md border border-[#E9E9E7] bg-[#FBFBFA] p-3 text-xs leading-relaxed text-[#191919] placeholder-[#9B9A97] focus:border-[#191919] focus:outline-none"
+            aria-label="나만의 학습 메모"
+            className="min-h-24 w-full rounded-2xl border border-[var(--lh-line)] bg-[var(--lh-surface-subtle)] p-4 text-sm leading-relaxed text-[var(--lh-ink)] placeholder-[var(--lh-ink-tertiary)] focus:border-[var(--lh-primary)] focus:bg-[var(--lh-surface)] focus:outline-none transition"
           />
         </div>
 
         {/* 3. Page Footer Action */}
-        <div className="mt-12 flex items-center justify-between border-t border-[#E9E9E7] pt-6">
-          <div className="text-xs text-[#787774]">
+        <div className="mt-12 flex flex-col items-stretch gap-4 border-t border-[var(--lh-line)] pt-8 sm:flex-row sm:items-center sm:justify-between">
+          <div className="text-sm font-medium text-[var(--lh-ink-secondary)]">
             공부를 마치셨다면 완료를 눌러 내 실력 그래프에 기록하세요.
           </div>
 
           <button
             onClick={handleCompleteLesson}
-            className="flex items-center gap-1.5 rounded-md bg-[#191919] px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-[#37352F] cursor-pointer"
+            className="flex min-h-12 items-center justify-center gap-2 rounded-full bg-[var(--lh-primary)] hover:bg-[var(--lh-primary-hover)] px-7 text-sm font-medium text-white shadow-xs transition cursor-pointer"
           >
-            <CheckCircle2 className="h-3.5 w-3.5" />
-            <span>{isCompleted ? "학습 완료됨 (다시 기록)" : "오늘 공부 완료! ⏎"}</span>
+            <CheckCircle2 className="h-4 w-4" />
+            <span>{isCompleted ? "완료 기록 업데이트" : "레슨 완료하기"}</span>
           </button>
         </div>
         {completionSaveStatus === "error" && (
-          <p className="mt-2 text-right text-xs text-[#B42318]">
+          <p className="mt-2 text-right text-xs text-[var(--lh-danger)]">
             레슨 완료 기록을 저장하지 못했습니다. 저장 공간을 확인한 뒤 다시 시도해 주세요.
           </p>
         )}
 
-        {/* Dignified Completion Celebration Card */}
+        {/* Dignified Completion Celebration Card: Chunky M3 Card */}
         {isCompleted && (
-          <div className="mt-6 rounded-lg border border-[#E9E9E7] bg-[#FBFBFA] p-6 text-center space-y-2">
-            <div className="text-3xl">👏</div>
-            <div className="text-base font-bold text-[#191919]">
-              수고하셨습니다! [{lessonMeta.title}] 학습을 기록했습니다.
+          <div className="mt-8 rounded-3xl border border-[var(--lh-primary-border)] bg-[var(--lh-primary-subtle)] p-8 text-center space-y-3 shadow-xs">
+            <span className="flex h-12 w-12 items-center justify-center rounded-full bg-[var(--lh-primary)] text-white mx-auto shadow-xs">
+              <CheckCircle2 className="h-6 w-6" />
+            </span>
+            <div className="text-lg font-medium text-[var(--lh-ink)]">
+              {lessonMeta.title} 학습을 기록했습니다.
             </div>
-            <p className="text-xs text-[#787774]">
+            <p className="text-xs text-[var(--lh-ink-secondary)] max-w-md mx-auto leading-relaxed">
               {completionKind === "quiz_checked" ? "확인 문제 결과를 반영했습니다. 다음 개념으로 전진해 보세요." : "읽기 완료를 기록했습니다. 숙련도는 확인 문제를 푼 뒤 측정됩니다."}
             </p>
           </div>
@@ -728,29 +754,29 @@ export const NotionLessonCanvas: React.FC<NotionLessonCanvasProps> = ({
 
       {/* Quiz Warning Modal if completed without quiz */}
       {showQuizWarningModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-xs">
-          <div className="w-full max-w-sm rounded-xl border border-[#E9E9E7] bg-white p-5 shadow-2xl text-[#2F3437] animate-fade-in space-y-4">
-            <div className="flex items-center gap-2 font-bold text-sm text-[#191919]">
-              <span className="text-lg">💡</span>
-              <span>아직 확인 퀴즈를 풀지 않았어요</span>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--lh-ink)]/45 p-4 backdrop-blur-xs" role="presentation">
+          <div role="dialog" aria-modal="true" aria-labelledby="quiz-warning-title" className="w-full max-w-sm rounded-3xl border border-[var(--lh-line)] bg-[var(--lh-surface)] p-6 text-[var(--lh-ink)] shadow-2xl animate-fade-in space-y-4">
+            <div className="flex items-center gap-2 font-medium text-base text-[var(--lh-ink)]">
+              <HelpCircle className="h-5 w-5" />
+              <span id="quiz-warning-title">아직 확인 퀴즈를 풀지 않았어요</span>
             </div>
-            <p className="text-xs text-[#787774] leading-relaxed">
+            <p className="text-xs text-[var(--lh-ink-secondary)] leading-relaxed font-medium">
               퀴즈를 풀고 스스로 점검하면 학습 기록 참고 지표에 결과가 반영됩니다. 지금 풀어볼까요?
             </p>
-            <div className="flex items-center gap-2 pt-1">
+            <div className="flex items-center gap-2 pt-2">
               <button
                 type="button"
                 onClick={() => executeCompletion("read_only")}
-                className="flex-1 rounded-md border border-[#E9E9E7] bg-white py-2 text-xs font-semibold text-[#787774] hover:bg-[#F7F6F3] cursor-pointer"
+                className="flex min-h-11 flex-1 items-center justify-center rounded-full border border-[var(--lh-line)] bg-[var(--lh-surface)] px-4 text-xs font-medium text-[var(--lh-ink-secondary)] hover:bg-[var(--lh-surface-subtle)] cursor-pointer transition shadow-xs"
               >
                 다음에 풀기
               </button>
               <button
                 type="button"
                 onClick={() => setShowQuizWarningModal(false)}
-                className="flex-1 rounded-md bg-[#191919] py-2 text-xs font-semibold text-white hover:bg-[#37352F] cursor-pointer"
+                className="flex min-h-11 flex-1 items-center justify-center rounded-full bg-[var(--lh-ink)] px-4 text-xs font-medium text-white hover:bg-[#343431] cursor-pointer transition shadow-xs"
               >
-                퀴즈 풀러 가기 ⏎
+                퀴즈 풀기
               </button>
             </div>
           </div>
