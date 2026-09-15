@@ -1,7 +1,6 @@
 import React, { useState } from "react";
 import { BarChart3, FileWarning, History, LineChart } from "lucide-react";
 import { Course, ReviewQuestion, UserProgress, UserSkill } from "../types/learning";
-import { INITIAL_COURSES } from "../data/initialData";
 import { SkillMatrixView } from "./SkillMatrixView";
 import { MistakeArchiveView } from "./notion/MistakeArchiveView";
 import { NotionPageView } from "./notion/Sidebar";
@@ -24,10 +23,9 @@ export const LearningRecordsView: React.FC<LearningRecordsViewProps> = ({
   onSelectView,
 }) => {
   const [activeTab, setActiveTab] = useState<RecordsTab>("summary");
-  const sampleCourseIds = new Set(INITIAL_COURSES.map((course) => course.id));
-  const learnerCourses = courses.filter((course) => !sampleCourseIds.has(course.id));
-  const learnerSkills = skills.filter((skill) => !sampleCourseIds.has(skill.courseId));
-  const learnerReviews = reviews.filter((review) => !review.courseId || !sampleCourseIds.has(review.courseId));
+  const learnerCourses = courses;
+  const learnerSkills = skills;
+  const learnerReviews = reviews;
   const completedLessons = learnerCourses.reduce(
     (count, course) => count + course.chapters.flatMap((chapter) => chapter.lessons).filter((lesson) => lesson.isCompleted).length,
     0,

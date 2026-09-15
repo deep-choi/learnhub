@@ -46,17 +46,24 @@ export function validateCurriculumPayload(payload: unknown): string[] {
   return errors;
 }
 
-export function validateLessonPayload(payload: unknown, learningType?: string): string[] {
+export interface LessonValidationOptions {
+  /** Apply the learner-facing lesson arc required by the generated lesson endpoint. */
+  requireLearningArc?: boolean;
+}
+
+export function validateLessonPayload(payload: unknown, learningType?: string, options: LessonValidationOptions = {}): string[] {
   const errors: string[] = [];
   if (!isRecord(payload)) return ["레슨 응답이 객체가 아닙니다."];
   if (!nonEmpty(payload.title)) errors.push("레슨 제목이 없습니다.");
   if (!Array.isArray(payload.steps) || payload.steps.length === 0) return [...errors, "레슨 단계가 하나 이상 필요합니다."];
   if (learningType !== undefined && !LEARNING_TYPES.includes(learningType as LearningType)) errors.push("지원하지 않는 학습 유형입니다.");
+  const stepTypes = new Set<string>();
   payload.steps.forEach((step, index) => {
     if (!isRecord(step)) {
       errors.push(`단계 ${index + 1} 형식이 올바르지 않습니다.`);
       return;
     }
+    if (typeof step.type === "string") stepTypes.add(step.type);
     if (!nonEmpty(step.title) || !nonEmpty(step.content)) errors.push(`단계 ${index + 1} 제목과 내용이 필요합니다.`);
     if (step.type !== undefined && !STEP_TYPES.includes(String(step.type))) errors.push(`단계 ${index + 1} 유형이 올바르지 않습니다.`);
     if (step.codeSnippet !== undefined && typeof step.codeSnippet !== "string") errors.push(`단계 ${index + 1} 코드 예시 형식이 올바르지 않습니다.`);
@@ -87,5 +94,16 @@ export function validateLessonPayload(payload: unknown, learningType?: string): 
       }
     }
   });
+  if (options.requireLearningArc) {
+    if (payload.steps.length < 3 || payload.steps.length > 5) errors.push("레슨은 3~5개 단계로 구성되어야 합니다.");
+    for (const requiredType of ["concept", "example", "practice"]) {
+      if (!stepTypes.has(requiredType)) errors.push(`${requiredType} 단계가 필요합니다.`);
+    }
+    payload.steps.forEach((step, index) => {
+      if (isRecord(step) && typeof step.content === "string" && step.content.trim().length < 50) {
+        errors.push(`단계 ${index + 1} 설명이 너무 짧습니다.`);
+      }
+    });
+  }
   return errors;
 }

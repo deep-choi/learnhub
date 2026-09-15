@@ -6,13 +6,19 @@ import {
 } from "../src/services/authClient";
 import {
   LEARNHUB_CLOUD_DATA_OWNER_KEY,
+  LEARNHUB_PENDING_SYNC_OWNER_KEY,
   SnapshotConflictError,
   assertLearningSnapshotUploadOwner,
+  clearPendingSync,
+  getPendingSyncOwnerId,
   getLearningSnapshot,
+  markPendingSync,
   restoreLearningSnapshot,
   saveCurrentLearningSnapshot,
+  syncCurrentLearningSnapshot,
 } from "../src/services/cloudSync";
 import { createLearningBackup } from "../src/services/learningBackup";
+import { StorageService } from "../src/services/storage";
 
 class MemoryStorage {
   private values = new Map<string, string>();
@@ -114,6 +120,31 @@ test("owner marker binds before upload and blocks another account", async () => 
     /다른 계정에 연결/,
   );
   assert.equal(writes, 1);
+});
+
+test("automatic sync writes the authenticated account snapshot with its revision", async () => {
+  setAuthUser("user-1");
+  StorageService.setUser({ id: "user-1", name: "학습자", isGuest: false, createdAt: new Date().toISOString() });
+  StorageService.saveCourses([]);
+  globalThis.fetch = (async (_input, init) => {
+    const body = JSON.parse(String(init?.body));
+    assert.equal(body.expectedRevision, 3);
+    assert.deepEqual(body.snapshot.data.courses, []);
+    return new Response(JSON.stringify({ snapshot: body.snapshot, revision: 4, updatedAt: "2026-09-15T00:00:00.000Z" }), { status: 200 });
+  }) as typeof fetch;
+
+  const saved = await syncCurrentLearningSnapshot("user-1", 3);
+  assert.equal(saved.revision, 4);
+  assert.equal(localStorage.getItem(LEARNHUB_CLOUD_DATA_OWNER_KEY), "user-1");
+});
+
+test("pending sync marker is scoped to one account and ignores another account", () => {
+  markPendingSync("user-1");
+  assert.equal(getPendingSyncOwnerId(), "user-1");
+  clearPendingSync("user-2");
+  assert.equal(localStorage.getItem(LEARNHUB_PENDING_SYNC_OWNER_KEY), "user-1");
+  clearPendingSync("user-1");
+  assert.equal(getPendingSyncOwnerId(), null);
 });
 
 test("owner marker persistence failure fails closed before any upload request", async () => {

@@ -11,6 +11,21 @@ export interface SupabaseSnapshotRecord {
   updatedAt: string;
 }
 
+export interface SupabaseAiUsageRecord {
+  requests: number;
+  reservedOutputTokens: number;
+  requestLimit: number;
+  outputTokenLimit: number;
+  usageDay: string;
+}
+
+export class SupabaseAiQuotaExceededError extends Error {
+  constructor() {
+    super("AI daily quota exceeded");
+    this.name = "SupabaseAiQuotaExceededError";
+  }
+}
+
 const validUrl = (value: string | undefined): value is string => {
   if (!value) return false;
   try {
@@ -96,4 +111,45 @@ export const putSupabaseLearningSnapshot = async (
   const row = Array.isArray(data) ? data[0] : data;
   if (!row || typeof row.revision !== "number" || typeof row.updated_at !== "string") throw new Error("Learning snapshot conflict");
   return { snapshot, revision: row.revision, updatedAt: row.updated_at };
+};
+
+const aiUsageRecord = (value: unknown): SupabaseAiUsageRecord | null => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const row = value as Record<string, unknown>;
+  if (
+    !Number.isInteger(row.requests) || (row.requests as number) < 0 ||
+    !Number.isInteger(row.reserved_output_tokens) || (row.reserved_output_tokens as number) < 0 ||
+    !Number.isInteger(row.request_limit) || (row.request_limit as number) <= 0 ||
+    !Number.isInteger(row.output_token_limit) || (row.output_token_limit as number) <= 0 ||
+    typeof row.usage_day !== "string" || !/^\d{4}-\d{2}-\d{2}$/u.test(row.usage_day)
+  ) return null;
+  return {
+    requests: row.requests as number,
+    reservedOutputTokens: row.reserved_output_tokens as number,
+    requestLimit: row.request_limit as number,
+    outputTokenLimit: row.output_token_limit as number,
+    usageDay: row.usage_day,
+  };
+};
+
+const firstRow = (data: unknown): unknown => Array.isArray(data) ? data[0] : data;
+
+/** Atomically reserves one authenticated learner's daily AI allowance in Supabase. */
+export const reserveSupabaseAiUsage = async (accessToken: string, requestedTokens: number): Promise<SupabaseAiUsageRecord> => {
+  if (!Number.isInteger(requestedTokens) || requestedTokens <= 0) throw new Error("Requested AI tokens must be a positive integer");
+  const client = createRequestClient(accessToken);
+  const { data, error } = await client.rpc("reserve_ai_daily_usage", { p_requested_tokens: requestedTokens });
+  if (error) throw new Error("AI usage reservation failed");
+  const usage = aiUsageRecord(firstRow(data));
+  if (!usage) throw new SupabaseAiQuotaExceededError();
+  return usage;
+};
+
+export const getSupabaseAiUsage = async (accessToken: string): Promise<SupabaseAiUsageRecord> => {
+  const client = createRequestClient(accessToken);
+  const { data, error } = await client.rpc("get_ai_daily_usage");
+  if (error) throw new Error("AI usage read failed");
+  const usage = aiUsageRecord(firstRow(data));
+  if (!usage) throw new Error("AI usage response was invalid");
+  return usage;
 };

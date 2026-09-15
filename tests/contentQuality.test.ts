@@ -34,3 +34,11 @@ test("an explicit quiz step requires quiz data, while read-only steps remain val
   assert.ok(validateLessonPayload(malformedQuizStep).some((error) => error.includes("퀴즈 내용")));
   assert.deepEqual(validateLessonPayload(readOnlyLesson), []);
 });
+
+test("generated lessons require a complete concept-example-practice arc", () => {
+  const shallowLesson = {
+    title: "얕은 레슨",
+    steps: [{ type: "concept", title: "설명", content: "짧은 내용" }],
+  };
+  assert.ok(validateLessonPayload(shallowLesson, "concept", { requireLearningArc: true }).length > 0);
+});

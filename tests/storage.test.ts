@@ -117,24 +117,26 @@ const content: LessonContent = {
 
 beforeEach(() => {
   installStorage();
+  StorageService.logout();
 });
 
-test("resetData only resets LearnHub study keys", () => {
+test("resetData clears every LearnHub account cache and preserves unrelated apps", () => {
   const storage = installStorage();
   storage.setItem("ai_learnhub_user_v2", JSON.stringify({ id: "local", name: "학습자" }));
-  storage.setItem("learnhub_note_lesson-test", "보존할 메모");
+  storage.setItem("learnhub_note_lesson-test", "계정 메모");
   storage.setItem("other_app_key", "보존할 값");
   storage.setItem("ai_learnhub_lessons_cache_v2_lesson-test", "캐시");
   storage.setItem("ai_learnhub_quiz_attempts_v2", JSON.stringify(["attempt-1"]));
 
   StorageService.resetData();
 
-  assert.equal(storage.getItem("ai_learnhub_user_v2"), JSON.stringify({ id: "local", name: "학습자" }));
-  assert.equal(storage.getItem("learnhub_note_lesson-test"), "보존할 메모");
+  assert.equal(storage.getItem("ai_learnhub_user_v2"), null);
+  assert.equal(storage.getItem("learnhub_note_lesson-test"), null);
   assert.equal(storage.getItem("other_app_key"), "보존할 값");
   assert.equal(storage.getItem("ai_learnhub_lessons_cache_v2_lesson-test"), null);
   assert.equal(storage.getItem("ai_learnhub_quiz_attempts_v2"), null);
-  assert.ok(StorageService.getCourses().length > 0);
+  assert.deepEqual(StorageService.getCourses(), []);
+  assert.deepEqual(StorageService.getProgress(), { streakDays: 0, totalMinutesLearned: 0, completedLessonsCount: 0, lastActiveDate: "" });
 });
 
 test("getReviews returns all records and getDueReviews uses now-or-earlier", () => {
@@ -197,9 +199,15 @@ test("failed skill persistence leaves no attempt marker and allows retry", () =>
   assert.equal(storage.getItem("ai_learnhub_quiz_attempts_v2"), null);
 });
 
-test("local profile creation fails when the profile cannot be persisted", () => {
-  installStorage(new FailingStorage());
-  assert.throws(() => StorageService.createLocalProfile("학습자"), /로컬 프로필을 저장하지 못했습니다/);
+test("authenticated profile stays in memory and logout clears account caches", () => {
+  const storage = installStorage();
+  StorageService.setUser({ id: "user-1", name: "학습자", isGuest: false, createdAt: new Date().toISOString() });
+  storage.setItem("ai_learnhub_courses_v2", JSON.stringify([course]));
+  assert.equal(StorageService.getUser().id, "user-1");
+  assert.equal(storage.getItem("ai_learnhub_user_v2"), null);
+  StorageService.logout();
+  assert.equal(StorageService.getUser().isGuest, true);
+  assert.equal(storage.getItem("ai_learnhub_courses_v2"), null);
 });
 
 test("reading completion records estimated time once without changing skill correctness", () => {
@@ -239,4 +247,17 @@ test("lesson completion reports course persistence failure without incrementing 
   storage.failCourses = false;
   assert.equal(StorageService.getCourses()[0].chapters[0].lessons[0].isCompleted, false);
   assert.deepEqual(StorageService.getProgress(), originalProgress);
+});
+
+test("course status moves items out of the active list without deleting the course", () => {
+  installStorage();
+  StorageService.saveCourses([course]);
+
+  assert.equal(StorageService.updateCourseStatus(course.id, "completed"), true);
+  assert.equal(StorageService.getCourses()[0].status, "completed");
+  assert.equal(StorageService.getCourseById(course.id)?.title, course.title);
+
+  assert.equal(StorageService.updateCourseStatus(course.id, "active"), true);
+  assert.equal(StorageService.getCourses()[0].status, "active");
+  assert.equal(StorageService.updateCourseStatus("missing-course", "cancelled"), false);
 });

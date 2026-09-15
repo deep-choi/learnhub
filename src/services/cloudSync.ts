@@ -11,6 +11,35 @@ import {
 import { authorizedFetch, authorizedFetchForUser, getAuthStatus } from "./authClient";
 
 export const LEARNHUB_CLOUD_DATA_OWNER_KEY = "learnhub_cloud_data_owner_v1";
+export const LEARNHUB_PENDING_SYNC_OWNER_KEY = "learnhub_pending_sync_owner_v1";
+
+export const getPendingSyncOwnerId = (): string | null => {
+  try {
+    const ownerId = localStorage.getItem(LEARNHUB_PENDING_SYNC_OWNER_KEY);
+    return ownerId && ownerId.trim().length > 0 ? ownerId : null;
+  } catch {
+    return null;
+  }
+};
+
+export const markPendingSync = (authenticatedUserId: string): void => {
+  try {
+    localStorage.setItem(LEARNHUB_PENDING_SYNC_OWNER_KEY, authenticatedUserId);
+  } catch {
+    // The data write already reports its own storage failure. If this marker
+    // cannot be persisted, the current in-memory session still attempts sync.
+  }
+};
+
+export const clearPendingSync = (authenticatedUserId: string): void => {
+  try {
+    if (getPendingSyncOwnerId() === authenticatedUserId) {
+      localStorage.removeItem(LEARNHUB_PENDING_SYNC_OWNER_KEY);
+    }
+  } catch {
+    // A stale marker causes a conservative retry on the next same-user load.
+  }
+};
 
 export interface LearningSnapshotResponse {
   snapshot: LearningBackupDocument;
@@ -199,6 +228,30 @@ export const saveCurrentLearningSnapshot = async (
   const response = await putLearningSnapshot(createLearningBackup(), expectedRevision, authenticatedUserId);
   assertCurrentAuthUser(authenticatedUserId);
   return response;
+};
+
+/**
+ * Persist the authenticated account's current cache as the online snapshot.
+ * A single revision conflict is merged with the remote snapshot and retried so
+ * another device cannot be silently overwritten by a stale revision.
+ */
+export const syncCurrentLearningSnapshot = async (
+  authenticatedUserId: string,
+  expectedRevision: number | null,
+): Promise<LearningSnapshotResponse> => {
+  assertCurrentAuthUser(authenticatedUserId);
+  const localOwnerId = getKnownLocalOwnerId();
+  assertLearningSnapshotUploadOwner(authenticatedUserId, localOwnerId);
+  bindCloudDataOwner(authenticatedUserId, localOwnerId);
+  try {
+    return await putLearningSnapshot(createLearningBackup(), expectedRevision, authenticatedUserId);
+  } catch (error) {
+    if (!(error instanceof SnapshotConflictError) || !error.current) throw error;
+    assertCurrentAuthUser(authenticatedUserId);
+    const merged = importLearningBackup(error.current.snapshot, { strategy: "merge" });
+    if (!merged.ok) throw new Error(merged.error || "다른 기기의 학습 기록과 합치지 못했습니다.");
+    return putLearningSnapshot(createLearningBackup(), error.current.revision, authenticatedUserId);
+  }
 };
 
 export const restoreLearningSnapshot = (

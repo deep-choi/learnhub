@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { AiAdmissionController, isAllowedLoopbackRequest } from "../server/aiPolicy";
 import { AiGateway, AiGatewayError } from "../server/aiGateway";
+import type { AiRuntimeSelection } from "../src/domain/aiModels";
 
 test("admission caps concurrent work and releases exactly once", () => {
   const policy = new AiAdmissionController({ maxConcurrent: 1, dailyOutputTokenBudget: 100 });
@@ -46,6 +47,25 @@ test("invalid numeric limits and requests fail closed", () => {
   assert.equal(policy.tryAcquire("client-a", Number.POSITIVE_INFINITY).reason, "invalid_request");
   assert.equal(policy.tryAcquire("client-a", 1.5).reason, "invalid_request");
   assert.equal(policy.tryAcquire("client-a", 0).reason, "invalid_request");
+});
+
+test("per-client daily quotas do not let one learner consume another learner's allowance", () => {
+  const policy = new AiAdmissionController({
+    maxConcurrent: 4,
+    maxRequestsPerClientPerMinute: 10,
+    dailyRequestBudget: 10,
+    dailyOutputTokenBudget: 1_000,
+    perClientDailyRequestBudget: 1,
+    perClientDailyOutputTokenBudget: 100,
+  });
+  const first = policy.tryAcquire("user:a", 50);
+  assert.ok(first.lease);
+  first.lease.release();
+  assert.equal(policy.tryAcquire("user:a", 1).reason, "daily_request_budget");
+  assert.ok(policy.tryAcquire("user:b", 50).lease);
+  const quota = policy.getSnapshot("user:a");
+  assert.equal(quota.client.remainingRequestsToday, 0);
+  assert.equal(quota.client.remainingReservedOutputTokensToday, 50);
 });
 
 test("expired client windows are cleaned and gateway logs metadata only", async () => {
@@ -122,6 +142,31 @@ test("gateway hides provider failures and logs only safe aggregate metadata", as
     (error: unknown) => error instanceof AiGatewayError && error.code === "AI_UNAVAILABLE" && error.httpStatus === 503,
   );
   assert.doesNotMatch(JSON.stringify(events), /provider secret response|private prompt/);
+});
+
+test("OpenAI Responses requests keep keys server-side and apply model, reasoning, output cap, and no storage", async () => {
+  let captured: { url: string; authorization: string | null; body: Record<string, unknown> } | null = null;
+  const openAiFetch = (async (input, init) => {
+    captured = {
+      url: String(input),
+      authorization: new Headers(init?.headers).get("Authorization"),
+      body: JSON.parse(String(init?.body)),
+    };
+    return new Response(JSON.stringify({
+      output: [{ type: "message", content: [{ type: "output_text", text: '{"ok":true}' }] }],
+      usage: { input_tokens: 4, output_tokens: 5, total_tokens: 9 },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+  const gateway = new AiGateway({ client: null, openAiApiKey: "server-secret", openAiFetch, logger: () => {} });
+  const selection: AiRuntimeSelection = { provider: "openai", model: "gpt-5.6-terra", reasoningEffort: "high", maxOutputTokens: 4_096 };
+  const result = await gateway.generateJson({ endpoint: "openai-test", requestId: "req-openai", clientKey: "user:a", prompt: "prompt", config: {}, maxOutputTokens: 9_000, selection, validate: () => [] });
+  assert.deepEqual(result.payload, { ok: true });
+  assert.equal(captured?.url, "https://api.openai.com/v1/responses");
+  assert.equal(captured?.authorization, "Bearer server-secret");
+  assert.equal(captured?.body.model, "gpt-5.6-terra");
+  assert.deepEqual(captured?.body.reasoning, { effort: "high" });
+  assert.equal(captured?.body.max_output_tokens, 4_096);
+  assert.equal(captured?.body.store, false);
 });
 
 test("local development exception requires loopback socket, host, and same origin", () => {

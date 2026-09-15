@@ -12,8 +12,8 @@ import {
   ToggleRight,
 } from "lucide-react";
 import { Course, LessonMeta, ReviewQuestion, UserProgress } from "../types/learning";
-import { INITIAL_COURSES } from "../data/initialData";
 import { LearnHubLogo } from "./common/LearnHubLogo";
+import { courseIsComplete, nextUnfinishedLesson } from "../domain/assessment";
 
 interface HomeViewProps {
   courses: Course[];
@@ -23,6 +23,7 @@ interface HomeViewProps {
   onStartLesson: (course: Course, lesson: LessonMeta, chapterTitle: string) => void;
   onStartReview: () => void;
   onOpenCreateCourse: (subject?: string) => void;
+  onStartAssessment: (course: Course) => void;
 }
 
 const getCourseProgress = (course: Course) => {
@@ -32,12 +33,7 @@ const getCourseProgress = (course: Course) => {
 };
 
 const getResumeLesson = (course: Course) => {
-  for (const chapter of course.chapters) {
-    const lesson = chapter.lessons.find((item) => !item.isCompleted);
-    if (lesson) return { lesson, chapterTitle: chapter.title };
-  }
-  const firstLesson = course.chapters[0]?.lessons[0];
-  return firstLesson ? { lesson: firstLesson, chapterTitle: course.chapters[0].title } : null;
+  return nextUnfinishedLesson(course);
 };
 
 export const HomeView: React.FC<HomeViewProps> = ({
@@ -48,9 +44,10 @@ export const HomeView: React.FC<HomeViewProps> = ({
   onStartLesson,
   onStartReview,
   onOpenCreateCourse,
+  onStartAssessment,
 }) => {
-  const sampleCourseIds = new Set(INITIAL_COURSES.map((course) => course.id));
-  const userCourses = courses.filter((course) => !sampleCourseIds.has(course.id));
+  const activeCourses = courses.filter((course) => course.status !== "completed" && course.status !== "cancelled");
+  const userCourses = activeCourses;
   const hasUserCourses = userCourses.length > 0;
 
   let nextLessonToStudy: { course: Course; chapterTitle: string; lesson: LessonMeta } | null = null;
@@ -62,16 +59,12 @@ export const HomeView: React.FC<HomeViewProps> = ({
     }
   }
 
-  // Fallback for preview if no user course
-  const firstSampleCourse = courses.find((course) => sampleCourseIds.has(course.id)) || courses[0];
-  const firstSampleResume = firstSampleCourse ? getResumeLesson(firstSampleCourse) : null;
+  const targetCourse = nextLessonToStudy?.course;
+  const targetLesson = nextLessonToStudy?.lesson;
+  const targetChapter = nextLessonToStudy?.chapterTitle || "단원 1";
 
-  const targetCourse = nextLessonToStudy ? nextLessonToStudy.course : firstSampleCourse;
-  const targetLesson = nextLessonToStudy ? nextLessonToStudy.lesson : firstSampleResume?.lesson;
-  const targetChapter = nextLessonToStudy ? nextLessonToStudy.chapterTitle : firstSampleResume?.chapterTitle || "단원 1";
-
-  const sampleCourses = courses.filter((course) => sampleCourseIds.has(course.id)).slice(0, 2);
-  const displayedCourses = hasUserCourses ? userCourses : sampleCourses;
+  const displayedCourses = userCourses;
+  const completedCourse = !nextLessonToStudy ? userCourses.find(courseIsComplete) : null;
 
   return (
     <div className="w-full px-3 sm:px-5 lg:px-6 py-4 sm:py-6 space-y-12 sm:space-y-16 pb-36">
@@ -97,13 +90,17 @@ export const HomeView: React.FC<HomeViewProps> = ({
             </p>
 
             <div className="mt-10 flex flex-wrap items-center gap-4">
-              {targetCourse && targetLesson ? (
+              {completedCourse ? (
+                <button type="button" onClick={() => onStartAssessment(completedCourse)} className="inline-flex min-h-14 items-center gap-3 rounded-full bg-[var(--lh-primary)] px-7 text-base font-medium text-white hover:bg-[var(--lh-primary-hover)]">
+                  문제로 실력 확인하기 <ArrowRight className="h-4 w-4" />
+                </button>
+              ) : targetCourse && targetLesson ? (
                 <button
                   type="button"
                   onClick={() => onStartLesson(targetCourse, targetLesson, targetChapter)}
                   className="rounded-full bg-[var(--lh-primary)] hover:bg-[var(--lh-primary-hover)] px-9 py-4 text-base sm:text-lg font-medium text-white shadow-xs hover:shadow-md transition-all duration-200 inline-flex items-center gap-3 cursor-pointer"
                 >
-                  <span>{hasUserCourses && nextLessonToStudy ? "이어서 학습하기" : "학습 시작하기"}</span>
+                  <span>이어서 학습하기</span>
                   <ArrowRight className="h-4 w-4" />
                 </button>
               ) : (
@@ -162,18 +159,14 @@ export const HomeView: React.FC<HomeViewProps> = ({
       {/* 2. [다른 카드형: 굳이 꽉 차지 않고 적정 폭 1280px 유지] EXACT M3 FEATURED CARD SET (8px GAP: gap-2) */}
       <section className="w-full max-w-[1280px] mx-auto space-y-4">
         <h2 className="text-3xl sm:text-4xl lg:text-[42px] font-medium tracking-tight text-[var(--lh-ink)]">
-          {hasUserCourses ? "추천 및 주요 학습 커리큘럼" : "LearnHub 핵심 대표 과정"}
+          {hasUserCourses ? "추천 및 주요 학습 커리큘럼" : "LearnHub 학습 시작 가이드"}
         </h2>
 
         {/* M3 Card Set Container with 8px Gap (gap-2) */}
         <div className="w-full grid grid-cols-1 md:grid-cols-2 gap-2">
           {/* Card 1: Top Full-Width Split Card */}
           <div
-            onClick={() => {
-              if (firstSampleCourse && firstSampleResume) {
-                onStartLesson(firstSampleCourse, firstSampleResume.lesson, firstSampleResume.chapterTitle);
-              }
-            }}
+            onClick={() => onOpenCreateCourse("초등 5-2 수학: 분수의 곱셈과 나눗셈")}
             className="col-span-1 md:col-span-2 overflow-hidden rounded-[28px] border border-[var(--lh-line)] bg-[var(--lh-surface)] p-3 sm:p-5 grid grid-cols-1 md:grid-cols-12 gap-6 items-center shadow-2xs hover:shadow-sm hover:border-[var(--lh-primary-border)] transition-all duration-200 cursor-pointer group"
           >
             {/* Left Media Zone: Clean Cover Slot (Ready for user image) */}
@@ -372,12 +365,12 @@ export const HomeView: React.FC<HomeViewProps> = ({
               <span>LEARNING PATHS</span>
             </div>
             <h2 className="mt-1.5 text-3xl sm:text-4xl font-medium tracking-tight text-[var(--lh-ink)]">
-              {hasUserCourses ? "내 등록 과목" : "전체 과목 커리큘럼"}
+              {hasUserCourses ? "내 등록 과목" : "내 학습 과정"}
             </h2>
             <p className="mt-1 text-sm text-[var(--lh-ink-secondary)] font-normal">
               {hasUserCourses
                 ? "현재 학습 중인 개인 맞춤 과정입니다. 카드를 클릭하여 단원 구성과 진도를 확인하세요."
-                : "배우고 싶은 교과를 선택하거나, 원하는 과목을 직접 생성하여 즉시 학습할 수 있습니다."}
+                : "배우고 싶은 주제로 첫 학습 과정을 만들어 보세요."}
             </p>
           </div>
           <button
@@ -399,16 +392,13 @@ export const HomeView: React.FC<HomeViewProps> = ({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
             {displayedCourses.map((course, index) => {
               const progressPct = getCourseProgress(course);
-              const resume = getResumeLesson(course);
               const totalLessons = course.chapters.flatMap((chapter) => chapter.lessons).length;
-              const isSample = sampleCourseIds.has(course.id);
 
               return (
                 <div
                   key={course.id}
                   onClick={() => {
-                    if (isSample && resume) onStartLesson(course, resume.lesson, resume.chapterTitle);
-                    else onSelectCourse(course.id);
+                    onSelectCourse(course.id);
                   }}
                   className="group flex flex-col justify-between overflow-hidden rounded-[28px] border border-[var(--lh-line)] bg-[var(--lh-surface)] text-left shadow-2xs transition-all duration-200 hover:shadow-sm hover:border-[var(--lh-primary-border)] cursor-pointer"
                 >
@@ -429,7 +419,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
 
                     <div className="relative flex items-center justify-between text-xs font-medium uppercase tracking-wider">
                       <span className="rounded-full bg-white/15 backdrop-blur-md px-3.5 py-1 text-[11px] font-medium text-white tracking-wide border border-white/10">
-                        {isSample ? "표준 커리큘럼" : "나의 학습 과정"}
+                        나의 학습 과정
                       </span>
                       <span className="rounded-full bg-white/15 backdrop-blur-md px-3.5 py-1 text-[11px] font-medium text-white tracking-wide border border-white/10">
                         {totalLessons}개 레슨
@@ -452,7 +442,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                     </div>
 
                     <div className="relative flex items-center justify-between text-xs text-white/80">
-                      <span className="font-normal">{isSample ? "기초 개념부터 응용까지" : "개인 맞춤 생성 코스"}</span>
+                      <span className="font-normal">개인 맞춤 생성 코스</span>
                       <span className="font-medium text-[var(--lh-primary-border)] group-hover:text-white group-hover:translate-x-1 transition duration-200">
                         학습 시작 →
                       </span>

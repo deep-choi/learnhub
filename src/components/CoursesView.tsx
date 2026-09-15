@@ -3,18 +3,24 @@ import {
   Search,
   BookOpen,
   CheckCircle2,
-  Clock,
   Sparkles,
   Layers,
-  ChevronRight,
   ArrowRight,
   X,
   Target,
   GraduationCap,
-  ListOrdered,
+  Archive,
+  RotateCcw,
+  Calculator,
+  FlaskConical,
+  Scale,
+  Landmark,
+  Languages,
+  BookOpenText,
 } from "lucide-react";
 import { Course, LessonMeta } from "../types/learning";
 import { LEARNING_ROADMAPS, LearningRoadmap } from "../data/roadmapData";
+import { courseIsComplete, nextUnfinishedLesson } from "../domain/assessment";
 
 interface CoursesViewProps {
   courses: Course[];
@@ -22,6 +28,8 @@ interface CoursesViewProps {
   onStartLesson: (course: Course, lesson: LessonMeta, chapterTitle: string) => void;
   onEnrollRoadmap: (course: Course) => void;
   onOpenCreateCourse?: () => void;
+  onStartAssessment: (course: Course) => void;
+  onUpdateCourseStatus?: (courseId: string, status: "completed" | "cancelled" | "active") => void;
 }
 
 const SUBJECT_FILTERS = [
@@ -34,23 +42,39 @@ const SUBJECT_FILTERS = [
   { label: "일본어", key: "japanese" },
 ] as const;
 
+const SUBJECT_VISUALS: Record<
+  LearningRoadmap["subjectKey"],
+  { gradient: string; Icon: React.ElementType }
+> = {
+  math: { gradient: "from-blue-600 via-indigo-600 to-violet-700", Icon: Calculator },
+  science: { gradient: "from-emerald-500 via-teal-600 to-cyan-700", Icon: FlaskConical },
+  social: { gradient: "from-amber-500 via-orange-600 to-rose-600", Icon: Scale },
+  history: { gradient: "from-stone-600 via-amber-800 to-stone-900", Icon: Landmark },
+  english: { gradient: "from-rose-500 via-pink-600 to-fuchsia-700", Icon: Languages },
+  japanese: { gradient: "from-red-500 via-rose-600 to-red-800", Icon: BookOpenText },
+};
+
 export const CoursesView: React.FC<CoursesViewProps> = ({
   courses,
   onSelectCourse,
   onStartLesson,
   onEnrollRoadmap,
   onOpenCreateCourse,
+  onStartAssessment,
+  onUpdateCourseStatus,
 }) => {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedSubject, setSelectedSubject] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<"all" | "enrolled">("all");
   const [selectedRoadmapForDetail, setSelectedRoadmapForDetail] = useState<LearningRoadmap | null>(null);
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const activeCourses = courses.filter((course) => course.status !== "completed" && course.status !== "cancelled");
+  const archivedCourses = courses.filter((course) => course.status === "completed" || course.status === "cancelled");
+  const createdCourses = activeCourses.filter((course) => !LEARNING_ROADMAPS.some((roadmap) => roadmap.course.id === course.id));
 
   // Set of IDs of courses currently in user's library
   const enrolledCourseIds = useMemo(() => {
-    return new Set(courses.map((c) => c.id));
-  }, [courses]);
+    return new Set(activeCourses.map((c) => c.id));
+  }, [activeCourses]);
 
   // Filter roadmaps by subject, status, and search query
   const filteredRoadmaps = useMemo(() => {
@@ -83,20 +107,21 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
     });
   }, [selectedSubject, statusFilter, searchQuery, enrolledCourseIds]);
 
-  const handleEnroll = (roadmap: LearningRoadmap, e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
-    onEnrollRoadmap(roadmap.course);
-    setToastMessage(`'${roadmap.subject}' 로드맵이 내 과목에 등록되었습니다.`);
-    setTimeout(() => setToastMessage(null), 3000);
-  };
-
   const handleStartRoadmap = (roadmap: LearningRoadmap, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
-    const course = courses.find((c) => c.id === roadmap.course.id) || roadmap.course;
-    const firstChapter = course.chapters[0];
-    const firstLesson = firstChapter?.lessons[0];
-    if (firstChapter && firstLesson) {
-      onStartLesson(course, firstLesson, firstChapter.title);
+    const isEnrolled = enrolledCourseIds.has(roadmap.course.id);
+    const course = activeCourses.find((c) => c.id === roadmap.course.id) || roadmap.course;
+
+    // 처음 시작하는 로드맵은 등록과 동시에 첫 레슨으로 이동합니다.
+    if (!isEnrolled) {
+      onEnrollRoadmap(course);
+    }
+
+    const next = nextUnfinishedLesson(course);
+    if (courseIsComplete(course)) {
+      onStartAssessment(course);
+    } else if (next) {
+      onStartLesson(course, next.lesson, next.chapterTitle);
     } else {
       onSelectCourse(course);
     }
@@ -104,19 +129,40 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
 
   return (
     <div className="w-full max-w-7xl mx-auto px-4 py-8 sm:px-6 lg:px-8 space-y-8 animate-fade-in">
-      {/* Toast notification */}
-      {toastMessage && (
-        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2.5 rounded-2xl border border-[var(--lh-primary-border)] bg-[var(--lh-surface)] px-4 py-3 text-xs font-medium text-[var(--lh-ink)] shadow-lg animate-fade-in">
-          <CheckCircle2 className="h-4 w-4 text-[var(--lh-point)]" />
-          <span>{toastMessage}</span>
-          <button
-            onClick={() => setToastMessage(null)}
-            className="ml-2 text-[var(--lh-ink-tertiary)] hover:text-[var(--lh-ink)] cursor-pointer"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
-        </div>
-      )}
+      {createdCourses.length > 0 && <section className="space-y-4">
+        <h1 className="text-2xl font-medium">내가 만든 과목</h1>
+        <div className="grid gap-3 sm:grid-cols-2">{createdCourses.map((course) => {
+          const lessons = course.chapters.flatMap((chapter) => chapter.lessons);
+          const completed = lessons.filter((lesson) => lesson.isCompleted).length;
+          return <button key={course.id} onClick={() => onSelectCourse(course)} className="space-y-3 rounded-2xl border border-[var(--lh-line)] bg-[var(--lh-surface)] p-5 text-left transition hover:border-[var(--lh-primary)]">
+            <span className="block font-medium">{course.title}</span>
+            <span className="block text-xs text-[var(--lh-ink-secondary)]">{completed} / {lessons.length} 레슨 완료</span>
+            <span className="block text-sm text-[var(--lh-primary)]">{courseIsComplete(course) ? "문제로 실력 확인하기 →" : "커리큘럼 보기 →"}</span>
+          </button>;
+        })}</div>
+      </section>}
+
+      {archivedCourses.length > 0 && onUpdateCourseStatus && <section className="space-y-3">
+        <details className="rounded-2xl border border-[var(--lh-line)] bg-[var(--lh-surface-subtle)] p-4">
+          <summary className="flex cursor-pointer list-none items-center gap-2 text-sm font-medium">
+            <Archive className="h-4 w-4 text-[var(--lh-ink-secondary)]" />
+            보관함 <span className="text-xs font-normal text-[var(--lh-ink-secondary)]">{archivedCourses.length}개</span>
+          </summary>
+          <div className="mt-4 grid gap-2 sm:grid-cols-2">
+            {archivedCourses.map((course) => (
+              <div key={course.id} className="flex items-center justify-between gap-3 rounded-xl border border-[var(--lh-line)] bg-[var(--lh-surface)] p-3">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium">{course.title}</p>
+                  <p className="mt-1 text-xs text-[var(--lh-ink-secondary)]">{course.status === "cancelled" ? "수강 취소됨" : "학습 완료"}</p>
+                </div>
+                <button type="button" onClick={() => onUpdateCourseStatus(course.id, "active")} className="inline-flex shrink-0 items-center gap-1 rounded-full border border-[var(--lh-line)] px-3 py-1.5 text-xs font-medium hover:bg-[var(--lh-surface-subtle)] cursor-pointer">
+                  <RotateCcw className="h-3.5 w-3.5" />복구
+                </button>
+              </div>
+            ))}
+          </div>
+        </details>
+      </section>}
 
       {/* Header Area */}
       <section className="space-y-4">
@@ -238,7 +284,7 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
         </div>
       </section>
 
-      {/* 3-Column Roadmap Card Grid (User requirement: 3열 형식으로 카드를 쭉 나열) */}
+      {/* 3-Column Roadmap Card Grid */}
       <section className="space-y-4">
         {filteredRoadmaps.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-[var(--lh-line)] bg-[var(--lh-surface-subtle)] py-16 text-center space-y-3">
@@ -266,125 +312,63 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
             {filteredRoadmaps.map((roadmap) => {
               const isEnrolled = enrolledCourseIds.has(roadmap.course.id);
 
+              const visual = SUBJECT_VISUALS[roadmap.subjectKey];
+              const SubjectIcon = visual.Icon;
+
               return (
-                <div
+                <article
                   key={roadmap.id}
-                  className="group flex flex-col justify-between rounded-2xl border border-[var(--lh-line)] bg-[var(--lh-surface)] p-5 transition-all duration-200 hover:border-[var(--lh-point)]/40 hover:shadow-md"
+                  className="group flex flex-col overflow-hidden rounded-2xl border border-[var(--lh-line)] bg-[var(--lh-surface)] transition-all duration-200 hover:-translate-y-0.5 hover:border-[var(--lh-point)]/40 hover:shadow-md"
                 >
-                  {/* Top: Badges & Enrolled Indicator */}
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className="rounded-full bg-[var(--lh-surface-subtle)] border border-[var(--lh-line)] px-2.5 py-0.5 text-xs font-medium text-[var(--lh-ink)]">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedRoadmapForDetail(roadmap)}
+                    className={`relative h-36 w-full overflow-hidden bg-gradient-to-br ${visual.gradient} p-5 text-left text-white cursor-pointer`}
+                    aria-label={`${roadmap.title} 자세히 보기`}
+                  >
+                    <div className="pointer-events-none absolute -right-10 -top-14 h-44 w-44 rounded-full border border-white/20" />
+                    <div className="pointer-events-none absolute -bottom-24 -left-12 h-48 w-48 rounded-full bg-white/10" />
+                    <div className="relative flex h-full flex-col justify-between">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="rounded-full bg-black/15 px-2.5 py-1 text-[11px] font-medium backdrop-blur-sm">
                           {roadmap.subject}
                         </span>
-                        <span className="rounded-full border border-[var(--lh-line)] px-2 py-0.5 text-[11px] font-normal text-[var(--lh-ink-secondary)]">
+                        <span className="rounded-full bg-white/15 px-2.5 py-1 text-[11px] backdrop-blur-sm">
                           {roadmap.levelLabel}
                         </span>
                       </div>
+                      <SubjectIcon className="h-10 w-10 text-white/90" strokeWidth={1.4} aria-hidden="true" />
+                    </div>
+                  </button>
 
-                      {isEnrolled ? (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-[var(--lh-primary-subtle)] border border-[var(--lh-primary-border)] px-2.5 py-0.5 text-[11px] font-medium text-[var(--lh-primary)]">
+                  <div className="flex flex-1 flex-col p-5">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <h2 className="line-clamp-2 text-base font-medium leading-snug text-[var(--lh-ink)] transition-colors group-hover:text-[var(--lh-point)]">
+                          {roadmap.title}
+                        </h2>
+                        <p className="mt-2 line-clamp-2 text-xs leading-relaxed text-[var(--lh-ink-secondary)]">
+                          {roadmap.tagline}
+                        </p>
+                      </div>
+                      {isEnrolled && (
+                        <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[var(--lh-primary-subtle)] px-2 py-1 text-[10px] font-medium text-[var(--lh-primary)]">
                           <CheckCircle2 className="h-3 w-3 text-[var(--lh-point)]" />
-                          <span>수강 중</span>
-                        </span>
-                      ) : (
-                        <span className="rounded-full bg-[var(--lh-surface-subtle)] px-2 py-0.5 text-[10px] font-normal text-[var(--lh-ink-tertiary)]">
-                          {roadmap.badge}
+                          수강 중
                         </span>
                       )}
                     </div>
 
-                    {/* Title & Tagline */}
-                    <div>
-                      <h2 className="text-base font-medium text-[var(--lh-ink)] group-hover:text-[var(--lh-point)] transition-colors line-clamp-1">
-                        {roadmap.title}
-                      </h2>
-                      <p className="mt-1.5 text-xs font-normal text-[var(--lh-ink-secondary)] leading-relaxed line-clamp-2">
-                        {roadmap.tagline}
-                      </p>
-                    </div>
-
-                    {/* 4-Stage Mini Stepper Preview */}
-                    <div className="space-y-1.5 pt-2 border-t border-[var(--lh-line)]">
-                      <div className="flex items-center justify-between text-[11px] font-medium text-[var(--lh-ink-tertiary)] pb-1">
-                        <span className="flex items-center gap-1">
-                          <ListOrdered className="h-3 w-3" />
-                          <span>단계별 로드맵 (4단계)</span>
-                        </span>
-                        <span>약 {roadmap.estimatedWeeks}주</span>
-                      </div>
-
-                      <div className="space-y-1">
-                        {roadmap.stages.map((stage) => (
-                          <div
-                            key={stage.step}
-                            className="flex items-center gap-2 rounded-lg bg-[var(--lh-surface-subtle)] px-2 py-1 text-[11px]"
-                          >
-                            <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[var(--lh-surface)] border border-[var(--lh-line)] text-[9px] font-medium text-[var(--lh-ink-secondary)]">
-                              {stage.step}
-                            </span>
-                            <span className="truncate font-normal text-[var(--lh-ink)]">
-                              {stage.title}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Meta info */}
-                    <div className="flex items-center justify-between pt-1 text-[11px] font-normal text-[var(--lh-ink-tertiary)]">
-                      <span className="flex items-center gap-1">
-                        <Clock className="h-3 w-3" />
-                        <span>총 {roadmap.course.chapters.reduce((acc, chap) => acc + chap.lessons.length, 0)}개 레슨</span>
-                      </span>
-                      <span className="truncate max-w-[150px]" title={roadmap.targetAudience}>
-                        {roadmap.targetAudience}
-                      </span>
-                    </div>
+                    <button
+                      type="button"
+                      onClick={(e) => handleStartRoadmap(roadmap, e)}
+                      className="mt-5 inline-flex w-full items-center justify-center gap-1.5 rounded-full bg-[var(--lh-primary)] px-3.5 py-2.5 text-xs font-medium text-white shadow-xs transition hover:bg-[var(--lh-primary-hover)] cursor-pointer"
+                    >
+                      <span>{isEnrolled ? "이어서 학습하기" : "시작하기"}</span>
+                      <ArrowRight className="h-3.5 w-3.5" />
+                    </button>
                   </div>
-
-                  {/* Bottom Actions */}
-                  <div className="mt-5 pt-3 border-t border-[var(--lh-line)] flex items-center gap-2">
-                    {isEnrolled ? (
-                      <>
-                        <button
-                          type="button"
-                          onClick={(e) => handleStartRoadmap(roadmap, e)}
-                          className="flex-1 flex items-center justify-center gap-1.5 rounded-full bg-[var(--lh-primary)] hover:bg-[var(--lh-primary-hover)] px-3.5 py-2 text-xs font-medium text-white shadow-xs transition cursor-pointer"
-                        >
-                          <span>이어서 학습하기</span>
-                          <ArrowRight className="h-3.5 w-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setSelectedRoadmapForDetail(roadmap)}
-                          className="rounded-full border border-[var(--lh-line)] bg-[var(--lh-surface)] hover:bg-[var(--lh-surface-subtle)] px-3 py-2 text-xs font-medium text-[var(--lh-ink-secondary)] transition cursor-pointer"
-                        >
-                          상세
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        <button
-                          type="button"
-                          onClick={(e) => handleEnroll(roadmap, e)}
-                          className="flex-1 flex items-center justify-center gap-1.5 rounded-full bg-[var(--lh-primary)] hover:bg-[var(--lh-primary-hover)] px-3.5 py-2 text-xs font-medium text-white shadow-xs transition cursor-pointer"
-                        >
-                          <span>이 로드맵 선택하기</span>
-                          <ChevronRight className="h-3.5 w-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setSelectedRoadmapForDetail(roadmap)}
-                          className="rounded-full border border-[var(--lh-line)] bg-[var(--lh-surface)] hover:bg-[var(--lh-surface-subtle)] px-3 py-2 text-xs font-medium text-[var(--lh-ink-secondary)] transition cursor-pointer"
-                        >
-                          로드맵 상세
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </div>
+                </article>
               );
             })}
           </div>
@@ -394,15 +378,16 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
       {/* Roadmap Detail Modal */}
       {selectedRoadmapForDetail && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4 animate-fade-in"
+          className="fixed inset-0 z-50 flex min-h-0 items-center justify-center overflow-hidden bg-black/40 p-4 backdrop-blur-xs animate-fade-in"
           onClick={() => setSelectedRoadmapForDetail(null)}
         >
           <div
-            className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-3xl border border-[var(--lh-line)] bg-[var(--lh-surface)] p-6 shadow-2xl text-left space-y-6"
+            className="relative flex max-h-[calc(100dvh-2rem)] min-h-0 w-full max-w-2xl flex-col overflow-hidden rounded-3xl border border-[var(--lh-line)] bg-[var(--lh-surface)] text-left shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            {/* Modal Header */}
-            <div className="flex items-start justify-between gap-4 border-b border-[var(--lh-line)] pb-4">
+            <div className="min-h-0 flex-1 space-y-6 overflow-y-auto p-6 sm:p-7">
+              {/* Modal Header */}
+              <div className="flex items-start justify-between gap-4 border-b border-[var(--lh-line)] pb-4">
               <div className="space-y-1.5">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="rounded-full bg-[var(--lh-surface-subtle)] border border-[var(--lh-line)] px-2.5 py-0.5 text-xs font-medium text-[var(--lh-ink)]">
@@ -437,10 +422,10 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
               >
                 <X className="h-4 w-4" />
               </button>
-            </div>
+              </div>
 
-            {/* Target & Outcomes */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {/* Target & Outcomes */}
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div className="rounded-2xl border border-[var(--lh-line)] bg-[var(--lh-surface-subtle)] p-3.5 space-y-1">
                 <div className="flex items-center gap-1.5 text-xs font-medium text-[var(--lh-ink)]">
                   <Target className="h-3.5 w-3.5 text-[var(--lh-point)]" />
@@ -460,10 +445,10 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
                   {selectedRoadmapForDetail.recommendedPrerequisites.join(", ")}
                 </p>
               </div>
-            </div>
+              </div>
 
-            {/* 4 Stages Detailed Breakdown */}
-            <div className="space-y-3">
+              {/* 4 Stages Detailed Breakdown */}
+              <div className="space-y-3">
               <h3 className="text-xs font-medium uppercase tracking-wider text-[var(--lh-ink-tertiary)]">
                 4단계 학습 로드맵 상세 단계
               </h3>
@@ -505,10 +490,10 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
                   </div>
                 ))}
               </div>
-            </div>
+              </div>
 
-            {/* Learning Outcomes */}
-            <div className="rounded-2xl border border-[var(--lh-line)] bg-[var(--lh-surface-subtle)] p-4 space-y-2">
+              {/* Learning Outcomes */}
+              <div className="rounded-2xl border border-[var(--lh-line)] bg-[var(--lh-surface-subtle)] p-4 space-y-2">
               <h4 className="text-xs font-medium text-[var(--lh-ink)]">
                 이 로드맵을 완수하면 얻게 되는 핵심 역량
               </h4>
@@ -520,10 +505,11 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
                   </li>
                 ))}
               </ul>
+              </div>
             </div>
 
             {/* Modal Footer Actions */}
-            <div className="pt-2 flex items-center justify-end gap-2 border-t border-[var(--lh-line)]">
+            <div className="flex shrink-0 items-center justify-end gap-2 border-t border-[var(--lh-line)] bg-[var(--lh-surface)] px-6 py-4 sm:px-7">
               <button
                 type="button"
                 onClick={() => setSelectedRoadmapForDetail(null)}
@@ -548,13 +534,13 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
                 <button
                   type="button"
                   onClick={() => {
-                    handleEnroll(selectedRoadmapForDetail);
+                    handleStartRoadmap(selectedRoadmapForDetail);
                     setSelectedRoadmapForDetail(null);
                   }}
                   className="flex items-center gap-1.5 rounded-full bg-[var(--lh-primary)] hover:bg-[var(--lh-primary-hover)] px-5 py-2 text-xs font-medium text-white shadow-xs transition cursor-pointer"
                 >
-                  <span>이 로드맵 선택하고 등록하기</span>
-                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  <span>시작하기</span>
+                  <ArrowRight className="h-3.5 w-3.5" />
                 </button>
               )}
             </div>

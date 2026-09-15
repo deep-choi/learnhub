@@ -38,6 +38,8 @@ export interface Course {
   chapters: Chapter[];
   createdAt: string;
   updatedAt: string;
+  /** Keeps the course out of the active sidebar without deleting its learning data. */
+  status?: "active" | "completed" | "cancelled";
 }
 
 export interface QuizData {

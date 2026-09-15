@@ -9,22 +9,26 @@ import {
   Target,
 } from "lucide-react";
 import { Course, LessonMeta } from "../types/learning";
+import { courseIsComplete } from "../domain/assessment";
 
 interface CourseDetailViewProps {
   course: Course;
   onBack: () => void;
   onStartLesson: (course: Course, lesson: LessonMeta, chapterTitle: string) => void;
+  onStartAssessment: (course: Course) => void;
 }
 
 export const CourseDetailView: React.FC<CourseDetailViewProps> = ({
   course,
   onBack,
   onStartLesson,
+  onStartAssessment,
 }) => {
   const allLessons = course.chapters.flatMap((c) => c.lessons);
   const completedLessons = allLessons.filter((l) => l.isCompleted);
   const totalMinutes = allLessons.reduce((acc, l) => acc + (l.estimatedMinutes || 10), 0);
   const progressPercent = allLessons.length > 0 ? Math.round((completedLessons.length / allLessons.length) * 100) : 0;
+  const isComplete = courseIsComplete(course);
 
   // Find next lesson to resume
   const nextLesson = allLessons.find((l) => !l.isCompleted) || allLessons[0];
@@ -108,7 +112,11 @@ export const CourseDetailView: React.FC<CourseDetailViewProps> = ({
             </div>
           </div>
 
-          {nextLesson && nextChapter && (
+          {isComplete ? (
+            <button type="button" onClick={() => onStartAssessment(course)} className="inline-flex min-h-12 items-center justify-center gap-2 rounded-full bg-[var(--lh-primary)] px-6 text-sm font-medium text-white hover:bg-[var(--lh-primary-hover)]">
+              문제로 실력 확인하기 <Play className="h-4 w-4" />
+            </button>
+          ) : nextLesson && nextChapter && (
             <button
               type="button"
               onClick={() => onStartLesson(course, nextLesson, nextChapter.title)}
@@ -120,6 +128,8 @@ export const CourseDetailView: React.FC<CourseDetailViewProps> = ({
           )}
         </div>
       </section>
+
+      {isComplete && <p className="rounded-2xl bg-[var(--lh-primary-subtle)] p-5 text-sm leading-relaxed text-[var(--lh-ink)]">모든 레슨을 마쳤어요! 문제 수와 유형을 골라 배운 내용을 확인해볼까요? 풀던 문제와 최근 결과도 다시 볼 수 있어요.</p>}
 
       {/* Chapters & Lessons Syllabus */}
       <section className="space-y-4">

@@ -3,11 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Course, UserSkill, UserProgress, ReviewQuestion, LessonMeta, UserAccount } from "./types/learning";
-import { StorageService } from "./services/storage";
+import { LEARNHUB_DATA_CHANGED_EVENT, StorageService } from "./services/storage";
 import { Sidebar, NotionPageView } from "./components/notion/Sidebar";
-import { TopBar } from "./components/notion/TopBar";
 import { HomeView } from "./components/HomeView";
 import { LearningRecordsView } from "./components/LearningRecordsView";
 import { NotionLessonCanvas } from "./components/notion/NotionLessonCanvas";
@@ -16,22 +15,30 @@ import { MistakeArchiveView } from "./components/notion/MistakeArchiveView";
 import { CommandPaletteModal } from "./components/notion/CommandPaletteModal";
 import { SkillMatrixView } from "./components/SkillMatrixView";
 import { ReviewView } from "./components/ReviewView";
-import { ProfileView } from "./components/ProfileView";
 import { CreateCourseModal } from "./components/CreateCourseModal";
 import { AiTutorDrawer } from "./components/AiTutorDrawer";
-import { PlacementTestModal } from "./components/notion/PlacementTestModal";
-import { ScratchpadCanvas } from "./components/notion/ScratchpadCanvas";
 import { AuthModal } from "./components/notion/AuthModal";
-import { INITIAL_COURSES } from "./data/initialData";
 import { trackLearningEvent } from "./services/learningAnalytics";
-import { getAuthStatus } from "./services/authClient";
+import { getAuthStatus, type AuthStatus } from "./services/authClient";
 import { LEARNHUB_AUTH_CHANGED_EVENT } from "./services/supabaseClient";
-import { PenTool } from "lucide-react";
+import {
+  clearPendingSync,
+  getCloudDataOwnerId,
+  getLearningSnapshot,
+  getPendingSyncOwnerId,
+  markPendingSync,
+  restoreLearningSnapshot,
+  syncCurrentLearningSnapshot,
+} from "./services/cloudSync";
+import { createLearningBackup, importLearningBackup, type LearningBackupDocument } from "./services/learningBackup";
 import { AiChatView } from "./components/AiChatView";
 import { LessonAiInputBar } from "./components/LessonAiInputBar";
 import { CoursesView } from "./components/CoursesView";
 import { CourseDetailView } from "./components/CourseDetailView";
 import { SettingsModal } from "./components/notion/SettingsModal";
+import { CourseAssessmentView } from "./components/CourseAssessmentView";
+import { courseIsComplete, nextUnfinishedLesson } from "./domain/assessment";
+import { LearnHubLogo } from "./components/common/LearnHubLogo";
 
 const getInitialView = (): NotionPageView => ({ type: "home" });
 
@@ -47,20 +54,8 @@ const getAuthCallbackError = (): string => {
 };
 
 const getResumeLesson = (course: Course) => {
-  for (const chapter of course.chapters) {
-    const lesson = chapter.lessons.find((item) => !item.isCompleted);
-    if (lesson) return { lesson, chapterTitle: chapter.title };
-  }
-
-  const firstLesson = course.chapters[0]?.lessons[0];
-  return firstLesson
-    ? { lesson: firstLesson, chapterTitle: course.chapters[0].title }
-    : null;
+  return nextUnfinishedLesson(course);
 };
-
-const SAMPLE_COURSE_IDS = new Set(INITIAL_COURSES.map((course) => course.id));
-
-const isSampleCourse = (course: Course) => SAMPLE_COURSE_IDS.has(course.id);
 
 const hasCompletedLesson = (course: Course) =>
   course.chapters.some((chapter) => chapter.lessons.some((lesson) => lesson.isCompleted));
@@ -91,15 +86,29 @@ export default function App() {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [initialSubject, setInitialSubject] = useState("");
   const [pendingSubjectAfterAuth, setPendingSubjectAfterAuth] = useState("");
+  const [pendingCreateAfterAuth, setPendingCreateAfterAuth] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isTutorOpen, setIsTutorOpen] = useState(false);
-  const [isPlacementTestOpen, setIsPlacementTestOpen] = useState(false);
-  const [isScratchpadOpen, setIsScratchpadOpen] = useState(false);
   const [authCallbackError, setAuthCallbackError] = useState(getAuthCallbackError);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(() => Boolean(getAuthCallbackError()));
+  const [passwordRecoveryMode, setPasswordRecoveryMode] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [tutorQuoteContext, setTutorQuoteContext] = useState("");
   const [pendingViewAfterAuth, setPendingViewAfterAuth] = useState<NotionPageView | null>(null);
+  const [authResolved, setAuthResolved] = useState(false);
+  const [dataReady, setDataReady] = useState(false);
+  const [sessionStatus, setSessionStatus] = useState<AuthStatus>(() => getAuthStatus());
+  const [syncStatus, setSyncStatus] = useState<"idle" | "loading" | "syncing" | "synced" | "error">("idle");
+  const [syncError, setSyncError] = useState("");
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
+  const activeUserIdRef = useRef<string | null>(null);
+  const snapshotRevisionRef = useRef<number | null>(null);
+  const authGenerationRef = useRef(0);
+  const dataReadyRef = useRef(false);
+  const suppressSyncRef = useRef(false);
+  const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const syncRequestRef = useRef(0);
+  const dataChangeVersionRef = useRef(0);
 
   const refreshDataState = () => {
     const loadedCourses = StorageService.getCourses();
@@ -123,12 +132,30 @@ export default function App() {
   }, [authCallbackError]);
 
   useEffect(() => {
-    reloadData();
-    const handleAuthChanged = (event: Event) => {
+    const handleAuthChanged = async (event: Event) => {
       const authEvent = (event as CustomEvent<{ event?: string }>).detail?.event;
       const authStatus = getAuthStatus();
+      if (authEvent === "INITIAL_SESSION" && !authStatus.configured) return;
+      const generation = ++authGenerationRef.current;
+      setAuthResolved(true);
+      setSessionStatus(authStatus);
       if (authStatus.signedIn && authStatus.userId) {
-        const existingAccount = StorageService.getUser();
+        const isPasswordRecovery = authEvent === "PASSWORD_RECOVERY";
+        if (activeUserIdRef.current === authStatus.userId && dataReadyRef.current) return;
+        let pendingLocalSnapshot: LearningBackupDocument | null = null;
+        try {
+          if (getCloudDataOwnerId() === authStatus.userId && getPendingSyncOwnerId() === authStatus.userId) {
+            pendingLocalSnapshot = createLearningBackup();
+          }
+        } catch {
+          pendingLocalSnapshot = null;
+        }
+        setDataReady(false);
+        dataReadyRef.current = false;
+        suppressSyncRef.current = true;
+        setSyncStatus("loading");
+        setSyncError("");
+        if (!pendingLocalSnapshot) StorageService.clearLearningData();
         const account: UserAccount = {
           id: authStatus.userId,
           name: authStatus.name?.trim() || authStatus.email?.split("@")[0] || "LearnHub 학습자",
@@ -136,30 +163,125 @@ export default function App() {
           isGuest: false,
           isLocalOnly: false,
           provider: authStatus.provider === "google" ? "google" : "email",
-          createdAt: existingAccount.id === authStatus.userId ? existingAccount.createdAt : new Date().toISOString(),
+          createdAt: new Date().toISOString(),
         };
         StorageService.setUser(account);
+        activeUserIdRef.current = authStatus.userId;
         setUserAccount(account);
         setAuthCallbackError("");
-        setIsAuthModalOpen(false);
-        if (pendingViewAfterAuth) {
-          setActiveView(pendingViewAfterAuth);
-          setPendingViewAfterAuth(null);
+        setPasswordRecoveryMode(isPasswordRecovery);
+        setIsAuthModalOpen(isPasswordRecovery);
+        try {
+          const snapshot = await getLearningSnapshot(authStatus.userId);
+          if (generation !== authGenerationRef.current || getAuthStatus().userId !== authStatus.userId) return;
+          if (pendingLocalSnapshot) {
+            const localRestored = restoreLearningSnapshot(authStatus.userId, pendingLocalSnapshot, "overwrite", { confirmed: true });
+            if (!localRestored.ok) throw new Error(localRestored.error || "이 기기에 남은 변경사항을 복구하지 못했습니다.");
+            if (snapshot) {
+              const remoteMerged = importLearningBackup(snapshot.snapshot, { strategy: "merge" });
+              if (!remoteMerged.ok) throw new Error(remoteMerged.error || "서버 기록과 이 기기의 변경사항을 합치지 못했습니다.");
+            }
+            const saved = await syncCurrentLearningSnapshot(authStatus.userId, snapshot?.revision ?? null);
+            if (generation !== authGenerationRef.current || getAuthStatus().userId !== authStatus.userId) return;
+            snapshotRevisionRef.current = saved.revision;
+            setLastSyncedAt(saved.updatedAt);
+            clearPendingSync(authStatus.userId);
+          } else if (snapshot) {
+            const restored = restoreLearningSnapshot(authStatus.userId, snapshot.snapshot, "overwrite", { confirmed: true });
+            if (!restored.ok) throw new Error(restored.error || "계정의 학습 기록을 적용하지 못했습니다.");
+            snapshotRevisionRef.current = snapshot.revision;
+            setLastSyncedAt(snapshot.updatedAt);
+          } else {
+            const created = await syncCurrentLearningSnapshot(authStatus.userId, null);
+            if (generation !== authGenerationRef.current || getAuthStatus().userId !== authStatus.userId) return;
+            snapshotRevisionRef.current = created.revision;
+            setLastSyncedAt(created.updatedAt);
+          }
+          refreshDataState();
+          dataReadyRef.current = true;
+          setDataReady(true);
+          setSyncStatus("synced");
+          if (pendingViewAfterAuth) {
+            setActiveView(pendingViewAfterAuth);
+            setPendingViewAfterAuth(null);
+          }
+          if (pendingCreateAfterAuth) {
+            setIsCreateModalOpen(true);
+            setPendingSubjectAfterAuth("");
+            setPendingCreateAfterAuth(false);
+            setActiveView({ type: "home" });
+          }
+        } catch (error) {
+          if (generation !== authGenerationRef.current) return;
+          if (!pendingLocalSnapshot) StorageService.clearLearningData();
+          StorageService.setUser(account);
+          if (pendingLocalSnapshot) markPendingSync(authStatus.userId);
+          refreshDataState();
+          activeUserIdRef.current = null;
+          snapshotRevisionRef.current = null;
+          setSyncStatus("error");
+          setSyncError(error instanceof Error ? error.message : "계정의 학습 기록을 연결하지 못했습니다.");
+        } finally {
+          if (generation === authGenerationRef.current) suppressSyncRef.current = false;
         }
       } else {
+        suppressSyncRef.current = true;
+        syncRequestRef.current += 1;
+        if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
+        activeUserIdRef.current = null;
+        snapshotRevisionRef.current = null;
+        dataReadyRef.current = true;
         StorageService.logout();
         refreshDataState();
+        setDataReady(true);
+        setSyncStatus("idle");
+        setSyncError("");
+        setLastSyncedAt(null);
         setActiveView({ type: "home" });
-      }
-      if (authStatus.signedIn && pendingSubjectAfterAuth) {
-        setIsCreateModalOpen(true);
-        setPendingSubjectAfterAuth("");
-        setActiveView({ type: "home" });
+        suppressSyncRef.current = false;
       }
     };
     window.addEventListener(LEARNHUB_AUTH_CHANGED_EVENT, handleAuthChanged);
     return () => window.removeEventListener(LEARNHUB_AUTH_CHANGED_EVENT, handleAuthChanged);
-  }, [activeView.type, pendingSubjectAfterAuth, pendingViewAfterAuth]);
+  }, [pendingCreateAfterAuth, pendingViewAfterAuth]);
+
+  useEffect(() => {
+    const handleDataChanged = () => {
+      refreshDataState();
+      const userId = activeUserIdRef.current;
+      if (!userId || !dataReadyRef.current || suppressSyncRef.current) return;
+      const changeVersion = ++dataChangeVersionRef.current;
+      markPendingSync(userId);
+      if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
+      setSyncStatus("syncing");
+      setSyncError("");
+      syncTimerRef.current = setTimeout(() => {
+        if (activeUserIdRef.current !== userId) return;
+        setSyncStatus("syncing");
+        const requestId = ++syncRequestRef.current;
+        void syncCurrentLearningSnapshot(userId, snapshotRevisionRef.current)
+          .then((saved) => {
+            if (activeUserIdRef.current !== userId) return;
+            snapshotRevisionRef.current = Math.max(snapshotRevisionRef.current ?? 0, saved.revision);
+            refreshDataState();
+            if (syncRequestRef.current !== requestId) return;
+            if (dataChangeVersionRef.current === changeVersion) clearPendingSync(userId);
+            setLastSyncedAt(saved.updatedAt);
+            setSyncStatus("synced");
+          })
+          .catch((error) => {
+            if (activeUserIdRef.current !== userId || syncRequestRef.current !== requestId) return;
+            setSyncStatus("error");
+            setSyncError(error instanceof Error ? error.message : "학습 기록을 동기화하지 못했습니다.");
+          });
+      }, 800);
+    };
+    window.addEventListener(LEARNHUB_DATA_CHANGED_EVENT, handleDataChanged);
+    return () => {
+      window.removeEventListener(LEARNHUB_DATA_CHANGED_EVENT, handleDataChanged);
+      if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     const handleRequestAuth = () => setIsAuthModalOpen(true);
@@ -189,16 +311,21 @@ export default function App() {
     chapterTitle: string,
     source: string,
     resume: boolean,
+    assessmentReturn = false,
   ) => {
+    const savedCourse = StorageService.getCourseById(course.id);
+    if (!savedCourse) { StorageService.addCourse(course); reloadData(); }
+    const currentCourse = savedCourse || course;
+    const currentLesson = currentCourse.chapters.flatMap((chapter) => chapter.lessons).find((item) => item.id === lesson.id) || lesson;
     trackLearningEvent("lesson_started", {
       courseId: course.id,
       lessonId: lesson.id,
       source,
       resume,
       firstLesson: isFirstLesson(course, lesson),
-      sample: isSampleCourse(course),
+      sample: false,
     });
-    setActiveView({ type: "lesson", course, lesson, chapterTitle });
+    setActiveView({ type: "lesson", course: currentCourse, lesson: currentLesson, chapterTitle, assessmentReturn });
   };
 
   const handleSelectView = (view: NotionPageView, source = "navigation") => {
@@ -217,7 +344,7 @@ export default function App() {
       return;
     }
     if (view.type === "review-queue") {
-      const hasUserCourse = courses.some((course) => !isSampleCourse(course));
+      const hasUserCourse = courses.length > 0;
       trackLearningEvent("review_visited", { source, sample: !hasUserCourse });
     }
     setActiveView(view);
@@ -229,8 +356,9 @@ export default function App() {
       setIsAuthModalOpen(true);
       return;
     }
-    const course = courses.find((candidate) => !isSampleCourse(candidate));
+    const course = courses.find((candidate) => getResumeLesson(candidate)) || courses[0];
     const resume = course ? getResumeLesson(course) : null;
+    if (course && courseIsComplete(course)) { setActiveView({ type: "assessment", course }); return; }
     if (!course || !resume) {
       setActiveView({ type: "home" });
       return;
@@ -253,12 +381,24 @@ export default function App() {
     }
   };
 
-  const handleEnrollRoadmap = (course: Course) => {
-    if (!courses.some((c) => c.id === course.id)) {
-      StorageService.addCourse(course);
-      reloadData();
-      trackLearningEvent("course_created", { courseId: course.id, sample: false, source: "roadmap" });
+  const handleCourseStatusChange = (courseId: string, status: "completed" | "cancelled" | "active") => {
+    if (!StorageService.updateCourseStatus(courseId, status)) return;
+    reloadData();
+    if ((activeView.type === "course-detail" || activeView.type === "lesson" || activeView.type === "assessment") && activeView.course.id === courseId && status !== "active") {
+      setActiveView({ type: "courses" });
     }
+  };
+
+  const handleEnrollRoadmap = (course: Course) => {
+    const storedCourse = StorageService.getCourseById(course.id);
+    if (!storedCourse) {
+      StorageService.addCourse(course);
+      trackLearningEvent("course_created", { courseId: course.id, sample: false, source: "roadmap" });
+    } else if (storedCourse.status === "completed" || storedCourse.status === "cancelled") {
+      // 보관하거나 취소했던 로드맵을 다시 시작하면 수강 중으로 되돌립니다.
+      StorageService.updateCourseStatus(course.id, "active");
+    }
+    reloadData();
   };
 
   const handleLessonFinished = (metadata?: {
@@ -272,7 +412,7 @@ export default function App() {
         courseId: metadata?.courseId === activeView.course.id ? metadata.courseId : activeView.course.id,
         lessonId: metadata?.lessonId === activeView.lesson.id ? metadata.lessonId : activeView.lesson.id,
         firstLesson: isFirstLesson(activeView.course, activeView.lesson),
-        sample: isSampleCourse(activeView.course),
+        sample: false,
         completionKind,
         source: "lesson",
       });
@@ -304,16 +444,51 @@ export default function App() {
     const authStatus = getAuthStatus();
     if (!authStatus.signedIn) {
       setPendingSubjectAfterAuth(trimmedSubject);
+      setPendingCreateAfterAuth(true);
       setIsAuthModalOpen(true);
       return;
     }
     setPendingSubjectAfterAuth("");
+    setPendingCreateAfterAuth(false);
     setIsCreateModalOpen(true);
   };
 
   const currentLessonData =
     activeView.type === "lesson" ? activeView : null;
-  const isAuthenticated = getAuthStatus().signedIn && !userAccount.isGuest;
+  const openAssessment = (course: Course) => {
+    const stored = StorageService.getCourseById(course.id);
+    if (!stored) {
+      StorageService.addCourse(course);
+      reloadData();
+    }
+    const latest = stored || course;
+    handleSelectView({ type: "assessment", course: latest }, "course-assessment");
+  };
+
+  useEffect(() => {
+    document.getElementById("learning-main")?.scrollTo({ top: 0 });
+  }, [activeView.type, activeView.type === "lesson" ? activeView.lesson.id : null]);
+
+  if (!authResolved || (sessionStatus.signedIn && !dataReady)) {
+    const failed = syncStatus === "error";
+    return (
+      <div className="flex h-screen w-screen items-center justify-center bg-[var(--lh-canvas)] px-6 text-center text-[var(--lh-ink)]">
+        <div className="max-w-md space-y-4">
+          <LearnHubLogo size={40} />
+          <h1 className="text-xl font-medium">{failed ? "학습 기록을 연결하지 못했습니다" : "계정의 학습 공간을 불러오는 중…"}</h1>
+          <p className="text-sm leading-relaxed text-[var(--lh-ink-secondary)]">{failed ? syncError : "다른 기기에서 이어서 학습할 수 있도록 최신 기록을 확인하고 있습니다."}</p>
+          {failed && (
+            <button type="button" onClick={() => {
+              activeUserIdRef.current = null;
+              window.dispatchEvent(new CustomEvent(LEARNHUB_AUTH_CHANGED_EVENT, { detail: { event: "RETRY_SYNC", userId: getAuthStatus().userId || null } }));
+            }} className="rounded-full bg-[var(--lh-primary)] px-5 py-2.5 text-sm font-medium text-white">
+              다시 연결하기
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[var(--lh-canvas)] text-[var(--lh-ink)] font-sans">
@@ -327,32 +502,20 @@ export default function App() {
           onOpenCreateCourse={() => handleOpenCreateCourse()}
           onOpenSearch={() => setIsSearchOpen(true)}
            onOpenTutor={handleOpenTutor}
-          onOpenPlacementTest={() => isAuthenticated ? setIsPlacementTestOpen(true) : setIsAuthModalOpen(true)}
           pendingReviewsCount={reviews.length}
           isOpen={isSidebarOpen}
           onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
           userAccount={userAccount}
           onOpenAuth={() => setIsAuthModalOpen(true)}
           onOpenSettings={() => setIsSettingsOpen(true)}
+          onUpdateCourseStatus={handleCourseStatusChange}
         />
       )}
 
       {/* 2. Main Workspace Canvas Area */}
       <div className="relative flex flex-1 flex-col overflow-hidden">
-        {/* Top Breadcrumb & Actions Bar */}
-        <TopBar
-          activeView={activeView}
-          isSidebarOpen={isSidebarOpen}
-          onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
-           onOpenTutor={handleOpenTutor}
-          isZenMode={isZenMode}
-          onToggleZenMode={() => setIsZenMode(!isZenMode)}
-          userAccount={userAccount}
-          onOpenAuth={() => setIsAuthModalOpen(true)}
-        />
-
         {/* Scrollable Viewport */}
-        <main className="flex-1 overflow-y-auto bg-[var(--lh-canvas)]">
+        <main id="learning-main" className="flex-1 overflow-y-auto bg-[var(--lh-canvas)]">
           {activeView.type === "home" && (
             <div>
               <HomeView
@@ -361,11 +524,9 @@ export default function App() {
                 reviews={reviews}
                 onSelectCourse={(courseId) => {
                   const course = courses.find((c) => c.id === courseId);
-                  const resume = course ? getResumeLesson(course) : null;
-                  if (course && resume) {
-                    openLesson(course, resume.lesson, resume.chapterTitle, "home-course", hasCompletedLesson(course));
-                  }
+                  if (course) handleSelectView({ type: "course-detail", course });
                 }}
+                onStartAssessment={openAssessment}
                 onStartLesson={(course, lesson, chapterTitle) =>
                   openLesson(course, lesson, chapterTitle, "home-continue", hasCompletedLesson(course))
                 }
@@ -384,6 +545,8 @@ export default function App() {
               }
               onEnrollRoadmap={handleEnrollRoadmap}
               onOpenCreateCourse={handleOpenCreateCourse}
+              onStartAssessment={openAssessment}
+              onUpdateCourseStatus={handleCourseStatusChange}
             />
           )}
 
@@ -394,6 +557,22 @@ export default function App() {
               onStartLesson={(course, lesson, chapterTitle) =>
                 openLesson(course, lesson, chapterTitle, "course-detail-start", hasCompletedLesson(course))
               }
+              onStartAssessment={openAssessment}
+            />
+          )}
+
+          {activeView.type === "assessment" && (
+            <CourseAssessmentView
+              key={`${userAccount.id}:${activeView.course.id}`}
+              course={courses.find((course) => course.id === activeView.course.id) || activeView.course}
+              onBack={() => setActiveView({ type: "course-detail", course: StorageService.getCourseById(activeView.course.id) || activeView.course })}
+              onDataChanged={reloadData}
+              onReviewLesson={(lessonId) => {
+                const course = StorageService.getCourseById(activeView.course.id) || activeView.course;
+                const chapter = course.chapters.find((chapter) => chapter.lessons.some((lesson) => lesson.id === lessonId));
+                const lesson = chapter?.lessons.find((lesson) => lesson.id === lessonId);
+                if (chapter && lesson) openLesson(course, lesson, chapter.title, "assessment-review", false, true);
+              }}
             />
           )}
 
@@ -409,6 +588,9 @@ export default function App() {
               }}
               onFinishLesson={handleLessonFinished}
               onGoHome={() => handleSelectView({ type: "home" }, "lesson-home")}
+              onGoCourse={() => setActiveView({ type: "course-detail", course: StorageService.getCourseById(activeView.course.id) || activeView.course })}
+              onStartAssessment={() => openAssessment(activeView.course)}
+              onBackToAssessment={activeView.assessmentReturn ? () => openAssessment(activeView.course) : undefined}
               onStartNextLesson={(nextCourse, nextLesson, chapterTitle) =>
                 openLesson(nextCourse, nextLesson, chapterTitle, "lesson-next", false)
               }
@@ -456,11 +638,6 @@ export default function App() {
             />
           )}
 
-          {activeView.type === "settings" && (
-            <ProfileView
-              onDataChanged={refreshDataState}
-            />
-          )}
         </main>
 
         {activeView.type === "lesson" && (
@@ -497,40 +674,11 @@ export default function App() {
       )}
 
       {/* 4. Modals */}
-      <PlacementTestModal
-        isOpen={isPlacementTestOpen}
-        onClose={() => setIsPlacementTestOpen(false)}
-        courses={courses}
-        onSelectView={(view) => handleSelectView(view, "placement")}
-      />
-
       <CommandPaletteModal
         isOpen={isSearchOpen}
         onClose={() => setIsSearchOpen(false)}
         courses={courses}
         onSelectView={(view) => handleSelectView(view, "search")}
-      />
-
-      {/* 5. Floating Scratchpad Trigger */}
-      {isAuthenticated && <button
-        onClick={() => setIsScratchpadOpen(!isScratchpadOpen)}
-        className="fixed bottom-5 right-5 z-30 flex items-center gap-2 rounded-full border border-white/10 bg-[var(--lh-ink)] px-4 py-2.5 text-xs font-medium text-white shadow-[var(--lh-shadow-md)] transition hover:bg-[var(--lh-ink-secondary)] cursor-pointer"
-        aria-label="수식 연습장 열기"
-      >
-        <PenTool className="h-3.5 w-3.5" />
-        <span>수식 연습장</span>
-      </button>}
-
-      <ScratchpadCanvas
-        key={
-          activeView.type === "lesson"
-            ? `scratchpad:${activeView.course.id}:${activeView.lesson.id}`
-            : "global"
-        }
-        isOpen={isScratchpadOpen}
-        onClose={() => setIsScratchpadOpen(false)}
-        courseId={activeView.type === "lesson" ? activeView.course.id : undefined}
-        lessonId={activeView.type === "lesson" ? activeView.lesson.id : undefined}
       />
 
       <CreateCourseModal
@@ -551,11 +699,18 @@ export default function App() {
         <AuthModal
           isOpen={isAuthModalOpen}
           initialError={authCallbackError}
+          recoveryMode={passwordRecoveryMode}
+          onRecoveryComplete={() => {
+            setPasswordRecoveryMode(false);
+            setIsAuthModalOpen(false);
+          }}
           onClose={() => {
             setIsAuthModalOpen(false);
+            setPasswordRecoveryMode(false);
             setAuthCallbackError("");
             setPendingViewAfterAuth(null);
             setPendingSubjectAfterAuth("");
+            setPendingCreateAfterAuth(false);
           }}
         />
       </div>
@@ -570,6 +725,9 @@ export default function App() {
         isZenMode={isZenMode}
         onToggleZenMode={() => setIsZenMode(!isZenMode)}
         onOpenTutor={handleOpenTutor}
+        syncStatus={syncStatus}
+        syncError={syncError}
+        lastSyncedAt={lastSyncedAt}
       />
     </div>
   );

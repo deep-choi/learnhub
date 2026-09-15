@@ -1,18 +1,26 @@
 import express, { type Request, type Response } from "express";
+import fs from "node:fs";
 import path from "path";
 import { randomUUID } from "node:crypto";
-import { createServer as createViteServer } from "vite";
 import { Type } from "@google/genai";
 import dotenv from "dotenv";
 import { compareAnswers } from "./src/utils/answerComparison";
 import { validateCurriculumPayload, validateLessonPayload } from "./src/domain/contentValidation";
 import { AiGateway, AiGatewayError } from "./server/aiGateway";
-import { isAllowedLoopbackRequest } from "./server/aiPolicy";
+import { AiAdmissionController, isAllowedLoopbackRequest } from "./server/aiPolicy";
 import { configureSupabaseAuth, isAuthConfigured, verifyAccessToken } from "./server/auth";
 import { configureSupabaseCloudStore, createContentReport, getLearningSnapshot, putLearningSnapshot } from "./server/cloudStore";
-import { getSupabasePublicConfig } from "./server/supabaseProvider";
+import { getSupabaseAiUsage, getSupabasePublicConfig, reserveSupabaseAiUsage, SupabaseAiQuotaExceededError } from "./server/supabaseProvider";
 import { getLearningSupport } from "./src/domain/learningSupport";
 import { validateLearningBackup } from "./src/services/learningBackup";
+import { assessmentRouter } from "./server/assessment";
+import {
+  AI_MODEL_CATALOG,
+  AI_OUTPUT_TOKEN_OPTIONS,
+  DEFAULT_AI_SELECTION,
+  isAiRuntimeSelection,
+  type AiRuntimeSelection,
+} from "./src/domain/aiModels";
 
 dotenv.config();
 dotenv.config({ path: ".env.supabase" });
@@ -25,6 +33,39 @@ const PORT = Number.isInteger(configuredPort) && configuredPort >= 1 && configur
 const LEARNING_TYPES = ["concept", "problem_solving", "memorization", "language", "practical"] as const;
 const QUIZ_TYPES = ["multiple_choice", "short_answer"] as const;
 const REPORT_CATEGORIES = ["wrong_answer", "inaccurate", "unclear", "rendering", "other"] as const;
+const SITE_TITLE = "LearnHub · 지식과 사유의 작업 공간";
+const SITE_DESCRIPTION = "배우고 싶은 주제를 개인 커리큘럼, AI 튜터 수업, 퀴즈와 자동 복습으로 이어가는 맞춤형 학습 서비스입니다.";
+
+const publicAppOrigin = (): string | null => {
+  const raw = (process.env.APP_URL || process.env.RENDER_EXTERNAL_URL || "").trim();
+  if (!raw) return null;
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== "https:") return null;
+    return url.origin;
+  } catch {
+    return null;
+  }
+};
+
+const isSeoIndexable = (): boolean => process.env.SEO_INDEXABLE === "true" && publicAppOrigin() !== null;
+
+const runtimeSeoMarkup = (): string => {
+  const origin = publicAppOrigin();
+  if (!origin) return "";
+  const canonical = `${origin}/`;
+  return [
+    `<link rel="canonical" href="${canonical}" />`,
+    `<meta property="og:url" content="${canonical}" />`,
+  ].join("\n    ");
+};
+
+const renderIndexHtml = (template: string): string => template
+  .replace(
+    '<meta name="robots" content="noindex, nofollow" data-runtime-seo="robots" />',
+    `<meta name="robots" content="${isSeoIndexable() ? "index, follow" : "noindex, nofollow"}" data-runtime-seo="robots" />`,
+  )
+  .replace("<!-- learnhub-runtime-seo -->", runtimeSeoMarkup());
 
 app.disable("x-powered-by");
 app.use((req, res, next) => {
@@ -38,8 +79,65 @@ app.use((req, res, next) => {
   res.setHeader("x-request-id", requestId);
   next();
 });
+app.use((_req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  if (!isSeoIndexable()) res.setHeader("X-Robots-Tag", "noindex, nofollow");
+  next();
+});
+app.use((req, res, next) => {
+  const startedAt = Date.now();
+  res.on("finish", () => {
+    console.info(JSON.stringify({
+      event: "http_request",
+      requestId: res.locals.requestId,
+      method: req.method,
+      path: req.path,
+      status: res.statusCode,
+      durationMs: Math.max(0, Date.now() - startedAt),
+    }));
+  });
+  next();
+});
 
-const aiGateway = new AiGateway({ apiKey: process.env.GEMINI_API_KEY });
+app.get("/robots.txt", (_req, res) => {
+  const origin = publicAppOrigin();
+  res.type("text/plain");
+  if (!isSeoIndexable() || !origin) return res.send("User-agent: *\nDisallow: /\n");
+  return res.send(`User-agent: *\nAllow: /\nSitemap: ${origin}/sitemap.xml\n`);
+});
+
+app.get("/healthz", (_req, res) => res.status(200).type("text/plain").send("ok"));
+
+app.get("/sitemap.xml", (_req, res) => {
+  const origin = publicAppOrigin();
+  if (!isSeoIndexable() || !origin) return res.status(404).type("text/plain").send("Sitemap is disabled for this deployment.");
+  const updated = new Date().toISOString().slice(0, 10);
+  return res.type("application/xml").send(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>${origin}/</loc><lastmod>${updated}</lastmod></url></urlset>`);
+});
+
+const positiveEnvInteger = (name: string, fallback: number): number => {
+  const raw = process.env[name]?.trim();
+  if (!raw) return fallback;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value <= 0) throw new Error(`${name} must be a positive integer`);
+  return value;
+};
+const aiPolicy = new AiAdmissionController({
+  maxConcurrent: positiveEnvInteger("AI_MAX_CONCURRENT", 4),
+  maxRequestsPerClientPerMinute: positiveEnvInteger("AI_REQUESTS_PER_USER_PER_MINUTE", 12),
+  dailyRequestBudget: positiveEnvInteger("AI_GLOBAL_REQUESTS_PER_DAY", 10_000),
+  dailyOutputTokenBudget: positiveEnvInteger("AI_GLOBAL_RESERVED_OUTPUT_TOKENS_PER_DAY", 1_000_000),
+  perClientDailyRequestBudget: positiveEnvInteger("AI_REQUESTS_PER_USER_PER_DAY", 100),
+  perClientDailyOutputTokenBudget: positiveEnvInteger("AI_RESERVED_OUTPUT_TOKENS_PER_USER_PER_DAY", 100_000),
+});
+const aiGateway = new AiGateway({
+  geminiApiKey: process.env.GEMINI_API_KEY,
+  openAiApiKey: process.env.OPENAI_API_KEY,
+  policy: aiPolicy,
+});
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 const hasOnlyKeys = (value: Record<string, unknown>, allowed: readonly string[]) => Object.keys(value).every((key) => allowed.includes(key));
 const boundedString = (body: Record<string, unknown>, key: string, maxLength: number, required = true): string | null => {
@@ -60,6 +158,28 @@ const isLoopbackRequest = (req: Request) => isAllowedLoopbackRequest({
 });
 const bearerToken = (req: Request) => /^Bearer\s+([^\s]{1,4096})$/i.exec(req.header("authorization") || "")?.[1] || null;
 
+const defaultAiSelection = (): AiRuntimeSelection => {
+  if (aiGateway.isConfigured("gemini")) return { ...DEFAULT_AI_SELECTION };
+  if (aiGateway.isConfigured("openai")) return { provider: "openai", model: "gpt-5.6-terra", reasoningEffort: "medium", maxOutputTokens: 8_192 };
+  return { ...DEFAULT_AI_SELECTION };
+};
+
+const aiSelectionFor = (req: Request): AiRuntimeSelection => {
+  const provider = req.header("x-learnhub-ai-provider");
+  const model = req.header("x-learnhub-ai-model");
+  const reasoningEffort = req.header("x-learnhub-ai-reasoning");
+  const maxOutputTokens = req.header("x-learnhub-ai-max-output-tokens");
+  if (!provider && !model && !reasoningEffort && !maxOutputTokens) return defaultAiSelection();
+  const candidate = {
+    provider,
+    model,
+    reasoningEffort,
+    maxOutputTokens: Number(maxOutputTokens),
+  };
+  if (!isAiRuntimeSelection(candidate)) throw new AiGatewayError("AI_INVALID_REQUEST", 400);
+  return candidate;
+};
+
 app.get("/api/public-config", (_req, res) => {
   const config = getSupabasePublicConfig();
   if (!config) return res.status(503).json({ error: "공개 설정이 아직 준비되지 않았습니다.", code: "PUBLIC_CONFIG_NOT_CONFIGURED" });
@@ -72,7 +192,7 @@ const requireAiAccess = async (req: Request, res: Response): Promise<boolean> =>
     const token = bearerToken(req);
     if (token) {
       const user = await verifyAccessToken(token).catch(() => null);
-      if (user) res.locals.userId = user.id;
+      if (user) { res.locals.userId = user.id; res.locals.accessToken = token; }
     }
     return true;
   }
@@ -88,6 +208,7 @@ const requireAiAccess = async (req: Request, res: Response): Promise<boolean> =>
   const user = await verifyAccessToken(token).catch(() => null);
   if (!user) { res.status(401).json({ error: "인증을 확인할 수 없습니다.", code: "AUTH_INVALID" }); return false; }
   res.locals.userId = user.id;
+  res.locals.accessToken = token;
   return true;
 };
 
@@ -112,6 +233,45 @@ const requireConfiguredUser = async (req: Request, res: Response): Promise<{ id:
   return { id: user.id, token };
 };
 
+app.get("/api/ai/config", async (req, res) => {
+  if (!(await requireAiAccess(req, res))) return;
+  const clientKey = clientKeyFor(req, res);
+  const quota = aiGateway.getQuotaSnapshot(clientKey);
+  let durableUsage: Awaited<ReturnType<typeof getSupabaseAiUsage>> | null = null;
+  if (typeof res.locals.accessToken === "string") {
+    try {
+      durableUsage = await getSupabaseAiUsage(res.locals.accessToken);
+    } catch {
+      return res.status(503).json({ error: "AI 사용량을 확인할 수 없습니다.", code: "AI_QUOTA_UNAVAILABLE" });
+    }
+  }
+  return res.json({
+    providers: {
+      openai: { configured: aiGateway.isConfigured("openai") },
+      gemini: { configured: aiGateway.isConfigured("gemini") },
+    },
+    models: AI_MODEL_CATALOG.map((model) => ({
+      ...model,
+      available: aiGateway.isConfigured(model.provider),
+    })),
+    outputTokenOptions: [...AI_OUTPUT_TOKEN_OPTIONS],
+    limits: {
+      requestsPerMinute: quota.limits.requestsPerMinute,
+      requestsPerDay: durableUsage?.requestLimit ?? quota.limits.requestsPerDay,
+      reservedOutputTokensPerDay: durableUsage?.outputTokenLimit ?? quota.limits.reservedOutputTokensPerDay,
+      globalRequestsPerDay: quota.limits.globalRequestsPerDay,
+      globalReservedOutputTokensPerDay: quota.limits.globalReservedOutputTokensPerDay,
+    },
+    usage: {
+      day: durableUsage?.usageDay ?? (quota.dayKey || new Date().toISOString().slice(0, 10)),
+      requestsToday: durableUsage?.requests ?? quota.client.requestsToday,
+      reservedOutputTokensToday: durableUsage?.reservedOutputTokens ?? quota.client.reservedOutputTokensToday,
+      remainingRequestsToday: durableUsage ? Math.max(0, durableUsage.requestLimit - durableUsage.requests) : quota.client.remainingRequestsToday,
+      remainingReservedOutputTokensToday: durableUsage ? Math.max(0, durableUsage.outputTokenLimit - durableUsage.reservedOutputTokens) : quota.client.remainingReservedOutputTokensToday,
+    },
+  });
+});
+
 const sendAiError = (res: Response, error: unknown) => {
   if (error instanceof AiGatewayError) {
     const messages: Record<string, string> = {
@@ -129,9 +289,17 @@ const sendAiError = (res: Response, error: unknown) => {
 type JsonConfig = Parameters<AiGateway["generateJson"]>[0]["config"];
 const runAi = async <T>(req: Request, res: Response, endpoint: string, prompt: string, config: JsonConfig, maxOutputTokens: number, validate: (payload: unknown) => string[]) => {
   try {
-    const result = await aiGateway.generateJson<T>({ endpoint, requestId: res.locals.requestId, clientKey: clientKeyFor(req, res), prompt, config, maxOutputTokens, validate });
+    const selection = aiSelectionFor(req);
+    const reservedOutputTokens = Math.min(maxOutputTokens, selection.maxOutputTokens);
+    if (typeof res.locals.accessToken === "string") await reserveSupabaseAiUsage(res.locals.accessToken, reservedOutputTokens);
+    const result = await aiGateway.generateJson<T>({ endpoint, requestId: res.locals.requestId, clientKey: clientKeyFor(req, res), prompt, config, maxOutputTokens, selection, validate });
+    res.setHeader("x-learnhub-ai-provider", result.selection.provider);
+    res.setHeader("x-learnhub-ai-model", result.selection.model);
     return res.json(result.payload);
-  } catch (error) { return sendAiError(res, error); }
+  } catch (error) {
+    if (error instanceof SupabaseAiQuotaExceededError) return res.status(429).json({ error: "오늘의 AI 사용 한도에 도달했습니다. 내일 다시 이용해 주세요.", code: "AI_DAILY_QUOTA_EXCEEDED" });
+    return sendAiError(res, error);
+  }
 };
 
 const curriculumSchema = {
@@ -149,8 +317,7 @@ const curriculumSchema = {
 const lessonSchema = {
   type: Type.OBJECT, properties: {
     title: { type: Type.STRING }, steps: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: {
-      type: { type: Type.STRING }, title: { type: Type.STRING }, content: { type: Type.STRING }, codeSnippet: { type: Type.STRING }, audioScript: { type: Type.STRING },
-      quiz: { type: Type.OBJECT, properties: { question: { type: Type.STRING }, quizType: { type: Type.STRING }, options: { type: Type.ARRAY, items: { type: Type.STRING } }, answer: { type: Type.STRING }, explanation: { type: Type.STRING }, conceptId: { type: Type.STRING }, hints: { type: Type.ARRAY, items: { type: Type.STRING } } }, required: ["question", "quizType", "answer", "explanation", "hints"] },
+      type: { type: Type.STRING }, title: { type: Type.STRING }, content: { type: Type.STRING }, codeSnippet: { type: Type.STRING },
     }, required: ["type", "title", "content"] } },
   }, required: ["title", "steps"],
 };
@@ -176,6 +343,8 @@ const validateReviewPayload = (payload: unknown): string[] => {
   });
 };
 
+app.use("/api/ai", assessmentRouter({ gateway: aiGateway, authorize: requireAiAccess, clientKey: clientKeyFor, selection: aiSelectionFor, error: sendAiError }));
+
 app.post("/api/ai/analyze-subject", async (req, res) => {
   if (!(await requireAiAccess(req, res))) return;
   const body = req.body;
@@ -194,16 +363,11 @@ app.post("/api/ai/generate-lesson", async (req, res) => {
   const guidance = `지원 방식: ${support.supported.slice(0, 2).join("; ")}. 성공 기준: ${support.successCriteria.slice(0, 2).join("; ")}.`;
   const typeGuidance = learningType === "practical"
     ? "실용형은 사진·디자인·도구 작업도 포함할 수 있으며 코드에 한정하지 마세요. 실행·파일 생성·외부 도구 검증은 하지 않는다고 명시하세요."
-    : learningType === "language"
-      ? "언어형의 audioScript는 선택 사항이며 텍스트 학습을 우선하세요."
-      : "";
-  const prompt = `성인 학습자를 위한 수업을 생성하세요. 과목: "${body.courseTitle}" 챕터: "${body.chapterTitle}" 수업: "${body.lessonTitle}" 유형: "${body.learningType}" 수준: "${body.level}" 개념: "${body.conceptName}" (${body.conceptId}). ${guidance} ${typeGuidance} 4~6개 단계로 개념, 예제, 확인 문제 또는 연습, 요약을 포함하고 지정된 JSON만 반환하세요. type이 quiz인 단계는 quiz 객체에 질문·유형·정답·해설·hints를 반드시 포함하세요.`;
+    : "";
+  const prompt = `성인 학습자를 위한 수업을 생성하세요. 과목: "${body.courseTitle}" 챕터: "${body.chapterTitle}" 수업: "${body.lessonTitle}" 유형: "${body.learningType}" 수준: "${body.level}" 개념: "${body.conceptName}" (${body.conceptId}). ${guidance} ${typeGuidance}
+정확히 4개 단계로 구성하세요. 순서는 concept(핵심 정의와 왜 필요한지), example(구체적인 예시를 처음부터 끝까지 풀이), practice(학습자가 직접 해볼 문제나 과제와 스스로 확인할 기준), summary(헷갈리기 쉬운 반례와 핵심 정리)입니다. 각 단계는 최소 두 문단 또는 50자 이상의 충분한 설명을 포함하고, 예시는 실제 숫자·상황·과정을 사용해 추상적인 말로 끝내지 마세요. practice 단계에는 정답을 숨긴 채 시도할 수 있는 짧은 과제를 넣으세요. 발음·대화·음성 대본과 레슨 안의 확인 퀴즈는 만들지 마세요. 지정된 JSON만 반환하세요.`;
   return runAi(req, res, "generate-lesson", prompt, { responseMimeType: "application/json", responseSchema: lessonSchema }, 2600, (payload) => {
-    const errors = validateLessonPayload(payload, learningType);
-    if (!isRecord(payload) || !Array.isArray(payload.steps)) return errors;
-    payload.steps.forEach((step, index) => {
-      if (isRecord(step) && step.type === "quiz" && !isRecord(step.quiz)) errors.push(`단계 ${index + 1} 퀴즈 내용이 필요합니다.`);
-    });
+    const errors = validateLessonPayload(payload, learningType, { requireLearningArc: true });
     return errors;
   });
 });
@@ -217,7 +381,7 @@ app.post("/api/ai/evaluate-quiz", async (req, res) => {
   if (comparison !== "unknown") return res.json({ status: "scored", isCorrect: comparison === "correct", feedback: comparison === "correct" ? "정답입니다. 핵심 원리를 올바르게 적용했습니다." : "제출한 답을 다시 확인해 보세요. 힌트를 활용해 한 번 더 시도할 수 있습니다." });
   const prompt = `엄밀하고 친절한 학습 채점관입니다. 개념: "${body.conceptName}" 질문: "${body.question}" 정답 기준: "${body.expectedAnswer}" 제출 답안: "${body.userAnswer}" 유형: "${body.quizType}". 확실하지 않으면 status를 unknown으로 반환하고 오답으로 단정하지 마세요. JSON만 반환하세요.`;
   try {
-    const result = await aiGateway.generateJson<Record<string, unknown>>({ endpoint: "evaluate-quiz", requestId: res.locals.requestId, clientKey: clientKeyFor(req, res), prompt, config: { responseMimeType: "application/json", responseSchema: evaluationSchema }, maxOutputTokens: 700, validate: (payload) => isRecord(payload) && typeof payload.isCorrect === "boolean" && typeof payload.feedback === "string" ? [] : ["invalid"] });
+    const result = await aiGateway.generateJson<Record<string, unknown>>({ endpoint: "evaluate-quiz", requestId: res.locals.requestId, clientKey: clientKeyFor(req, res), prompt, config: { responseMimeType: "application/json", responseSchema: evaluationSchema }, maxOutputTokens: 700, selection: aiSelectionFor(req), validate: (payload) => isRecord(payload) && typeof payload.isCorrect === "boolean" && typeof payload.feedback === "string" ? [] : ["invalid"] });
     const data = result.payload;
     if (data.status === "unknown") return res.json({ status: "unknown", isCorrect: null, feedback: "답안을 확실히 판정하기 어려워 오답으로 기록하지 않았습니다. 다른 표현으로 다시 제출해 보세요.", hint: typeof data.hint === "string" ? data.hint : undefined });
     return res.json({ ...data, status: "scored" });
@@ -301,14 +465,17 @@ app.use((error: unknown, _req: Request, res: Response, _next: express.NextFuncti
 
 export async function startServer() {
   if (process.env.NODE_ENV !== "production") {
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({ server: { middlewareMode: true }, appType: "spa" });
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), "dist");
+    const indexTemplate = fs.readFileSync(path.join(distPath, "index.html"), "utf8");
     app.use(express.static(distPath));
-    app.get("*", (_req, res) => res.sendFile(path.join(distPath, "index.html")));
+    app.get("*", (_req, res) => res.type("html").send(renderIndexHtml(indexTemplate)));
   }
   app.listen(PORT, "0.0.0.0", () => console.log(`Server running on http://0.0.0.0:${PORT}`));
 }
 
-if (process.env.NODE_ENV !== "test") void startServer();
+const isFirebaseFunctionsRuntime = Boolean(process.env.FUNCTION_TARGET || process.env.K_SERVICE);
+if (process.env.NODE_ENV !== "test" && !isFirebaseFunctionsRuntime) void startServer();

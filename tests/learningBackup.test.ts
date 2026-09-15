@@ -9,6 +9,7 @@ import {
   previewLearningBackup,
   validateLearningBackup,
 } from "../src/services/learningBackup";
+import { fixtureSession } from "./fixtures/assessment";
 
 class MemoryStorage {
   private values = new Map<string, string>();
@@ -92,6 +93,28 @@ test("export uses an explicit study allowlist and excludes profile, auth, and un
   assert.equal(isPortableLearningStorageKey("ai_learnhub_user_v2"), false);
   assert.equal(isPortableLearningStorageKey("ai_learnhub_session_v1"), false);
   assert.equal(isPortableLearningStorageKey("other_app_key"), false);
+});
+
+test("online snapshot includes practice answers and assessment sessions", () => {
+  const storage = installStorage(new MemoryStorage());
+  const session = fixtureSession();
+  const practiceKey = "learnhub_practice_course-backup_lesson-1";
+  const assessmentKey = `learnhub_assessment_user-1_${session.courseId}`;
+  const aiPreferences = { provider: "openai", model: "gpt-5.6-terra", reasoningEffort: "high", maxOutputTokens: 8_192 };
+  storage.setItem(practiceKey, JSON.stringify({ "step-1": "내 풀이" }));
+  storage.setItem(assessmentKey, JSON.stringify(session));
+  storage.setItem("learnhub_ai_preferences_v1", JSON.stringify(aiPreferences));
+
+  const backup = createLearningBackup(storage);
+  assert.deepEqual(backup.data.practice?.[practiceKey], { "step-1": "내 풀이" });
+  assert.deepEqual(backup.data.assessments?.[assessmentKey], session);
+  assert.deepEqual(backup.data.aiPreferences, aiPreferences);
+
+  const restored = installStorage(new MemoryStorage());
+  assert.equal(importLearningBackup(backup, { strategy: "overwrite", storage: restored }).ok, true);
+  assert.equal(restored.getItem(practiceKey), JSON.stringify({ "step-1": "내 풀이" }));
+  assert.equal(restored.getItem(assessmentKey), JSON.stringify(session));
+  assert.equal(restored.getItem("learnhub_ai_preferences_v1"), JSON.stringify(aiPreferences));
 });
 
 test("prototype-pollution keys are rejected before any write", () => {

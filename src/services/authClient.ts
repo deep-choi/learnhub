@@ -1,3 +1,5 @@
+import { applyAiPreferenceHeaders } from "./aiPreferences";
+
 export interface AuthStatus {
   configured: boolean;
   signedIn: boolean;
@@ -14,7 +16,11 @@ export interface AuthClientAdapter {
   requestMagicLink?: (email: string) => Promise<void>;
   signInWithGoogle?: () => Promise<void>;
   signUpWithPassword?: (email: string, password: string, name?: string) => Promise<void>;
+  resendSignUpConfirmation?: (email: string) => Promise<void>;
   signInWithPassword?: (email: string, password: string) => Promise<void>;
+  requestPasswordReset?: (email: string) => Promise<void>;
+  updatePassword?: (password: string) => Promise<void>;
+  deleteAccount?: () => Promise<void>;
   signOut?: () => Promise<void>;
 }
 
@@ -72,9 +78,29 @@ export const signUpWithPassword = async (email: string, password: string, name?:
   await adapter.signUpWithPassword(email, password, name);
 };
 
+export const resendSignUpConfirmation = async (email: string): Promise<void> => {
+  if (!adapter?.resendSignUpConfirmation) throw new Error("가입 확인 메일 재전송 기능이 아직 연결되지 않았습니다.");
+  await adapter.resendSignUpConfirmation(email);
+};
+
 export const signInWithPassword = async (email: string, password: string): Promise<void> => {
   if (!adapter?.signInWithPassword) throw new Error("이메일 로그인이 아직 연결되지 않았습니다.");
   await adapter.signInWithPassword(email, password);
+};
+
+export const requestPasswordReset = async (email: string): Promise<void> => {
+  if (!adapter?.requestPasswordReset) throw new Error("비밀번호 재설정 기능이 아직 연결되지 않았습니다.");
+  await adapter.requestPasswordReset(email);
+};
+
+export const updatePassword = async (password: string): Promise<void> => {
+  if (!adapter?.updatePassword) throw new Error("비밀번호 변경 기능이 아직 연결되지 않았습니다.");
+  await adapter.updatePassword(password);
+};
+
+export const deleteAccount = async (): Promise<void> => {
+  if (!adapter?.deleteAccount) throw new Error("회원 탈퇴 기능이 아직 연결되지 않았습니다.");
+  await adapter.deleteAccount();
 };
 
 export const signOut = async (): Promise<void> => {
@@ -96,6 +122,20 @@ const isSameOriginApiRequest = (input: RequestInfo | URL): boolean => {
   }
 };
 
+const isAiMutationRequest = (input: RequestInfo | URL, init?: RequestInit): boolean => {
+  if (typeof window === "undefined") return false;
+  try {
+    const requestUrl = new URL(
+      typeof Request !== "undefined" && input instanceof Request ? input.url : input.toString(),
+      window.location.origin,
+    );
+    const method = (init?.method || (typeof Request !== "undefined" && input instanceof Request ? input.method : "GET")).toUpperCase();
+    return requestUrl.origin === window.location.origin && requestUrl.pathname.startsWith("/api/ai/") && method !== "GET";
+  } catch {
+    return false;
+  }
+};
+
 const fetchWithOptionalExpectedUser = async (
   input: RequestInfo | URL,
   init?: RequestInit,
@@ -106,11 +146,10 @@ const fetchWithOptionalExpectedUser = async (
   if (expectedUserId && getAuthStatus().userId !== expectedUserId) {
     throw new Error("계정이 바뀌어 요청을 중단했습니다.");
   }
-  if (!token) return fetch(input, init);
-
   const inputHeaders = typeof Request !== "undefined" && input instanceof Request ? input.headers : undefined;
   const headers = new Headers(inputHeaders || init?.headers);
-  headers.set("Authorization", `Bearer ${token}`);
+  if (isAiMutationRequest(input, init)) applyAiPreferenceHeaders(headers);
+  if (token) headers.set("Authorization", `Bearer ${token}`);
   return fetch(input, { ...init, headers });
 };
 

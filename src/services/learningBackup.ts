@@ -6,6 +6,8 @@ import {
   UserProgress,
   UserSkill,
 } from "../types/learning";
+import { isAssessmentSession, type AssessmentSession } from "../domain/assessment";
+import { isAiRuntimeSelection, type AiRuntimeSelection } from "../domain/aiModels";
 import {
   LEARNHUB_SCOPED_STORAGE_PREFIXES,
   LEARNHUB_STORAGE_KEYS,
@@ -49,6 +51,9 @@ export interface LearningBackupData {
   notes?: Record<string, string>;
   scratchpad?: Record<string, string>;
   tutor?: Record<string, TutorBackupMessage[]>;
+  practice?: Record<string, Record<string, string>>;
+  assessments?: Record<string, AssessmentSession>;
+  aiPreferences?: AiRuntimeSelection;
   /** Quiz-attempt IDs are local deduplication state and contain no identity data. */
   quizAttempts?: string[];
 }
@@ -163,6 +168,7 @@ const isCourse = (value: unknown): value is Course => {
     isNonEmptyString(value.title, 500) &&
     isNonEmptyString(value.subject, 500) &&
     isLearningType(value.learningType) &&
+    (value.status === undefined || value.status === "active" || value.status === "completed" || value.status === "cancelled") &&
     isString(value.learningTypeExplanation, 5_000) &&
     isString(value.summary, 10_000) &&
     isLevel(value.level) &&
@@ -309,10 +315,13 @@ export const isPortableLearningStorageKey = (key: string): boolean =>
   key === LEARNHUB_STORAGE_KEYS.REVIEWS ||
   key === LEARNHUB_STORAGE_KEYS.MISTAKES ||
   key === LEARNHUB_STORAGE_KEYS.QUIZ_ATTEMPTS ||
+  key === LEARNHUB_STORAGE_KEYS.AI_PREFERENCES ||
   isSafeScopedKey(key, `${LEARNHUB_STORAGE_KEYS.LESSONS_CACHE}_`) ||
   isSafeScopedKey(key, LEARNHUB_SCOPED_STORAGE_PREFIXES.NOTES) ||
   isSafeScopedKey(key, LEARNHUB_SCOPED_STORAGE_PREFIXES.SCRATCHPAD) ||
-  isSafeScopedKey(key, LEARNHUB_SCOPED_STORAGE_PREFIXES.TUTOR));
+  isSafeScopedKey(key, LEARNHUB_SCOPED_STORAGE_PREFIXES.TUTOR) ||
+  isSafeScopedKey(key, LEARNHUB_SCOPED_STORAGE_PREFIXES.PRACTICE) ||
+  isSafeScopedKey(key, LEARNHUB_SCOPED_STORAGE_PREFIXES.ASSESSMENT));
 
 const getStorage = (storage?: Storage): Storage => {
   if (storage) return storage;
@@ -329,9 +338,12 @@ const categoryForKey = (key: string): string => {
   if (key === LEARNHUB_STORAGE_KEYS.REVIEWS) return "reviews";
   if (key === LEARNHUB_STORAGE_KEYS.MISTAKES) return "mistakes";
   if (key === LEARNHUB_STORAGE_KEYS.QUIZ_ATTEMPTS) return "quizAttempts";
+  if (key === LEARNHUB_STORAGE_KEYS.AI_PREFERENCES) return "aiPreferences";
   if (key.startsWith(`${LEARNHUB_STORAGE_KEYS.LESSONS_CACHE}_`)) return "lessonCache";
   if (key.startsWith(LEARNHUB_SCOPED_STORAGE_PREFIXES.NOTES)) return "notes";
   if (key.startsWith(LEARNHUB_SCOPED_STORAGE_PREFIXES.SCRATCHPAD)) return "scratchpad";
+  if (key.startsWith(LEARNHUB_SCOPED_STORAGE_PREFIXES.PRACTICE)) return "practice";
+  if (key.startsWith(LEARNHUB_SCOPED_STORAGE_PREFIXES.ASSESSMENT)) return "assessments";
   return "tutor";
 };
 
@@ -361,6 +373,7 @@ const setDataField = (data: LearningBackupData, key: string, value: unknown) => 
   if (key === LEARNHUB_STORAGE_KEYS.REVIEWS && isBoundedArray(value) && value.every(isReview)) data.reviews = value;
   if (key === LEARNHUB_STORAGE_KEYS.MISTAKES && isBoundedArray(value) && value.every(isMistake)) data.mistakes = value;
   if (key === LEARNHUB_STORAGE_KEYS.QUIZ_ATTEMPTS && isBoundedArray(value) && value.every((item) => isNonEmptyString(item, 500))) data.quizAttempts = value;
+  if (key === LEARNHUB_STORAGE_KEYS.AI_PREFERENCES && isAiRuntimeSelection(value)) data.aiPreferences = value;
 };
 
 /** Read only the allowlisted LearnHub study namespace into a portable document. */
@@ -375,6 +388,7 @@ export const createLearningBackup = (storage?: Storage): LearningBackupDocument 
     LEARNHUB_STORAGE_KEYS.REVIEWS,
     LEARNHUB_STORAGE_KEYS.MISTAKES,
     LEARNHUB_STORAGE_KEYS.QUIZ_ATTEMPTS,
+    LEARNHUB_STORAGE_KEYS.AI_PREFERENCES,
   ]) {
     const value = readJson(source, key);
     if (value !== null) setDataField(data, key, value);
@@ -384,6 +398,8 @@ export const createLearningBackup = (storage?: Storage): LearningBackupDocument 
   const notes: Record<string, string> = {};
   const scratchpad: Record<string, string> = {};
   const tutor: Record<string, TutorBackupMessage[]> = {};
+  const practice: Record<string, Record<string, string>> = {};
+  const assessments: Record<string, AssessmentSession> = {};
 
   for (const key of allPortableKeys(source)) {
     const raw = source.getItem(key);
@@ -398,6 +414,15 @@ export const createLearningBackup = (storage?: Storage): LearningBackupDocument 
     } else if (key.startsWith(LEARNHUB_SCOPED_STORAGE_PREFIXES.TUTOR)) {
       const value = readJson(source, key);
       if (isBoundedArray(value, MAX_TUTOR_MESSAGES) && value.every(isTutorMessage)) tutor[key] = value;
+    } else if (key.startsWith(LEARNHUB_SCOPED_STORAGE_PREFIXES.PRACTICE)) {
+      const value = readJson(source, key);
+      if (isRecord(value) && Object.keys(value).length <= MAX_COLLECTION_ITEMS &&
+        Object.values(value).every((entry) => isString(entry, 2_000))) {
+        practice[key] = value as Record<string, string>;
+      }
+    } else if (key.startsWith(LEARNHUB_SCOPED_STORAGE_PREFIXES.ASSESSMENT)) {
+      const value = readJson(source, key);
+      if (isAssessmentSession(value)) assessments[key] = value;
     }
   }
 
@@ -405,6 +430,8 @@ export const createLearningBackup = (storage?: Storage): LearningBackupDocument 
   if (Object.keys(notes).length > 0) data.notes = notes;
   if (Object.keys(scratchpad).length > 0) data.scratchpad = scratchpad;
   if (Object.keys(tutor).length > 0) data.tutor = tutor;
+  if (Object.keys(practice).length > 0) data.practice = practice;
+  if (Object.keys(assessments).length > 0) data.assessments = assessments;
 
   return {
     schema: LEARNHUB_BACKUP_SCHEMA,
@@ -434,7 +461,7 @@ export const validateLearningBackup = (input: unknown): BackupValidationResult =
 
   const data = input.data;
   const knownFields = new Set([
-    "courses", "skills", "progress", "reviews", "mistakes", "lessonCache", "notes", "scratchpad", "tutor", "quizAttempts",
+    "courses", "skills", "progress", "reviews", "mistakes", "lessonCache", "notes", "scratchpad", "tutor", "practice", "assessments", "quizAttempts", "aiPreferences",
   ]);
   Object.keys(data).forEach((key) => {
     if (!knownFields.has(key)) errors.push(`알 수 없는 백업 데이터 필드: ${key}`);
@@ -446,6 +473,7 @@ export const validateLearningBackup = (input: unknown): BackupValidationResult =
   if (data.reviews !== undefined && (!isBoundedArray(data.reviews) || !data.reviews.every(isReview))) errors.push("복습 데이터가 올바르지 않습니다.");
   if (data.mistakes !== undefined && (!isBoundedArray(data.mistakes) || !data.mistakes.every(isMistake))) errors.push("오답 데이터가 올바르지 않습니다.");
   if (data.quizAttempts !== undefined && (!isBoundedArray(data.quizAttempts) || !data.quizAttempts.every((item) => isNonEmptyString(item, 500)))) errors.push("퀴즈 시도 데이터가 올바르지 않습니다.");
+  if (data.aiPreferences !== undefined && !isAiRuntimeSelection(data.aiPreferences)) errors.push("AI 설정 데이터가 올바르지 않습니다.");
 
   const validateScopedMap = (value: unknown, prefix: string, validator: (item: unknown) => boolean, field: string) => {
     if (value === undefined) return;
@@ -462,6 +490,9 @@ export const validateLearningBackup = (input: unknown): BackupValidationResult =
   validateScopedMap(data.notes, LEARNHUB_SCOPED_STORAGE_PREFIXES.NOTES, (item) => isString(item, MAX_NOTE_LENGTH), "메모");
   validateScopedMap(data.scratchpad, LEARNHUB_SCOPED_STORAGE_PREFIXES.SCRATCHPAD, (item) => isString(item, MAX_SCRATCHPAD_LENGTH) && item.startsWith("data:image/"), "연습장");
   validateScopedMap(data.tutor, LEARNHUB_SCOPED_STORAGE_PREFIXES.TUTOR, (item) => isBoundedArray(item, MAX_TUTOR_MESSAGES) && item.every(isTutorMessage), "튜터 기록");
+  validateScopedMap(data.practice, LEARNHUB_SCOPED_STORAGE_PREFIXES.PRACTICE, (item) =>
+    isRecord(item) && Object.keys(item).length <= MAX_COLLECTION_ITEMS && Object.values(item).every((entry) => isString(entry, 2_000)), "연습 답안");
+  validateScopedMap(data.assessments, LEARNHUB_SCOPED_STORAGE_PREFIXES.ASSESSMENT, isAssessmentSession, "과정 평가");
 
   if (errors.length > 0) return { ok: false, value: null, errors };
   return { ok: true, value: input as unknown as LearningBackupDocument, errors: [] };
@@ -477,10 +508,13 @@ const entriesFromBackup = (backup: LearningBackupDocument): PortableEntry[] => {
   if (data.reviews !== undefined) addJson(LEARNHUB_STORAGE_KEYS.REVIEWS, data.reviews);
   if (data.mistakes !== undefined) addJson(LEARNHUB_STORAGE_KEYS.MISTAKES, data.mistakes);
   if (data.quizAttempts !== undefined) addJson(LEARNHUB_STORAGE_KEYS.QUIZ_ATTEMPTS, data.quizAttempts);
+  if (data.aiPreferences !== undefined) addJson(LEARNHUB_STORAGE_KEYS.AI_PREFERENCES, data.aiPreferences);
   for (const [key, value] of Object.entries(data.lessonCache || {})) addJson(key, value);
   for (const [key, value] of Object.entries(data.notes || {})) entries.push({ key, value, category: "notes" });
   for (const [key, value] of Object.entries(data.scratchpad || {})) entries.push({ key, value, category: "scratchpad" });
   for (const [key, value] of Object.entries(data.tutor || {})) addJson(key, value);
+  for (const [key, value] of Object.entries(data.practice || {})) addJson(key, value);
+  for (const [key, value] of Object.entries(data.assessments || {})) addJson(key, value);
   return entries;
 };
 

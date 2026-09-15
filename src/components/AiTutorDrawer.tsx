@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { X, Send, Loader2, MessageCircle } from "lucide-react";
 import { LessonContent } from "../types/learning";
 import { authorizedFetch } from "../services/authClient";
+import { notifyLearningDataChanged } from "../services/storage";
 
 interface AiTutorDrawerProps {
   isOpen: boolean;
@@ -117,6 +118,7 @@ export const AiTutorDrawer: React.FC<AiTutorDrawerProps> = ({
     if (activeScope.current !== historyKey) return;
     try {
       localStorage.setItem(historyKey, JSON.stringify(messages));
+      notifyLearningDataChanged();
       setHistorySaveStatus("saved");
     } catch {
       setHistorySaveStatus("error");

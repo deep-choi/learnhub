@@ -12,10 +12,12 @@ import {
   RotateCcw,
   Search,
   Settings,
-  Target,
   User,
   Layers,
   PanelLeftClose,
+  MoreHorizontal,
+  Archive,
+  XCircle,
 } from "lucide-react";
 import { Course, LessonMeta, UserAccount } from "../../types/learning";
 import { LearnHubLogo } from "../common/LearnHubLogo";
@@ -24,14 +26,14 @@ export type NotionPageView =
   | { type: "home" }
   | { type: "courses" }
   | { type: "course-detail"; course: Course }
+  | { type: "assessment"; course: Course }
   | { type: "ai-chat" }
   | { type: "records" }
-  | { type: "lesson"; course: Course; lesson: LessonMeta; chapterTitle: string }
+  | { type: "lesson"; course: Course; lesson: LessonMeta; chapterTitle: string; assessmentReturn?: boolean }
   | { type: "knowledge-map" }
   | { type: "skill-matrix" }
   | { type: "review-queue" }
-  | { type: "mistake-archive" }
-  | { type: "settings" };
+  | { type: "mistake-archive" };
 
 interface SidebarProps {
   courses: Course[];
@@ -41,13 +43,13 @@ interface SidebarProps {
   onOpenCreateCourse: () => void;
   onOpenSearch: () => void;
   onOpenTutor: () => void;
-  onOpenPlacementTest: () => void;
   pendingReviewsCount: number;
   isOpen: boolean;
   onToggleSidebar: () => void;
   userAccount?: UserAccount;
   onOpenAuth?: () => void;
   onOpenSettings?: () => void;
+  onUpdateCourseStatus?: (courseId: string, status: "completed" | "cancelled" | "active") => void;
 }
 
 type RailCategory = "home" | "courses" | "ai-chat" | "records" | "review-queue";
@@ -60,13 +62,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onOpenCreateCourse,
   onOpenSearch,
   onOpenTutor,
-  onOpenPlacementTest,
   pendingReviewsCount,
   isOpen,
   onToggleSidebar,
   userAccount,
   onOpenAuth,
   onOpenSettings,
+  onUpdateCourseStatus,
 }) => {
   // 1번째 사진 (Rail only) vs 2번째 사진 (Rail + Expanded Drawer)
   const [isPanelExpanded, setIsPanelExpanded] = useState<boolean>(false);
@@ -76,7 +78,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   }, [userAccount?.isGuest]);
 
   const [selectedRailCategory, setSelectedRailCategory] = useState<RailCategory>(() => {
-    if (activeView.type === "courses" || activeView.type === "course-detail" || activeView.type === "lesson") return "courses";
+    if (activeView.type === "courses" || activeView.type === "course-detail" || activeView.type === "lesson" || activeView.type === "assessment") return "courses";
     if (activeView.type === "ai-chat") return "ai-chat";
     if (activeView.type === "review-queue") return "review-queue";
     if (["records", "knowledge-map", "skill-matrix", "mistake-archive"].includes(activeView.type)) return "records";
@@ -87,6 +89,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
     "course-high-math-01": true,
     "course-mid-math-01": false,
   });
+  const [courseMenuId, setCourseMenuId] = useState<string | null>(null);
+  const activeCourses = courses.filter((course) => course.status !== "completed" && course.status !== "cancelled");
 
   const toggleCourse = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -102,7 +106,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   // Determine current active rail tab from activeView
   const currentActiveRail: RailCategory = (() => {
-    if (activeView.type === "courses" || activeView.type === "course-detail" || activeView.type === "lesson") return "courses";
+    if (activeView.type === "courses" || activeView.type === "course-detail" || activeView.type === "lesson" || activeView.type === "assessment") return "courses";
     if (activeView.type === "ai-chat") return "ai-chat";
     if (activeView.type === "review-queue") return "review-queue";
     if (["records", "knowledge-map", "skill-matrix", "mistake-archive"].includes(activeView.type)) return "records";
@@ -188,9 +192,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             - Bottom Utilities (Theme, Tutor, Expand/Collapse Toggle, Profile)
            ========================================================================= */}
         <div
-          className={`flex h-full w-[76px] shrink-0 flex-col items-center justify-between bg-[var(--lh-surface)] py-3 transition-all duration-200 ${
-            isPanelExpanded ? "border-r-0" : "border-r border-[var(--lh-line)]"
-          }`}
+          className="flex h-full w-[76px] shrink-0 flex-col items-center justify-between border-r border-[var(--lh-line-strong)] bg-[var(--lh-surface)] py-3 transition-all duration-200"
         >
 
           {/* Top: LearnHub Official Brand Emblem (No box wrapper) & Quick Search */}
@@ -258,13 +260,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 }`}
               >
                 <BookOpen className="h-5 w-5" />
-                {courses.length > 0 && (
+                {activeCourses.length > 0 && (
                   <span className={`absolute -top-1 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full text-[9px] font-medium border ${
                     currentActiveRail === "courses" || (isPanelExpanded && selectedRailCategory === "courses")
                       ? "bg-white text-[var(--lh-primary)] border-white/80"
                       : "bg-[var(--lh-primary)] text-white border-white"
                   }`}>
-                    {courses.length}
+                    {activeCourses.length}
                   </span>
                 )}
               </div>
@@ -391,8 +393,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   onOpenAuth();
                 } else if (onOpenSettings) {
                   onOpenSettings();
-                } else {
-                  handleSelectView({ type: "settings" });
                 }
               }}
               title={userAccount?.isGuest ? "로그인하기" : `${userAccount?.name || "회원"} 프로필`}
@@ -470,11 +470,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
             {/* 3. Scrollable Tree: Courses -> Chapters -> Lessons */}
             <div className="flex-1 space-y-3 overflow-y-auto pr-1 py-2">
               <div className="px-2 text-[10px] font-medium uppercase tracking-wider text-[var(--lh-ink-tertiary)]">
-                수강 중인 과목 ({courses.length})
+                수강 중인 과목 ({activeCourses.length})
               </div>
 
               <div className="space-y-2">
-                {courses.map((course) => {
+                {activeCourses.map((course) => {
                   const isExpanded = !!expandedCourseIds[course.id];
                   const isCourseActive =
                     activeView.type === "lesson" && activeView.course.id === course.id;
@@ -485,27 +485,62 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       className="rounded-2xl border border-[var(--lh-line)] bg-[var(--lh-surface-subtle)] p-2.5 space-y-1.5 shadow-xs"
                     >
                       {/* Course Title Accordion Item */}
-                      <button
-                        type="button"
-                        onClick={(e) => toggleCourse(course.id, e)}
-                        aria-expanded={isExpanded}
-                        className={`flex w-full items-center justify-between rounded-xl px-2 py-1.5 text-left transition cursor-pointer ${
-                          isCourseActive
-                            ? "bg-[var(--lh-surface)] font-medium text-[var(--lh-ink)] shadow-2xs"
-                            : "hover:bg-[var(--lh-surface)] text-[var(--lh-ink)] font-medium"
-                        }`}
-                      >
-                        <span className="flex items-center gap-2 truncate text-xs">
-                          <span className="text-[var(--lh-ink-tertiary)]">
-                            {isExpanded ? (
-                              <ChevronDown className="h-3.5 w-3.5" />
-                            ) : (
-                              <ChevronRight className="h-3.5 w-3.5" />
-                            )}
+                      <div className="relative flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={(e) => toggleCourse(course.id, e)}
+                          aria-expanded={isExpanded}
+                          className={`flex min-w-0 flex-1 items-center justify-between rounded-xl px-2 py-1.5 text-left transition cursor-pointer ${
+                            isCourseActive
+                              ? "bg-[var(--lh-surface)] font-medium text-[var(--lh-ink)] shadow-2xs"
+                              : "hover:bg-[var(--lh-surface)] text-[var(--lh-ink)] font-medium"
+                          }`}
+                        >
+                          <span className="flex items-center gap-2 truncate text-xs">
+                            <span className="text-[var(--lh-ink-tertiary)]">
+                              {isExpanded ? (
+                                <ChevronDown className="h-3.5 w-3.5" />
+                              ) : (
+                                <ChevronRight className="h-3.5 w-3.5" />
+                              )}
+                            </span>
+                            <span className="truncate">{course.title}</span>
                           </span>
-                          <span className="truncate">{course.title}</span>
-                        </span>
-                      </button>
+                        </button>
+                        {onUpdateCourseStatus && (
+                          <button
+                            type="button"
+                            aria-label={`${course.title} 과목 관리`}
+                            title="과목 관리"
+                            onClick={() => setCourseMenuId((current) => current === course.id ? null : course.id)}
+                            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[var(--lh-ink-tertiary)] transition hover:bg-[var(--lh-surface)] hover:text-[var(--lh-ink)] cursor-pointer"
+                          >
+                            <MoreHorizontal className="h-4 w-4" />
+                          </button>
+                        )}
+                        {courseMenuId === course.id && onUpdateCourseStatus && (
+                          <div role="menu" className="absolute right-0 top-9 z-30 min-w-44 rounded-xl border border-[var(--lh-line)] bg-[var(--lh-surface)] p-1.5 text-xs shadow-lg">
+                            <button
+                              type="button"
+                              role="menuitem"
+                              onClick={() => { onUpdateCourseStatus(course.id, "completed"); setCourseMenuId(null); }}
+                              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left hover:bg-[var(--lh-surface-subtle)] cursor-pointer"
+                            >
+                              <Archive className="h-3.5 w-3.5" />
+                              학습 완료로 보관
+                            </button>
+                            <button
+                              type="button"
+                              role="menuitem"
+                              onClick={() => { onUpdateCourseStatus(course.id, "cancelled"); setCourseMenuId(null); }}
+                              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[var(--lh-danger)] hover:bg-[var(--lh-surface-subtle)] cursor-pointer"
+                            >
+                              <XCircle className="h-3.5 w-3.5" />
+                              수강 취소
+                            </button>
+                          </div>
+                        )}
+                      </div>
 
                       {/* Expanded Chapters & Lessons */}
                       {isExpanded && (
@@ -564,54 +599,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     </div>
                   );
                 })}
-              </div>
-
-              {/* Quick Placement Test Card in Sub-Drawer */}
-              <div className="rounded-2xl border border-[var(--lh-line)] bg-[var(--lh-surface-subtle)] p-3 space-y-2 shadow-xs mt-3">
-                <div className="flex items-center gap-2 font-medium text-xs text-[var(--lh-ink)]">
-                  <Target className="h-4 w-4" />
-                  <span>수학 진단 테스트</span>
-                </div>
-                <p className="text-[11px] text-[var(--lh-ink-secondary)] leading-relaxed font-medium">
-                  나의 수학 시작 위치를 3문제로 가볍게 점검해 보세요.
-                </p>
-                <button
-                  type="button"
-                  onClick={onOpenPlacementTest}
-                  className="inline-flex min-h-8 w-full items-center justify-center rounded-full border border-[var(--lh-line)] bg-[var(--lh-surface)] px-3 text-xs font-medium text-[var(--lh-ink)] hover:bg-[var(--lh-ink)] hover:text-white transition cursor-pointer shadow-xs"
-                >
-                  진단 시작하기
-                </button>
-              </div>
-            </div>
-
-            {/* 4. Sub-Drawer Footer: Profile Info */}
-            <div className="pt-2 border-t border-[var(--lh-line)]">
-              <div className="flex items-center justify-between rounded-2xl border border-[var(--lh-line)] bg-[var(--lh-surface-subtle)] p-2.5 shadow-xs">
-                <div className="flex items-center gap-2 truncate">
-                  <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[var(--lh-ink)] text-[10px] font-medium text-white shadow-xs">
-                    {userAccount?.name?.slice(0, 1) || "G"}
-                  </span>
-                  <div className="flex flex-col truncate">
-                    <span className="truncate text-xs font-medium text-[var(--lh-ink)]">
-                      {userAccount?.name || "로그인이 필요합니다"}
-                    </span>
-                    <span className="text-[9px] text-[var(--lh-ink-tertiary)] font-medium">
-                      {userAccount?.isGuest ? "서비스 계정으로 시작" : "회원 계정"}
-                    </span>
-                  </div>
-                </div>
-                {userAccount?.isGuest && onOpenAuth && (
-                  <button
-                    onClick={onOpenAuth}
-                    type="button"
-                    className="rounded-full border border-[var(--lh-line)] bg-[var(--lh-surface)] px-2.5 py-1 text-[10px] font-medium text-[var(--lh-ink)] hover:bg-[var(--lh-ink)] hover:text-white transition cursor-pointer"
-                  >
-                    로그인
-                  </button>
+                {activeCourses.length === 0 && (
+                  <p className="rounded-xl border border-dashed border-[var(--lh-line)] px-3 py-4 text-center text-xs text-[var(--lh-ink-secondary)]">
+                    수강 중인 과목이 없어요.
+                  </p>
                 )}
               </div>
+
             </div>
+
           </div>
         )}
       </aside>

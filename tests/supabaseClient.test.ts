@@ -68,3 +68,20 @@ test("authorizedFetch keeps local API usable without configured auth", async () 
   await authorizedFetch("/api/learning-snapshot");
   assert.deepEqual(requests, [null]);
 });
+
+test("authorizedFetch sends the validated AI preference only to AI mutation routes", async () => {
+  const requests: Array<{ url: string; headers: Headers }> = [];
+  globalThis.fetch = (async (input, init) => {
+    requests.push({ url: input.toString(), headers: new Headers(init?.headers) });
+    return new Response("ok", { status: 200 });
+  }) as typeof fetch;
+
+  await authorizedFetch("/api/ai/tutor-chat", { method: "POST" });
+  await authorizedFetch("/api/learning-snapshot", { method: "PUT" });
+
+  assert.equal(requests[0].headers.get("x-learnhub-ai-provider"), "gemini");
+  assert.equal(requests[0].headers.get("x-learnhub-ai-model"), "gemini-3.8-flash");
+  assert.equal(requests[0].headers.get("x-learnhub-ai-reasoning"), "medium");
+  assert.equal(requests[0].headers.get("x-learnhub-ai-max-output-tokens"), "8192");
+  assert.equal(requests[1].headers.get("x-learnhub-ai-provider"), null);
+});

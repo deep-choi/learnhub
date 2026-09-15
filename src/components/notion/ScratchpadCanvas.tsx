@@ -1,5 +1,6 @@
 import React, { useRef, useState, useEffect } from "react";
 import { Eraser, PenTool, RotateCcw, X, Minimize2 } from "lucide-react";
+import { notifyLearningDataChanged } from "../../services/storage";
 
 interface ScratchpadCanvasProps {
   isOpen: boolean;
@@ -36,6 +37,7 @@ export const ScratchpadCanvas: React.FC<ScratchpadCanvasProps> = ({
     if (!canvas) return;
     try {
       localStorage.setItem(storageKey, canvas.toDataURL("image/png"));
+      notifyLearningDataChanged();
       setSaveStatus("saved");
     } catch {
       setSaveStatus("error");
@@ -115,6 +117,7 @@ export const ScratchpadCanvas: React.FC<ScratchpadCanvasProps> = ({
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     try {
       localStorage.removeItem(storageKey);
+      notifyLearningDataChanged();
       setSaveStatus("saved");
     } catch {
       setSaveStatus("error");

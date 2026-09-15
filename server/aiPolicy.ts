@@ -3,6 +3,8 @@ export interface AiAdmissionOptions {
   maxRequestsPerClientPerMinute?: number;
   dailyOutputTokenBudget?: number;
   dailyRequestBudget?: number;
+  perClientDailyOutputTokenBudget?: number;
+  perClientDailyRequestBudget?: number;
   maxTrackedClients?: number;
   now?: () => Date;
 }
@@ -22,6 +24,12 @@ export interface AiAdmissionLease {
 
 interface ClientWindow {
   startedAt: number;
+  requests: number;
+}
+
+interface ClientDailyUsage {
+  dayKey: string;
+  reservedTokens: number;
   requests: number;
 }
 
@@ -74,9 +82,12 @@ export class AiAdmissionController {
   private readonly maxRequestsPerClientPerMinute: number;
   private readonly dailyOutputTokenBudget: number;
   private readonly dailyRequestBudget: number;
+  private readonly perClientDailyOutputTokenBudget: number;
+  private readonly perClientDailyRequestBudget: number;
   private readonly maxTrackedClients: number;
   private readonly now: () => Date;
   private readonly clientWindows = new Map<string, ClientWindow>();
+  private readonly clientDailyUsage = new Map<string, ClientDailyUsage>();
   private activeRequests = 0;
   private dayKey = "";
   private reservedDailyTokens = 0;
@@ -85,8 +96,10 @@ export class AiAdmissionController {
   constructor(options: AiAdmissionOptions = {}) {
     this.maxConcurrent = finitePositiveInteger(options.maxConcurrent ?? 2, "maxConcurrent");
     this.maxRequestsPerClientPerMinute = finitePositiveInteger(options.maxRequestsPerClientPerMinute ?? 12, "maxRequestsPerClientPerMinute");
-    this.dailyOutputTokenBudget = finitePositiveInteger(options.dailyOutputTokenBudget ?? 50_000, "dailyOutputTokenBudget");
-    this.dailyRequestBudget = finitePositiveInteger(options.dailyRequestBudget ?? 100, "dailyRequestBudget");
+    this.dailyOutputTokenBudget = finitePositiveInteger(options.dailyOutputTokenBudget ?? 1_000_000, "dailyOutputTokenBudget");
+    this.dailyRequestBudget = finitePositiveInteger(options.dailyRequestBudget ?? 10_000, "dailyRequestBudget");
+    this.perClientDailyOutputTokenBudget = finitePositiveInteger(options.perClientDailyOutputTokenBudget ?? 100_000, "perClientDailyOutputTokenBudget");
+    this.perClientDailyRequestBudget = finitePositiveInteger(options.perClientDailyRequestBudget ?? 100, "perClientDailyRequestBudget");
     this.maxTrackedClients = finitePositiveInteger(options.maxTrackedClients ?? 1_000, "maxTrackedClients");
     this.now = options.now ?? (() => new Date());
   }
@@ -105,10 +118,17 @@ export class AiAdmissionController {
       this.dayKey = currentDay;
       this.reservedDailyTokens = 0;
       this.dailyRequests = 0;
+      this.clientDailyUsage.clear();
     }
     if (this.activeRequests >= this.maxConcurrent) return { lease: null, reason: "global_concurrency" };
     if (this.reservedDailyTokens + tokens > this.dailyOutputTokenBudget) return { lease: null, reason: "daily_budget" };
     if (this.dailyRequests >= this.dailyRequestBudget) return { lease: null, reason: "daily_request_budget" };
+
+    const clientDaily = this.clientDailyUsage.get(safeClientKey)?.dayKey === currentDay
+      ? this.clientDailyUsage.get(safeClientKey)!
+      : { dayKey: currentDay, reservedTokens: 0, requests: 0 };
+    if (clientDaily.reservedTokens + tokens > this.perClientDailyOutputTokenBudget) return { lease: null, reason: "daily_budget" };
+    if (clientDaily.requests >= this.perClientDailyRequestBudget) return { lease: null, reason: "daily_request_budget" };
 
     for (const [key, value] of this.clientWindows) {
       if (nowMs - value.startedAt >= 60_000) this.clientWindows.delete(key);
@@ -125,6 +145,9 @@ export class AiAdmissionController {
     this.activeRequests += 1;
     this.reservedDailyTokens += tokens;
     this.dailyRequests += 1;
+    clientDaily.reservedTokens += tokens;
+    clientDaily.requests += 1;
+    this.clientDailyUsage.set(safeClientKey, clientDaily);
     let released = false;
     return {
       lease: {
@@ -138,13 +161,32 @@ export class AiAdmissionController {
     };
   }
 
-  getSnapshot() {
+  getSnapshot(clientKey?: string) {
+    const safeClientKey = typeof clientKey === "string" && clientKey.trim() ? clientKey.trim() : "unknown";
+    const clientDaily = this.clientDailyUsage.get(safeClientKey);
+    const sameDay = clientDaily?.dayKey === this.dayKey;
+    const clientRequests = sameDay ? clientDaily.requests : 0;
+    const clientTokens = sameDay ? clientDaily.reservedTokens : 0;
     return {
       activeRequests: this.activeRequests,
       reservedDailyTokens: this.reservedDailyTokens,
       dailyRequests: this.dailyRequests,
       trackedClients: this.clientWindows.size,
       dayKey: this.dayKey,
+      limits: {
+        maxConcurrent: this.maxConcurrent,
+        requestsPerMinute: this.maxRequestsPerClientPerMinute,
+        requestsPerDay: this.perClientDailyRequestBudget,
+        reservedOutputTokensPerDay: this.perClientDailyOutputTokenBudget,
+        globalRequestsPerDay: this.dailyRequestBudget,
+        globalReservedOutputTokensPerDay: this.dailyOutputTokenBudget,
+      },
+      client: {
+        requestsToday: clientRequests,
+        reservedOutputTokensToday: clientTokens,
+        remainingRequestsToday: Math.max(0, this.perClientDailyRequestBudget - clientRequests),
+        remainingReservedOutputTokensToday: Math.max(0, this.perClientDailyOutputTokenBudget - clientTokens),
+      },
     };
   }
 }

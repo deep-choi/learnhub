@@ -126,9 +126,32 @@ export const createSupabaseAuthAdapter = async (
       });
       if (result.error) throw result.error;
     },
+    resendSignUpConfirmation: async (email: string) => {
+      const emailRedirectTo = typeof window === "undefined" ? undefined : window.location.origin;
+      const result = await client.auth.resend({
+        type: "signup",
+        email,
+        options: emailRedirectTo ? { emailRedirectTo } : undefined,
+      });
+      if (result.error) throw result.error;
+    },
     signInWithPassword: async (email: string, password: string) => {
       const result = await client.auth.signInWithPassword({ email, password });
       if (result.error) throw result.error;
+    },
+    requestPasswordReset: async (email: string) => {
+      const redirectTo = typeof window === "undefined" ? undefined : window.location.origin;
+      const result = await client.auth.resetPasswordForEmail(email, redirectTo ? { redirectTo } : undefined);
+      if (result.error) throw result.error;
+    },
+    updatePassword: async (password: string) => {
+      const result = await client.auth.updateUser({ password });
+      if (result.error) throw result.error;
+    },
+    deleteAccount: async () => {
+      const result = await client.rpc("delete_my_account");
+      if (result.error) throw result.error;
+      await client.auth.signOut({ scope: "local" });
     },
     signOut: async () => {
       const result = await client.auth.signOut();

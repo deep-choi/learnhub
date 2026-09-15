@@ -1,8 +1,15 @@
 import {
   GoogleGenAI,
+  ThinkingLevel,
   type GenerateContentConfig,
   type GenerateContentResponse,
 } from "@google/genai";
+import {
+  DEFAULT_AI_SELECTION,
+  getAiModel,
+  isAiRuntimeSelection,
+  type AiRuntimeSelection,
+} from "../src/domain/aiModels";
 import { AiAdmissionController } from "./aiPolicy";
 
 export const AI_TIMEOUT_MS = 20_000;
@@ -22,18 +29,23 @@ export interface AiGatewayRequest<T> {
   prompt: string;
   config: GenerateContentConfig;
   maxOutputTokens: number;
+  selection?: AiRuntimeSelection;
   validate: (payload: unknown) => string[];
 }
 
 export interface AiGatewayResult<T> {
   payload: T;
   usage: AiUsageMetadata;
+  selection: AiRuntimeSelection;
 }
 
 export interface AiGatewayLoggerEvent {
   event: "ai_request";
   requestId: string;
   endpoint: string;
+  provider: AiRuntimeSelection["provider"];
+  model: string;
+  reasoningEffort: AiRuntimeSelection["reasoningEffort"];
   status: "success" | "invalid_input" | "invalid_output" | "unavailable" | "admission_rejected";
   durationMs: number;
   usage: AiUsageMetadata | null;
@@ -70,30 +82,89 @@ const emptyUsage = (): AiUsageMetadata => ({
 const finiteOrNull = (value: unknown): number | null =>
   typeof value === "number" && Number.isFinite(value) ? value : null;
 
-const readUsage = (response: GenerateContentResponse): AiUsageMetadata => ({
+const readGeminiUsage = (response: GenerateContentResponse): AiUsageMetadata => ({
   promptTokenCount: finiteOrNull(response.usageMetadata?.promptTokenCount),
   candidatesTokenCount: finiteOrNull(response.usageMetadata?.candidatesTokenCount),
   totalTokenCount: finiteOrNull(response.usageMetadata?.totalTokenCount),
 });
 
+const thinkingLevel = (effort: AiRuntimeSelection["reasoningEffort"]): ThinkingLevel => {
+  if (effort === "minimal" || effort === "none") return ThinkingLevel.MINIMAL;
+  if (effort === "low") return ThinkingLevel.LOW;
+  if (effort === "high" || effort === "xhigh" || effort === "max") return ThinkingLevel.HIGH;
+  return ThinkingLevel.MEDIUM;
+};
+
+const geminiThinkingConfig = (selection: AiRuntimeSelection) => {
+  if (selection.model.startsWith("gemini-2.5")) {
+    const budgets = { none: 0, minimal: 512, low: 1_024, medium: 8_192, high: 24_576, xhigh: 24_576, max: 24_576 } as const;
+    return { thinkingBudget: budgets[selection.reasoningEffort] };
+  }
+  return { thinkingLevel: thinkingLevel(selection.reasoningEffort) };
+};
+
+type JsonSchema = Record<string, unknown>;
+
+const toJsonSchema = (input: unknown): JsonSchema => {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return {};
+  const source = input as Record<string, unknown>;
+  const typeMap: Record<string, string> = {
+    STRING: "string",
+    NUMBER: "number",
+    INTEGER: "integer",
+    BOOLEAN: "boolean",
+    ARRAY: "array",
+    OBJECT: "object",
+    NULL: "null",
+  };
+  const output: JsonSchema = {};
+  if (typeof source.type === "string" && typeMap[source.type]) output.type = typeMap[source.type];
+  if (Array.isArray(source.enum)) output.enum = source.enum;
+  if (Array.isArray(source.required)) output.required = source.required;
+  if (source.items) output.items = toJsonSchema(source.items);
+  if (source.properties && typeof source.properties === "object" && !Array.isArray(source.properties)) {
+    output.properties = Object.fromEntries(
+      Object.entries(source.properties as Record<string, unknown>).map(([key, value]) => [key, toJsonSchema(value)]),
+    );
+    output.additionalProperties = false;
+  }
+  return output;
+};
+
+interface OpenAiResponseBody {
+  output?: Array<{ type?: string; content?: Array<{ type?: string; text?: string }> }>;
+  usage?: { input_tokens?: number; output_tokens?: number; total_tokens?: number };
+}
+
+const openAiText = (body: OpenAiResponseBody): string =>
+  (body.output || [])
+    .flatMap((item) => item.content || [])
+    .filter((content) => content.type === "output_text" && typeof content.text === "string")
+    .map((content) => content.text!)
+    .join("");
+
 export class AiGateway {
-  private readonly client: AiModelsClient | null;
+  private readonly geminiClient: AiModelsClient | null;
+  private readonly openAiApiKey: string | null;
+  private readonly openAiFetch: typeof fetch;
   private readonly policy: AiAdmissionController;
   private readonly logger: (event: AiGatewayLoggerEvent) => void;
-  private readonly model: string;
 
   constructor(options: {
+    /** Backward-compatible alias for geminiApiKey. */
     apiKey?: string;
+    geminiApiKey?: string;
+    openAiApiKey?: string;
     client?: AiModelsClient | null;
+    openAiFetch?: typeof fetch;
     policy?: AiAdmissionController;
-    model?: string;
     logger?: (event: AiGatewayLoggerEvent) => void;
   } = {}) {
-    const apiKey = options.apiKey?.trim();
-    this.client = options.client === undefined
-      ? apiKey
+    const geminiApiKey = (options.geminiApiKey || options.apiKey)?.trim();
+    this.geminiClient = options.client === undefined
+      ? geminiApiKey
         ? new GoogleGenAI({
-            apiKey,
+            apiKey: geminiApiKey,
             httpOptions: {
               timeout: AI_TIMEOUT_MS,
               retryOptions: { attempts: 1 },
@@ -102,65 +173,114 @@ export class AiGateway {
           })
         : null
       : options.client;
+    this.openAiApiKey = options.openAiApiKey?.trim() || null;
+    this.openAiFetch = options.openAiFetch || fetch;
     this.policy = options.policy ?? new AiAdmissionController();
-    this.model = options.model ?? "gemini-3.6-flash";
     this.logger = options.logger ?? ((event) => console.info(JSON.stringify(event)));
   }
 
-  isConfigured(): boolean {
-    return this.client !== null;
+  isConfigured(provider?: AiRuntimeSelection["provider"]): boolean {
+    if (provider === "openai") return this.openAiApiKey !== null;
+    if (provider === "gemini") return this.geminiClient !== null;
+    return this.openAiApiKey !== null || this.geminiClient !== null;
+  }
+
+  getQuotaSnapshot(clientKey: string) {
+    return this.policy.getSnapshot(clientKey);
   }
 
   async generateJson<T>(request: AiGatewayRequest<T>): Promise<AiGatewayResult<T>> {
     const startedAt = Date.now();
+    const selection = request.selection || { ...DEFAULT_AI_SELECTION };
     let status: AiGatewayLoggerEvent["status"] = "unavailable";
     let usage: AiUsageMetadata | null = null;
     let admissionReason: string | undefined;
+    const model = getAiModel(selection.provider, selection.model);
 
-    if (!request.prompt.trim() || request.prompt.length > AI_MAX_PROMPT_CHARS || !Number.isFinite(request.maxOutputTokens) || request.maxOutputTokens <= 0 || !Number.isInteger(request.maxOutputTokens)) {
+    if (
+      !request.prompt.trim() ||
+      request.prompt.length > AI_MAX_PROMPT_CHARS ||
+      !Number.isFinite(request.maxOutputTokens) ||
+      request.maxOutputTokens <= 0 ||
+      !Number.isInteger(request.maxOutputTokens) ||
+      !isAiRuntimeSelection(selection) ||
+      !model ||
+      !model.reasoningEfforts.includes(selection.reasoningEffort)
+    ) {
       status = "invalid_input";
-      this.log(request, startedAt, status, usage);
+      this.log(request, selection, startedAt, status, usage);
       throw new AiGatewayError("AI_INVALID_REQUEST", 400);
     }
 
-    if (!this.client) {
-      this.log(request, startedAt, status, usage);
+    if (!this.isConfigured(selection.provider)) {
+      this.log(request, selection, startedAt, status, usage);
       throw new AiGatewayError("AI_NOT_CONFIGURED", 503);
     }
 
-    const maxOutputTokens = Math.floor(request.maxOutputTokens);
+    const maxOutputTokens = Math.min(Math.floor(request.maxOutputTokens), selection.maxOutputTokens);
     const admission = this.policy.tryAcquire(request.clientKey, maxOutputTokens);
     if (!admission.lease) {
       status = "admission_rejected";
       admissionReason = admission.reason;
-      this.log(request, startedAt, status, usage, admissionReason);
+      this.log(request, selection, startedAt, status, usage, admissionReason);
       throw new AiGatewayError("AI_ADMISSION_REJECTED", 429, admissionReason);
     }
 
     const abortController = new AbortController();
     const timeout = setTimeout(() => abortController.abort(), AI_TIMEOUT_MS);
     try {
-      const response = await this.client.models.generateContent({
-        model: this.model,
-        contents: request.prompt,
-        config: {
-          ...request.config,
-          maxOutputTokens,
-          abortSignal: abortController.signal,
-          httpOptions: {
-            ...request.config.httpOptions,
-            timeout: AI_TIMEOUT_MS,
-            retryOptions: { attempts: 1 },
+      let text = "";
+      if (selection.provider === "gemini") {
+        const response = await this.geminiClient!.models.generateContent({
+          model: selection.model,
+          contents: request.prompt,
+          config: {
+            ...request.config,
+            maxOutputTokens,
+            thinkingConfig: geminiThinkingConfig(selection),
+            abortSignal: abortController.signal,
+            httpOptions: {
+              ...request.config.httpOptions,
+              timeout: AI_TIMEOUT_MS,
+              retryOptions: { attempts: 1 },
+            },
           },
-        },
-      });
-      usage = readUsage(response);
-      const text = response.text || "";
+        });
+        usage = readGeminiUsage(response);
+        text = response.text || "";
+      } else {
+        const schema = request.config.responseSchema ? toJsonSchema(request.config.responseSchema) : null;
+        const response = await this.openAiFetch("https://api.openai.com/v1/responses", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${this.openAiApiKey}`,
+            "Content-Type": "application/json",
+            "User-Agent": "learnhub-server",
+          },
+          signal: abortController.signal,
+          body: JSON.stringify({
+            model: selection.model,
+            input: request.prompt,
+            reasoning: { effort: selection.reasoningEffort },
+            max_output_tokens: maxOutputTokens,
+            store: false,
+            ...(schema ? { text: { format: { type: "json_schema", name: "learnhub_response", strict: false, schema } } } : {}),
+          }),
+        });
+        if (!response.ok) throw new Error("OpenAI request failed");
+        const body = await response.json() as OpenAiResponseBody;
+        text = openAiText(body);
+        usage = {
+          promptTokenCount: finiteOrNull(body.usage?.input_tokens),
+          candidatesTokenCount: finiteOrNull(body.usage?.output_tokens),
+          totalTokenCount: finiteOrNull(body.usage?.total_tokens),
+        };
+      }
+
       if (text.length === 0 || text.length > AI_MAX_RESPONSE_CHARS) {
         status = "invalid_output";
         throw new AiGatewayError("AI_INVALID_OUTPUT", 502);
       }
-
       let payload: unknown;
       try {
         payload = JSON.parse(text);
@@ -168,28 +288,26 @@ export class AiGateway {
         status = "invalid_output";
         throw new AiGatewayError("AI_INVALID_OUTPUT", 502);
       }
-      const validationErrors = request.validate(payload);
-      if (validationErrors.length > 0) {
+      if (request.validate(payload).length > 0) {
         status = "invalid_output";
         throw new AiGatewayError("AI_INVALID_OUTPUT", 502);
       }
       status = "success";
-      return { payload: payload as T, usage };
+      return { payload: payload as T, usage: usage || emptyUsage(), selection };
     } catch (error) {
       if (error instanceof AiGatewayError) throw error;
       status = "unavailable";
       throw new AiGatewayError("AI_UNAVAILABLE", 503);
     } finally {
       clearTimeout(timeout);
-      // The lease is released only after the SDK promise settles. The SDK's
-      // documented abort is client-side, so no retry is started after it.
       admission.lease.release();
-      this.log(request, startedAt, status, usage, admissionReason);
+      this.log(request, selection, startedAt, status, usage, admissionReason);
     }
   }
 
   private log(
     request: AiGatewayRequest<unknown>,
+    selection: AiRuntimeSelection,
     startedAt: number,
     status: AiGatewayLoggerEvent["status"],
     usage: AiUsageMetadata | null,
@@ -199,6 +317,9 @@ export class AiGateway {
       event: "ai_request",
       requestId: request.requestId,
       endpoint: request.endpoint,
+      provider: selection.provider,
+      model: selection.model,
+      reasoningEffort: selection.reasoningEffort,
       status,
       durationMs: Math.max(0, Date.now() - startedAt),
       usage,

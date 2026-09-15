@@ -1,37 +1,22 @@
 import { Course, UserSkill, UserProgress, ReviewQuestion, LessonContent, LessonMeta, MistakeItem, UserAccount } from "../types/learning";
-import { INITIAL_COURSES, INITIAL_SKILLS, INITIAL_REVIEWS, INITIAL_PROGRESS } from "../data/initialData";
 import { PRESET_ROADMAP_CONTENTS } from "../data/roadmapData";
 
-const INITIAL_MISTAKES: MistakeItem[] = [
-  {
-    id: "mistake-1",
-    conceptId: "concept-diff-01",
-    concept: "순간변화율과 접선의 기울기",
-    courseId: "course-high-math-01",
-    course: "[고등] 미적분학: 변화의 수학",
-    question: "함수 f(x) = x²의 x = 3에서의 순간변화율은?",
-    wrongAnswer: "9",
-    correctAnswer: "6",
-    misconceptionTag: "개념 미숙",
-    explanation: "f(3)의 함숫값(9)과 f'(3)의 미분계수(6)를 혼동하여 대입했습니다.",
-    date: "2026-09-08",
-    isResolved: false,
-  },
-  {
-    id: "mistake-2",
-    conceptId: "concept-mid-01",
-    concept: "일차방정식과 논리적 이항",
-    courseId: "course-mid-math-01",
-    course: "[중등] 일차방정식: 미지수의 균형",
-    question: "방정식 2x + 7 = 15 에서 x의 값은?",
-    wrongAnswer: "11",
-    correctAnswer: "4",
-    misconceptionTag: "계산 착오",
-    explanation: "+7을 우변으로 이항할 때 부호를 바꾸지 않고 15 + 7로 계산한 오류입니다.",
-    date: "2026-09-07",
-    isResolved: false,
-  },
-];
+export const LEARNHUB_DATA_CHANGED_EVENT = "learnhub:data-changed";
+
+const EMPTY_PROGRESS: UserProgress = {
+  streakDays: 0,
+  totalMinutesLearned: 0,
+  completedLessonsCount: 0,
+  lastActiveDate: "",
+};
+
+let currentUser: UserAccount | null = null;
+
+export const notifyLearningDataChanged = (): void => {
+  if (typeof window !== "undefined" && typeof window.dispatchEvent === "function") {
+    window.dispatchEvent(new CustomEvent(LEARNHUB_DATA_CHANGED_EVENT));
+  }
+};
 
 /**
  * The stable LearnHub localStorage namespace.
@@ -47,6 +32,7 @@ export const LEARNHUB_STORAGE_KEYS = {
   LESSONS_CACHE: "ai_learnhub_lessons_cache_v2",
   QUIZ_ATTEMPTS: "ai_learnhub_quiz_attempts_v2",
   MISTAKES: "ai_learnhub_mistakes_v2",
+  AI_PREFERENCES: "learnhub_ai_preferences_v1",
   USER: "ai_learnhub_user_v2",
 } as const;
 
@@ -54,6 +40,8 @@ export const LEARNHUB_SCOPED_STORAGE_PREFIXES = {
   NOTES: "learnhub_note_",
   SCRATCHPAD: "learnhub_scratchpad_",
   TUTOR: "learnhub_tutor_history_",
+  PRACTICE: "learnhub_practice_",
+  ASSESSMENT: "learnhub_assessment_",
 } as const;
 
 const KEYS = LEARNHUB_STORAGE_KEYS;
@@ -62,19 +50,17 @@ export class StorageService {
   static getCourses(): Course[] {
     try {
       const data = localStorage.getItem(KEYS.COURSES);
-      if (!data) {
-        this.saveCourses(INITIAL_COURSES);
-        return INITIAL_COURSES;
-      }
+      if (!data) return [];
       return JSON.parse(data);
     } catch {
-      return INITIAL_COURSES;
+      return [];
     }
   }
 
   static saveCourses(courses: Course[]): boolean {
     try {
       localStorage.setItem(KEYS.COURSES, JSON.stringify(courses));
+      notifyLearningDataChanged();
       return true;
     } catch (e) {
       console.error("Failed to save courses:", e);
@@ -84,8 +70,17 @@ export class StorageService {
 
   static addCourse(course: Course) {
     const courses = this.getCourses();
-    const updated = [course, ...courses];
+    const updated = [{ ...course, status: course.status || "active" }, ...courses];
     this.saveCourses(updated);
+  }
+
+  static updateCourseStatus(courseId: string, status: NonNullable<Course["status"]>): boolean {
+    const courses = this.getCourses();
+    const course = courses.find((item) => item.id === courseId);
+    if (!course) return false;
+    course.status = status;
+    course.updatedAt = new Date().toISOString();
+    return this.saveCourses(courses);
   }
 
   static getCourseById(id: string): Course | undefined {
@@ -123,19 +118,17 @@ export class StorageService {
   static getSkills(): UserSkill[] {
     try {
       const data = localStorage.getItem(KEYS.SKILLS);
-      if (!data) {
-        localStorage.setItem(KEYS.SKILLS, JSON.stringify(INITIAL_SKILLS));
-        return INITIAL_SKILLS;
-      }
+      if (!data) return [];
       return JSON.parse(data);
     } catch {
-      return INITIAL_SKILLS;
+      return [];
     }
   }
 
   static saveSkills(skills: UserSkill[]): boolean {
     try {
       localStorage.setItem(KEYS.SKILLS, JSON.stringify(skills));
+      notifyLearningDataChanged();
       return true;
     } catch (e) {
       console.error("Failed to save skills:", e);
@@ -215,19 +208,17 @@ export class StorageService {
   static getReviews(): ReviewQuestion[] {
     try {
       const data = localStorage.getItem(KEYS.REVIEWS);
-      if (!data) {
-        localStorage.setItem(KEYS.REVIEWS, JSON.stringify(INITIAL_REVIEWS));
-        return INITIAL_REVIEWS;
-      }
+      if (!data) return [];
       return JSON.parse(data);
     } catch {
-      return INITIAL_REVIEWS;
+      return [];
     }
   }
 
   static saveReviews(reviews: ReviewQuestion[]): boolean {
     try {
       localStorage.setItem(KEYS.REVIEWS, JSON.stringify(reviews));
+      notifyLearningDataChanged();
       return true;
     } catch (e) {
       console.error("Failed to save reviews:", e);
@@ -305,19 +296,17 @@ export class StorageService {
   static getProgress(): UserProgress {
     try {
       const data = localStorage.getItem(KEYS.PROGRESS);
-      if (!data) {
-        localStorage.setItem(KEYS.PROGRESS, JSON.stringify(INITIAL_PROGRESS));
-        return INITIAL_PROGRESS;
-      }
+      if (!data) return { ...EMPTY_PROGRESS };
       return JSON.parse(data);
     } catch {
-      return INITIAL_PROGRESS;
+      return { ...EMPTY_PROGRESS };
     }
   }
 
   static saveProgress(p: UserProgress) {
     try {
       localStorage.setItem(KEYS.PROGRESS, JSON.stringify(p));
+      notifyLearningDataChanged();
     } catch (e) {
       console.error("Failed to save progress:", e);
     }
@@ -352,6 +341,7 @@ export class StorageService {
   static cacheLessonContent(lessonId: string, content: LessonContent) {
     try {
       localStorage.setItem(`${KEYS.LESSONS_CACHE}_${lessonId}`, JSON.stringify(content));
+      notifyLearningDataChanged();
     } catch (e) {
       console.error("Failed to cache lesson:", e);
     }
@@ -360,19 +350,17 @@ export class StorageService {
   static getMistakes(): MistakeItem[] {
     try {
       const data = localStorage.getItem(KEYS.MISTAKES);
-      if (!data) {
-        this.saveMistakes(INITIAL_MISTAKES);
-        return INITIAL_MISTAKES;
-      }
+      if (!data) return [];
       return JSON.parse(data);
     } catch {
-      return INITIAL_MISTAKES;
+      return [];
     }
   }
 
   static saveMistakes(mistakes: MistakeItem[]) {
     try {
       localStorage.setItem(KEYS.MISTAKES, JSON.stringify(mistakes));
+      notifyLearningDataChanged();
     } catch (e) {
       console.error("Failed to save mistakes:", e);
     }
@@ -412,83 +400,54 @@ export class StorageService {
   }
 
   static getUser(): UserAccount {
-    try {
-      const data = localStorage.getItem(KEYS.USER);
-      if (data) return JSON.parse(data);
-    } catch {}
-    const defaultGuest: UserAccount = {
+    return currentUser || {
       id: "guest-user",
-      name: "체험 학습자",
+      name: "로그인 필요",
       isGuest: true,
       isLocalOnly: true,
       provider: "guest",
       createdAt: new Date().toISOString(),
     };
-    return defaultGuest;
   }
 
   static setUser(user: UserAccount): boolean {
-    try {
-      localStorage.setItem(KEYS.USER, JSON.stringify(user));
-      return true;
-    } catch (e) {
-      console.error("Failed to save user:", e);
-      return false;
-    }
-  }
-
-  static createLocalProfile(name: string): UserAccount {
-    const user: UserAccount = {
-      id: `local-user-${Date.now()}`,
-      name: name.trim() || "이 기기 학습자",
-      isGuest: false,
-      isLocalOnly: true,
-      createdAt: new Date().toISOString(),
-    };
-    if (!this.setUser(user)) {
-      throw new Error("로컬 프로필을 저장하지 못했습니다.");
-    }
-    return user;
-  }
-
-  // Kept for callers written against the old local-only API. It never authenticates
-  // or stores newly supplied PII; use createLocalProfile for new UI code.
-  static loginUser(name: string, email: string, provider: "email" | "google" | "apple" = "email"): UserAccount {
-    void email;
-    void provider;
-    return this.createLocalProfile(name);
+    currentUser = user;
+    return true;
   }
 
   static logout(): UserAccount {
-    localStorage.removeItem(KEYS.USER);
+    currentUser = null;
+    this.clearLearningData();
     return this.getUser();
   }
 
-  static resetData() {
-    const studyKeys = [
-      KEYS.COURSES,
-      KEYS.SKILLS,
-      KEYS.REVIEWS,
-      KEYS.PROGRESS,
-      KEYS.MISTAKES,
-      KEYS.QUIZ_ATTEMPTS,
-    ];
-    studyKeys.forEach((key) => localStorage.removeItem(key));
-
-    // Lesson content is disposable study data, but lesson notes and the current
-    // local profile intentionally remain untouched.
+  static clearLearningData(): void {
+    const exactKeys = new Set<string>([
+      ...Object.values(KEYS),
+      "learnhub_cloud_data_owner_v1",
+      "learnhub_pending_sync_owner_v1",
+      "learnhub_content_report_drafts_v1",
+      "learnhub_learning_analytics_v1",
+    ]);
     for (let index = localStorage.length - 1; index >= 0; index -= 1) {
       const key = localStorage.key(index);
-      if (key?.startsWith(`${KEYS.LESSONS_CACHE}_`)) {
+      if (key && (
+        exactKeys.has(key) ||
+        key.startsWith(`${KEYS.LESSONS_CACHE}_`) ||
+        key.startsWith(LEARNHUB_SCOPED_STORAGE_PREFIXES.NOTES) ||
+        key.startsWith(LEARNHUB_SCOPED_STORAGE_PREFIXES.SCRATCHPAD) ||
+        key.startsWith(LEARNHUB_SCOPED_STORAGE_PREFIXES.TUTOR) ||
+        key.startsWith(LEARNHUB_SCOPED_STORAGE_PREFIXES.PRACTICE) ||
+        key.startsWith(LEARNHUB_SCOPED_STORAGE_PREFIXES.ASSESSMENT)
+      )) {
         localStorage.removeItem(key);
       }
     }
+  }
 
-    this.saveCourses(INITIAL_COURSES);
-    this.saveSkills(INITIAL_SKILLS);
-    this.saveReviews(INITIAL_REVIEWS);
-    this.saveProgress(INITIAL_PROGRESS);
-    this.saveMistakes(INITIAL_MISTAKES);
+  static resetData(): void {
+    this.clearLearningData();
+    notifyLearningDataChanged();
   }
 
   private static getQuizAttemptIds(): Set<string> {
@@ -509,6 +468,7 @@ export class StorageService {
   private static saveQuizAttemptIds(attempts: Set<string>): boolean {
     try {
       localStorage.setItem(KEYS.QUIZ_ATTEMPTS, JSON.stringify([...attempts]));
+      notifyLearningDataChanged();
       return true;
     } catch (e) {
       console.error("Failed to save quiz attempts:", e);

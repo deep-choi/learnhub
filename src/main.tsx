@@ -18,6 +18,9 @@ void initializeSupabaseAuth()
   .then((handle) => {
     if (!handle) {
       clearAuthAdapter();
+      window.dispatchEvent(new CustomEvent(LEARNHUB_AUTH_CHANGED_EVENT, {
+        detail: { event: "CONFIGURATION_ERROR", userId: null },
+      }));
       return;
     }
     configureAuthAdapter(handle.adapter);
@@ -28,4 +31,7 @@ void initializeSupabaseAuth()
   .catch(() => {
     // Missing/unavailable public config remains the default fail-closed state.
     clearAuthAdapter();
+    window.dispatchEvent(new CustomEvent(LEARNHUB_AUTH_CHANGED_EVENT, {
+      detail: { event: "CONFIGURATION_ERROR", userId: null },
+    }));
   });
