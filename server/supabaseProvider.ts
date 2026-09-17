@@ -139,9 +139,15 @@ export const reserveSupabaseAiUsage = async (accessToken: string, requestedToken
   if (!Number.isInteger(requestedTokens) || requestedTokens <= 0) throw new Error("Requested AI tokens must be a positive integer");
   const client = createRequestClient(accessToken);
   const { data, error } = await client.rpc("reserve_ai_daily_usage", { p_requested_tokens: requestedTokens });
-  if (error) throw new Error("AI usage reservation failed");
+  if (error) {
+    console.error(JSON.stringify({ event: "supabase_ai_quota_error", operation: "reserve", code: error.code || "unknown", message: error.message.slice(0, 200) }));
+    throw new Error("AI usage reservation failed");
+  }
   const usage = aiUsageRecord(firstRow(data));
-  if (!usage) throw new SupabaseAiQuotaExceededError();
+  if (!usage) {
+    console.error(JSON.stringify({ event: "supabase_ai_quota_error", operation: "reserve", code: "INVALID_RESPONSE" }));
+    throw new SupabaseAiQuotaExceededError();
+  }
   return usage;
 };
 

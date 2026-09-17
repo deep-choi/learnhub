@@ -20,10 +20,13 @@ service-role key, secret key, JWT secret은 앱 서버나 브라우저에 필요
 - `supabase/migrations/20260909_learnhub_initial.sql`
 - `supabase/migrations/20260915_delete_my_account.sql`
 - `supabase/migrations/20260915_ai_daily_quota.sql`
+- `supabase/migrations/20260917_fix_ai_daily_quota_reservation.sql` (기존 운영 DB에 1회 적용)
 
 두 번째 migration은 사용자가 설정 화면에서 본인의 계정을 삭제할 때 호출하는 `delete_my_account()` RPC를 만든다. 이 함수는 인증된 `auth.uid()` 본인만 삭제하며, 관련 학습 snapshot과 신고 기록은 외래 키 cascade로 함께 삭제된다.
 
 세 번째 migration은 인증된 계정별 AI 요청·예약 token을 하루 단위로 원자적으로 기록한다. `ai_quota_policy`의 초기값은 하루 100회·100,000 예약 output token이며, `reserve_ai_daily_usage()`와 `get_ai_daily_usage()`만 인증된 사용자에게 공개된다.
+
+기존 운영 DB에서 `reserve_ai_daily_usage()`가 `usage_day` ambiguous 오류를 내면 네 번째 migration을 Supabase SQL Editor에서 1회 실행한다. 이 함수는 primary-key constraint를 사용해 출력 컬럼명과 충돌하지 않도록 고친 버전이다.
 
 2026-09-15 LearnHub 원격 프로젝트에 이 migration을 실행했고 SQL Editor의 `Success. No rows returned` 결과를 확인했다. 다른 Supabase 프로젝트나 새 환경에 적용할 때는 다음 순서를 사용한다.
 

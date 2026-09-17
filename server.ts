@@ -298,6 +298,12 @@ const runAi = async <T>(req: Request, res: Response, endpoint: string, prompt: s
     return res.json(result.payload);
   } catch (error) {
     if (error instanceof SupabaseAiQuotaExceededError) return res.status(429).json({ error: "오늘의 AI 사용 한도에 도달했습니다. 내일 다시 이용해 주세요.", code: "AI_DAILY_QUOTA_EXCEEDED" });
+    console.error(JSON.stringify({
+      event: "ai_error",
+      requestId: res.locals.requestId,
+      endpoint,
+      code: error instanceof AiGatewayError ? error.code : error instanceof Error ? error.message.slice(0, 120) : "unknown",
+    }));
     return sendAiError(res, error);
   }
 };
@@ -323,7 +329,33 @@ const lessonSchema = {
 };
 const evaluationSchema = { type: Type.OBJECT, properties: { isCorrect: { type: Type.BOOLEAN }, feedback: { type: Type.STRING }, hint: { type: Type.STRING }, misconceptionTag: { type: Type.STRING }, explanation: { type: Type.STRING }, status: { type: Type.STRING } }, required: ["isCorrect", "feedback"] };
 const tutorSchema = { type: Type.OBJECT, properties: { reply: { type: Type.STRING }, suggestionChips: { type: Type.ARRAY, items: { type: Type.STRING } } }, required: ["reply", "suggestionChips"] };
+const practiceSchema = { type: Type.OBJECT, properties: {
+  question: { type: Type.STRING },
+  quizType: { type: Type.STRING },
+  options: { type: Type.ARRAY, items: { type: Type.STRING } },
+  answer: { type: Type.STRING },
+  explanation: { type: Type.STRING },
+  hints: { type: Type.ARRAY, items: { type: Type.STRING } },
+}, required: ["question", "quizType", "answer", "explanation", "hints"] };
 const reviewSchema = { type: Type.OBJECT, properties: { reviewSessionTitle: { type: Type.STRING }, estimatedMinutes: { type: Type.INTEGER }, questions: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { conceptId: { type: Type.STRING }, conceptName: { type: Type.STRING }, courseTitle: { type: Type.STRING }, question: { type: Type.STRING }, quizType: { type: Type.STRING }, options: { type: Type.ARRAY, items: { type: Type.STRING } }, answer: { type: Type.STRING }, explanation: { type: Type.STRING } }, required: ["conceptName", "courseTitle", "question", "quizType", "answer", "explanation"] } } }, required: ["reviewSessionTitle", "estimatedMinutes", "questions"] };
+
+const validatePracticePayload = (payload: unknown): string[] => {
+  if (!isRecord(payload) || boundedString(payload, "question", 2_000) === null || boundedString(payload, "answer", 1_000) === null || boundedString(payload, "explanation", 4_000) === null || !isAllowed(payload.quizType, QUIZ_TYPES)) {
+    return ["문제 응답 형식이 올바르지 않습니다."];
+  }
+  if (!Array.isArray(payload.hints) || payload.hints.length < 1 || payload.hints.length > 3 || payload.hints.some((hint) => typeof hint !== "string" || !hint.trim() || hint.length > 500)) {
+    return ["문제 힌트 형식이 올바르지 않습니다."];
+  }
+  if (payload.quizType === "multiple_choice") {
+    if (!Array.isArray(payload.options) || payload.options.length < 3 || payload.options.length > 5 || payload.options.some((option) => typeof option !== "string" || !option.trim() || option.length > 500)) {
+      return ["객관식 선택지 형식이 올바르지 않습니다."];
+    }
+    const options = payload.options.map((option) => option.trim());
+    const answer = (payload.answer as string).trim();
+    if (new Set(options).size !== options.length || !options.includes(answer)) return ["객관식 정답이 선택지와 일치하지 않습니다."];
+  }
+  return [];
+};
 
 const validateReviewPayload = (payload: unknown): string[] => {
   if (!isRecord(payload) || boundedString(payload, "reviewSessionTitle", 200) === null || typeof payload.estimatedMinutes !== "number" || !Number.isFinite(payload.estimatedMinutes) || payload.estimatedMinutes <= 0 || !Array.isArray(payload.questions) || payload.questions.length < 1 || payload.questions.length > 5) return ["복습 응답이 올바르지 않습니다."];
@@ -396,6 +428,15 @@ app.post("/api/ai/tutor-chat", async (req, res) => {
   const history = Array.isArray(body.history) ? body.history.map((item) => `${item.role === "user" ? "학습자" : "튜터"}: ${item.text}`).join("\n").slice(0, 6_000) : "이전 대화 없음";
   const prompt = `친절한 AI 튜터입니다. 과목: "${body.courseTitle}" 수업: "${body.lessonTitle}" 개념: "${body.conceptName}" 현재 내용: "${body.currentStepContent}" 이전 대화:\n${history}\n질문: "${body.userQuestion}". 단계별 힌트와 쉬운 비유를 사용하고 후속 추천 질문 2~3개를 JSON으로 반환하세요.`;
   return runAi(req, res, "tutor-chat", prompt, { responseMimeType: "application/json", responseSchema: tutorSchema }, 900, (payload) => isRecord(payload) && typeof payload.reply === "string" && Array.isArray(payload.suggestionChips) && payload.suggestionChips.length <= 3 && payload.suggestionChips.every((item) => typeof item === "string") ? [] : ["invalid"]);
+});
+
+app.post("/api/ai/generate-practice", async (req, res) => {
+  if (!(await requireAiAccess(req, res))) return;
+  const body = req.body;
+  const fields = ["courseTitle", "chapterTitle", "lessonTitle", "learningType", "level", "conceptId", "conceptName", "lessonContext"];
+  if (!isRecord(body) || !hasOnlyKeys(body, fields) || ["courseTitle", "chapterTitle", "lessonTitle", "level", "conceptId", "conceptName"].some((key) => boundedString(body, key, 400) === null) || boundedString(body, "lessonContext", 8_000) === null || !isAllowed(body.learningType, LEARNING_TYPES)) return invalidBody(res, "문제 생성 설정을 확인해 주세요.");
+  const prompt = `성인 학습자를 위한 개인 튜터입니다. 과목: "${body.courseTitle}" 챕터: "${body.chapterTitle}" 레슨: "${body.lessonTitle}" 학습 유형: "${body.learningType}" 수준: "${body.level}" 개념: "${body.conceptName}" (${body.conceptId}). 현재 학습 내용: "${body.lessonContext}". 방금 배운 내용을 확인하는 문제를 딱 1개 생성하세요. 학습자가 직접 생각해야 하므로 정답이나 풀이를 질문에 넣지 마세요. 객관식이면 서로 겹치지 않는 선택지 3~4개와 선택지 중 하나인 정답을 만들고, 단답형이면 짧은 답을 허용하세요. 힌트는 정답을 바로 말하지 않는 단계별 힌트 2개를 만드세요. 지정된 JSON만 반환하세요.`;
+  return runAi(req, res, "generate-practice", prompt, { responseMimeType: "application/json", responseSchema: practiceSchema }, 1100, validatePracticePayload);
 });
 
 app.post("/api/ai/generate-review", async (req, res) => {

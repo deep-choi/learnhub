@@ -9,7 +9,7 @@ test("durable AI quota migration is account-scoped and atomic", () => {
   assert.match(sql, /references auth\.users \(id\) on delete cascade/u);
   assert.match(sql, /security definer/u);
   assert.match(sql, /auth\.uid\(\)/u);
-  assert.match(sql, /on conflict \(owner_id, usage_day\) do update/u);
+  assert.match(sql, /on conflict on constraint ai_usage_daily_pkey do update/u);
   assert.match(sql, /usage\.requests < quota\.per_user_request_limit/u);
   assert.match(sql, /grant execute on function public\.reserve_ai_daily_usage\(integer\) to authenticated/u);
 });

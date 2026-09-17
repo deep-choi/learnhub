@@ -60,7 +60,10 @@ begin
   return query
     insert into public.ai_usage_daily as usage (owner_id, usage_day, requests, reserved_output_tokens, updated_at)
     values (auth.uid(), current_day, 1, p_requested_tokens, now())
-    on conflict (owner_id, usage_day) do update
+    -- The return column is also named usage_day. Use the primary-key
+    -- constraint here so PL/pgSQL does not resolve the conflict target
+    -- against the output column variable with the same name.
+    on conflict on constraint ai_usage_daily_pkey do update
       set requests = usage.requests + 1,
           reserved_output_tokens = usage.reserved_output_tokens + excluded.reserved_output_tokens,
           updated_at = now()

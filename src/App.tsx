@@ -9,14 +9,13 @@ import { LEARNHUB_DATA_CHANGED_EVENT, StorageService } from "./services/storage"
 import { Sidebar, NotionPageView } from "./components/notion/Sidebar";
 import { HomeView } from "./components/HomeView";
 import { LearningRecordsView } from "./components/LearningRecordsView";
-import { NotionLessonCanvas } from "./components/notion/NotionLessonCanvas";
+import { LearningConversationView } from "./components/LearningConversationView";
 import { KnowledgeMapView } from "./components/notion/KnowledgeMapView";
 import { MistakeArchiveView } from "./components/notion/MistakeArchiveView";
 import { CommandPaletteModal } from "./components/notion/CommandPaletteModal";
 import { SkillMatrixView } from "./components/SkillMatrixView";
 import { ReviewView } from "./components/ReviewView";
 import { CreateCourseModal } from "./components/CreateCourseModal";
-import { AiTutorDrawer } from "./components/AiTutorDrawer";
 import { AuthModal } from "./components/notion/AuthModal";
 import { trackLearningEvent } from "./services/learningAnalytics";
 import { getAuthStatus, type AuthStatus } from "./services/authClient";
@@ -32,7 +31,6 @@ import {
 } from "./services/cloudSync";
 import { createLearningBackup, importLearningBackup, type LearningBackupDocument } from "./services/learningBackup";
 import { AiChatView } from "./components/AiChatView";
-import { LessonAiInputBar } from "./components/LessonAiInputBar";
 import { CoursesView } from "./components/CoursesView";
 import { CourseDetailView } from "./components/CourseDetailView";
 import { SettingsModal } from "./components/notion/SettingsModal";
@@ -88,12 +86,10 @@ export default function App() {
   const [pendingSubjectAfterAuth, setPendingSubjectAfterAuth] = useState("");
   const [pendingCreateAfterAuth, setPendingCreateAfterAuth] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
-  const [isTutorOpen, setIsTutorOpen] = useState(false);
   const [authCallbackError, setAuthCallbackError] = useState(getAuthCallbackError);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(() => Boolean(getAuthCallbackError()));
   const [passwordRecoveryMode, setPasswordRecoveryMode] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [tutorQuoteContext, setTutorQuoteContext] = useState("");
   const [pendingViewAfterAuth, setPendingViewAfterAuth] = useState<NotionPageView | null>(null);
   const [authResolved, setAuthResolved] = useState(false);
   const [dataReady, setDataReady] = useState(false);
@@ -313,6 +309,11 @@ export default function App() {
     resume: boolean,
     assessmentReturn = false,
   ) => {
+    if (!getAuthStatus().signedIn) {
+      setPendingViewAfterAuth({ type: "lesson", course, lesson, chapterTitle, assessmentReturn });
+      setIsAuthModalOpen(true);
+      return;
+    }
     const savedCourse = StorageService.getCourseById(course.id);
     if (!savedCourse) { StorageService.addCourse(course); reloadData(); }
     const currentCourse = savedCourse || course;
@@ -420,22 +421,8 @@ export default function App() {
     reloadData();
   };
 
-  const activeLessonScope = activeView.type === "lesson"
-    ? `${activeView.course.id}:${activeView.lesson.id}`
-    : null;
-
-  useEffect(() => {
-    setTutorQuoteContext("");
-    setIsTutorOpen(false);
-  }, [activeLessonScope]);
-
   const handleOpenTutor = () => {
-    if (activeView.type !== "lesson") {
-      handleSelectView({ type: "ai-chat" }, "ai-tutor");
-      return;
-    }
-    setTutorQuoteContext("");
-    setIsTutorOpen(true);
+    handleSelectView({ type: "ai-chat" }, "ai-tutor");
   };
 
   const handleOpenCreateCourse = (subject?: string) => {
@@ -453,8 +440,6 @@ export default function App() {
     setIsCreateModalOpen(true);
   };
 
-  const currentLessonData =
-    activeView.type === "lesson" ? activeView : null;
   const openAssessment = (course: Course) => {
     const stored = StorageService.getCourseById(course.id);
     if (!stored) {
@@ -577,15 +562,11 @@ export default function App() {
           )}
 
           {activeView.type === "lesson" && (
-            <NotionLessonCanvas
+            <LearningConversationView
               key={`${activeView.course.id}:${activeView.lesson.id}`}
               course={activeView.course}
               lessonMeta={activeView.lesson}
               chapterTitle={activeView.chapterTitle}
-              onOpenTutorWithText={(quote) => {
-                setTutorQuoteContext(quote);
-                setIsTutorOpen(true);
-              }}
               onFinishLesson={handleLessonFinished}
               onGoHome={() => handleSelectView({ type: "home" }, "lesson-home")}
               onGoCourse={() => setActiveView({ type: "course-detail", course: StorageService.getCourseById(activeView.course.id) || activeView.course })}
@@ -640,40 +621,9 @@ export default function App() {
 
         </main>
 
-        {activeView.type === "lesson" && (
-          <div className="pointer-events-none absolute inset-x-0 bottom-4 z-20 px-4">
-            <div className="pointer-events-auto">
-              <LessonAiInputBar onAsk={(question) => { setTutorQuoteContext(question); setIsTutorOpen(true); }} />
-            </div>
-          </div>
-        )}
       </div>
 
-      {/* 3. Global AI Socratic Drawer */}
-      {currentLessonData && (
-        <AiTutorDrawer
-          key={`tutor:${currentLessonData.course.id}:${currentLessonData.lesson.id}`}
-          isOpen={isTutorOpen}
-          onClose={() => {
-            setIsTutorOpen(false);
-            setTutorQuoteContext("");
-          }}
-          courseTitle={currentLessonData.course.title}
-          lessonTitle={currentLessonData.lesson.title}
-          lessonId={currentLessonData.lesson.id}
-          historyScope={`${currentLessonData.course.id}:${currentLessonData.lesson.id}`}
-          cachedLessonContent={StorageService.getCachedLessonContent(currentLessonData.lesson.id)}
-          conceptName={currentLessonData.lesson.conceptName}
-          currentStepContent={
-            tutorQuoteContext
-              ? `사용자가 현재 레슨에서 다음 내용을 질문했습니다: "${tutorQuoteContext}"`
-              : `${currentLessonData.course.title}의 ${currentLessonData.lesson.title} 학습 내용에 대한 질의응답 세션입니다.`
-          }
-          initialQuestion={tutorQuoteContext}
-        />
-      )}
-
-      {/* 4. Modals */}
+      {/* 3. Modals */}
       <CommandPaletteModal
         isOpen={isSearchOpen}
         onClose={() => setIsSearchOpen(false)}
