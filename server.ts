@@ -328,7 +328,7 @@ const lessonSchema = {
   }, required: ["title", "steps"],
 };
 const evaluationSchema = { type: Type.OBJECT, properties: { isCorrect: { type: Type.BOOLEAN }, feedback: { type: Type.STRING }, hint: { type: Type.STRING }, misconceptionTag: { type: Type.STRING }, explanation: { type: Type.STRING }, status: { type: Type.STRING } }, required: ["isCorrect", "feedback"] };
-const tutorSchema = { type: Type.OBJECT, properties: { reply: { type: Type.STRING }, suggestionChips: { type: Type.ARRAY, items: { type: Type.STRING } } }, required: ["reply", "suggestionChips"] };
+const tutorSchema = { type: Type.OBJECT, properties: { reply: { type: Type.STRING }, suggestionChips: { type: Type.ARRAY, items: { type: Type.STRING } } }, required: ["reply"] };
 const practiceSchema = { type: Type.OBJECT, properties: {
   question: { type: Type.STRING },
   quizType: { type: Type.STRING },
@@ -427,7 +427,11 @@ app.post("/api/ai/tutor-chat", async (req, res) => {
   if (!isRecord(body) || !hasOnlyKeys(body, fields) || ["courseTitle", "lessonTitle", "currentStepContent", "userQuestion", "conceptName"].some((key) => boundedString(body, key, key === "currentStepContent" ? 8_000 : 400) === null) || (body.history !== undefined && (!Array.isArray(body.history) || body.history.length > 12 || body.history.some((item) => !isRecord(item) || !isAllowed(item.role, ["user", "assistant"]) || boundedString(item, "text", 900) === null)))) return invalidBody(res, "튜터 질문과 레슨 맥락을 확인해 주세요.");
   const history = Array.isArray(body.history) ? body.history.map((item) => `${item.role === "user" ? "학습자" : "튜터"}: ${item.text}`).join("\n").slice(0, 6_000) : "이전 대화 없음";
   const prompt = `친절한 AI 튜터입니다. 과목: "${body.courseTitle}" 수업: "${body.lessonTitle}" 개념: "${body.conceptName}" 현재 내용: "${body.currentStepContent}" 이전 대화:\n${history}\n질문: "${body.userQuestion}". 단계별 힌트와 쉬운 비유를 사용하고 후속 추천 질문 2~3개를 JSON으로 반환하세요.`;
-  return runAi(req, res, "tutor-chat", prompt, { responseMimeType: "application/json", responseSchema: tutorSchema }, 900, (payload) => isRecord(payload) && typeof payload.reply === "string" && Array.isArray(payload.suggestionChips) && payload.suggestionChips.length <= 3 && payload.suggestionChips.every((item) => typeof item === "string") ? [] : ["invalid"]);
+  return runAi(req, res, "tutor-chat", prompt, { responseMimeType: "application/json", responseSchema: tutorSchema }, 900, (payload) => {
+    if (!isRecord(payload) || typeof payload.reply !== "string" || !payload.reply.trim()) return ["invalid"];
+    if (payload.suggestionChips !== undefined && (!Array.isArray(payload.suggestionChips) || payload.suggestionChips.some((item) => typeof item !== "string"))) return ["invalid"];
+    return [];
+  });
 });
 
 app.post("/api/ai/generate-practice", async (req, res) => {

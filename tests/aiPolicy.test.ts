@@ -131,6 +131,23 @@ test("gateway rejects invalid JSON and structural output without exposing provid
   assert.doesNotMatch(JSON.stringify(events), /private answer|required field|unexpected/);
 });
 
+test("gateway accepts provider JSON wrapped in a Markdown fence", async () => {
+  const gateway = new AiGateway({
+    client: { models: { generateContent: async () => ({ text: "```json\n{\"ok\":true}\n```" } as never) } },
+    logger: () => {},
+  });
+  const result = await gateway.generateJson({
+    endpoint: "fenced-json",
+    requestId: "req-fenced",
+    clientKey: "client-a",
+    prompt: "prompt",
+    config: {},
+    maxOutputTokens: 10,
+    validate: (payload) => payload && typeof payload === "object" && "ok" in payload ? [] : ["invalid"],
+  });
+  assert.deepEqual(result.payload, { ok: true });
+});
+
 test("gateway hides provider failures and logs only safe aggregate metadata", async () => {
   const events: unknown[] = [];
   const gateway = new AiGateway({

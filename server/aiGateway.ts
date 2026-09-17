@@ -143,6 +143,43 @@ const openAiText = (body: OpenAiResponseBody): string =>
     .map((content) => content.text!)
     .join("");
 
+/**
+ * Providers occasionally wrap otherwise valid JSON in a Markdown code fence or
+ * add a short sentence before/after it. Structured-output is still preferred,
+ * but accepting these harmless wrappers keeps the tutor usable across model
+ * versions without weakening the endpoint-specific validation below.
+ */
+const parseJsonText = (text: string): unknown => {
+  const trimmed = text.trim();
+  const candidates = [
+    trimmed,
+    trimmed.replace(/^```(?:json)?\s*/iu, "").replace(/\s*```$/u, "").trim(),
+  ];
+  const objectStart = trimmed.search(/[\[{]/u);
+  const objectEnd = Math.max(trimmed.lastIndexOf("}"), trimmed.lastIndexOf("]"));
+  if (objectStart >= 0 && objectEnd > objectStart) candidates.push(trimmed.slice(objectStart, objectEnd + 1));
+  for (const candidate of candidates) {
+    try {
+      return JSON.parse(candidate);
+    } catch {
+      // Try the next provider-compatible representation.
+    }
+  }
+  return null;
+};
+
+const outputShape = (value: unknown): Record<string, unknown> => {
+  if (Array.isArray(value)) return { type: "array", length: value.length };
+  if (value === null) return { type: "null" };
+  if (typeof value !== "object") return { type: typeof value };
+  const record = value as Record<string, unknown>;
+  return {
+    type: "object",
+    keys: Object.keys(record).slice(0, 20),
+    valueTypes: Object.fromEntries(Object.entries(record).slice(0, 20).map(([key, item]) => [key, Array.isArray(item) ? "array" : typeof item])),
+  };
+};
+
 export class AiGateway {
   private readonly geminiClient: AiModelsClient | null;
   private readonly openAiApiKey: string | null;
@@ -281,14 +318,15 @@ export class AiGateway {
         status = "invalid_output";
         throw new AiGatewayError("AI_INVALID_OUTPUT", 502);
       }
-      let payload: unknown;
-      try {
-        payload = JSON.parse(text);
-      } catch {
+      const payload = parseJsonText(text);
+      if (payload === null) {
+        console.error(JSON.stringify({ event: "ai_output_rejected", endpoint: request.endpoint, requestId: request.requestId, reason: "json_parse", responseChars: text.length }));
         status = "invalid_output";
         throw new AiGatewayError("AI_INVALID_OUTPUT", 502);
       }
-      if (request.validate(payload).length > 0) {
+      const validationErrors = request.validate(payload);
+      if (validationErrors.length > 0) {
+        console.error(JSON.stringify({ event: "ai_output_rejected", endpoint: request.endpoint, requestId: request.requestId, reason: "schema_validation", responseChars: text.length, shape: outputShape(payload) }));
         status = "invalid_output";
         throw new AiGatewayError("AI_INVALID_OUTPUT", 502);
       }
