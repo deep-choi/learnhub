@@ -1,4 +1,4 @@
-import { Course, LessonContent } from "../types/learning";
+import { Course, LessonContent, LessonMeta } from "../types/learning";
 
 export interface RoadmapStage {
   step: number;
@@ -30,7 +30,7 @@ export interface LearningRoadmap {
 }
 
 // 6개 과목 × 5단계 = 총 30개 단계별 학습 로드맵
-export const LEARNING_ROADMAPS: LearningRoadmap[] = [
+const BASE_LEARNING_ROADMAPS: LearningRoadmap[] = [
   // =========================================================================
   // 1. 수학 (Mathematics) - 1~5단계
   // =========================================================================
@@ -1504,6 +1504,387 @@ export const LEARNING_ROADMAPS: LearningRoadmap[] = [
     },
   },
 ];
+
+/**
+ * The first version of the roadmap was useful as a preview, but four lessons
+ * per level is not enough for a learner to build durable mathematical fluency.
+ * These specifications turn the five visible roadmap levels into a coherent
+ * prerequisite chain: elementary school, middle school, high school, the
+ * undergraduate core, and graduate-level foundations.
+ */
+interface MathLessonSpec {
+  title: string;
+  description: string;
+  conceptId: string;
+  conceptName: string;
+  estimatedMinutes: number;
+  id?: string;
+}
+
+interface MathChapterSpec {
+  title: string;
+  description: string;
+  id?: string;
+  lessons: MathLessonSpec[];
+}
+
+interface MathRoadmapSpec {
+  roadmapId: string;
+  courseId: string;
+  stepLevelLabel: string;
+  title: string;
+  tagline: string;
+  description: string;
+  targetAudience: string;
+  level: LearningRoadmap["level"];
+  levelLabel: string;
+  estimatedWeeks: number;
+  badge: string;
+  goal: string;
+  summary: string;
+  learningTypeExplanation: string;
+  dailyMinutes: number;
+  recommendedPrerequisites: string[];
+  learningOutcomes: string[];
+  stages: RoadmapStage[];
+  chapters: MathChapterSpec[];
+}
+
+const mathLesson = (courseId: string, roadmapId: string, chapterIndex: number, lessonIndex: number, lesson: MathLessonSpec): LessonMeta => ({
+  id: lesson.id || `les-${roadmapId}-${chapterIndex + 1}-${lessonIndex + 1}`,
+  chapterId: `chap-${roadmapId}-${chapterIndex + 1}`,
+  courseId,
+  title: lesson.title,
+  description: lesson.description,
+  estimatedMinutes: lesson.estimatedMinutes,
+  conceptId: lesson.conceptId,
+  conceptName: lesson.conceptName,
+  isCompleted: false,
+  isGenerated: true,
+});
+
+const mathChapters = (courseId: string, roadmapId: string, chapters: MathChapterSpec[]): Course["chapters"] => chapters.map((chapter, chapterIndex) => ({
+  id: chapter.id || `chap-${roadmapId}-${chapterIndex + 1}`,
+  title: chapter.title,
+  description: chapter.description,
+  lessons: chapter.lessons.map((lesson, lessonIndex) => mathLesson(courseId, roadmapId, chapterIndex, lessonIndex, lesson)),
+}));
+
+const MATH_CURRICULUM: MathRoadmapSpec[] = [
+  {
+    roadmapId: "math-lv1",
+    courseId: "course-math-lv1",
+    stepLevelLabel: "1단계: 초등 1~6학년 수 감각",
+    title: "수학 Lv.1: 초등 수학의 언어",
+    tagline: "수 세기부터 분수·비례·자료 해석까지, 수학을 읽고 설명하는 힘",
+    description: "초등학교 1학년의 수 감각에서 출발해 6학년의 분수·소수·비례·도형·자료 해석까지 한 단계씩 쌓습니다. 계산 결과보다 그림, 말, 식을 서로 연결하는 것을 목표로 합니다.",
+    targetAudience: "초등 1학년부터 초등 수학을 다시 배우는 성인까지, 수학을 처음부터 제대로 시작하려는 학습자",
+    level: "beginner",
+    levelLabel: "초등 1~6학년",
+    estimatedWeeks: 40,
+    badge: "초등 1~6학년",
+    goal: "수의 의미를 말과 그림으로 설명하고, 초등 수준의 낯선 문제를 스스로 식으로 바꾸어 해결",
+    summary: "수와 자리값, 사칙연산, 분수·소수·비율, 도형·측정, 자료와 규칙을 문제 상황과 연결해 학습합니다.",
+    learningTypeExplanation: "조작·그림·수직선·표를 먼저 사용하고, 마지막에 기호와 식으로 정리해 개념을 오래 기억합니다.",
+    dailyMinutes: 15,
+    recommendedPrerequisites: ["선수 지식 없음. 숫자를 읽고 말할 수 있으면 시작할 수 있습니다."],
+    learningOutcomes: ["덧셈·뺄셈·곱셈·나눗셈을 상황과 모델로 설명합니다.", "분수·소수·백분율을 서로 변환하고 생활 문제에 적용합니다.", "문제의 조건을 표·그림·식으로 바꾸어 풀이 과정을 말로 검증합니다."],
+    stages: [
+      { step: 1, title: "초등 1~2학년: 수와 연산의 감각", description: "수량을 묶고 비교하며 연산이 무엇을 뜻하는지 경험합니다.", durationWeeks: 10, topics: ["1~10000 수 세기와 자리값", "수직선과 크기 비교", "덧셈·뺄셈 전략", "곱셈을 같은 묶음으로 보기", "시각·길이·화폐"] },
+      { step: 2, title: "초등 3~4학년: 곱셈·나눗셈과 분수", description: "계산 알고리즘을 원리와 검산으로 연결합니다.", durationWeeks: 10, topics: ["세로셈과 어림", "나눗셈과 나머지", "분수의 의미와 수직선", "분모가 같은 분수 계산", "각도·평면도형·둘레"] },
+      { step: 3, title: "초등 5~6학년: 비례·소수·넓이", description: "서로 다른 표현을 오가며 관계를 읽습니다.", durationWeeks: 10, topics: ["약분·통분과 분수 계산", "소수의 자릿값과 계산", "비·비율·백분율", "넓이·부피·도형의 합동", "평균과 그래프"] },
+      { step: 4, title: "초등 통합: 설명하는 문제 해결", description: "여러 개념이 섞인 문제를 계획하고 검토합니다.", durationWeeks: 10, topics: ["규칙과 대응", "경우의 수와 가능성", "다단계 문장제", "자료로 주장하기", "중학교 수학을 위한 진단 프로젝트"] },
+    ],
+    chapters: [
+      { title: "Chapter 1. 수를 세고 구조를 읽기", description: "수량, 자리값, 수직선을 통해 숫자에 의미를 부여합니다.", lessons: [
+        { title: "수량을 묶어 세기와 10진법", description: "물건을 하나씩 세는 것에서 10개씩 묶어 세는 것으로 자리값을 이해합니다.", conceptId: "math_place_value", conceptName: "자리값과 십진법", estimatedMinutes: 12 },
+        { title: "수직선과 수의 크기 비교", description: "수의 위치와 거리를 이용해 큰 수·작은 수를 설명합니다.", conceptId: "math_number_line", conceptName: "수직선과 수의 크기", estimatedMinutes: 12 },
+        { title: "덧셈과 뺄셈을 여러 전략으로 풀기", description: "합치기·더 가까운 십 만들기·차이 구하기를 그림과 식으로 연결합니다.", conceptId: "math_add_sub_strategies", conceptName: "덧셈과 뺄셈 전략", estimatedMinutes: 14 },
+        { title: "곱셈을 같은 묶음과 배열로 이해하기", description: "구구단을 외우기 전에 같은 수의 반복과 직사각형 배열로 곱셈을 만듭니다.", conceptId: "math_multiplication_model", conceptName: "곱셈의 배열 모델", estimatedMinutes: 14 },
+        { title: "나눗셈의 등분·포함제와 나머지", description: "나눗셈의 두 의미와 나머지가 문제 상황에서 무엇을 뜻하는지 구별합니다.", conceptId: "math_division_remainder", conceptName: "나눗셈과 나머지", estimatedMinutes: 15 },
+      ] },
+      { title: "Chapter 2. 분수·소수·비율의 세계", description: "부분과 전체, 연속량, 비율을 하나의 수직선에서 연결합니다.", lessons: [
+        { title: "분수는 조각이 아니라 수다", description: "단위분수와 분수의 위치를 영역 모델·수직선·나눗셈으로 연결합니다.", conceptId: "math_fraction_meaning", conceptName: "분수의 의미", estimatedMinutes: 15 },
+        { id: "les-m1-101", title: "분모가 다른 분수의 덧셈과 통분", description: "단위가 다른 조각을 같은 단위로 바꾸어야 더할 수 있는 이유를 시각적으로 설명합니다.", conceptId: "math_fraction_common_denom", conceptName: "통분과 분수", estimatedMinutes: 16 },
+        { title: "분수의 곱셈과 나눗셈", description: "배율과 묶음의 관점으로 분수 곱셈과 나눗셈을 그림과 식으로 검산합니다.", conceptId: "math_fraction_operations", conceptName: "분수의 곱셈과 나눗셈", estimatedMinutes: 18 },
+        { title: "소수의 자릿값과 분수 변환", description: "10분의 1, 100분의 1을 기준으로 소수의 위치와 크기를 비교합니다.", conceptId: "math_decimal_place_value", conceptName: "소수의 자릿값", estimatedMinutes: 15 },
+        { id: "les-m1-102", title: "비율·백분율·비례배분", description: "할인·지도·요리·자료의 비율을 표와 단위비로 바꾸어 계산합니다.", conceptId: "math_ratio_percent", conceptName: "비율과 백분율", estimatedMinutes: 18 },
+      ] },
+      { title: "Chapter 3. 도형과 측정으로 공간 읽기", description: "길이·넓이·부피와 도형의 성질을 실제 측정과 연결합니다.", lessons: [
+        { title: "단위와 어림: 길이·시간·무게·각도", description: "단위를 선택하고 어림한 뒤 실제 측정값과 비교하는 습관을 만듭니다.", conceptId: "math_measurement_units", conceptName: "측정과 단위", estimatedMinutes: 14 },
+        { title: "각도와 삼각형·사각형의 성질", description: "각의 크기와 변의 관계를 이용해 도형을 분류하고 성질을 설명합니다.", conceptId: "math_shapes_angles", conceptName: "평면도형과 각", estimatedMinutes: 16 },
+        { title: "둘레와 넓이: 공식을 만들어 쓰기", description: "직사각형을 쪼개고 붙여 넓이 공식을 만들며 둘레와 혼동하지 않습니다.", conceptId: "math_perimeter_area", conceptName: "둘레와 넓이", estimatedMinutes: 16 },
+        { title: "직육면체의 부피와 전개도", description: "단위 정육면체를 쌓는 방식으로 부피와 전개도를 이해합니다.", conceptId: "math_volume_nets", conceptName: "부피와 전개도", estimatedMinutes: 16 },
+        { title: "대칭·좌표·도형의 이동", description: "격자 위 좌표와 대칭·회전·이동으로 공간을 정확히 묘사합니다.", conceptId: "math_coordinates_symmetry", conceptName: "좌표와 대칭", estimatedMinutes: 16 },
+      ] },
+      { title: "Chapter 4. 자료·규칙·문장제 프로젝트", description: "문제를 읽고 표현을 선택하며 풀이를 설명하는 힘을 완성합니다.", lessons: [
+        { title: "규칙 찾기와 대응 관계", description: "수 배열과 도형 패턴에서 규칙을 말·표·식으로 표현합니다.", conceptId: "math_patterns_rules", conceptName: "규칙과 대응", estimatedMinutes: 14 },
+        { title: "표·막대그래프·꺾은선그래프 읽기", description: "자료의 단위와 축을 확인하고 그래프가 말하는 사실을 문장으로 씁니다.", conceptId: "math_data_graphs", conceptName: "자료와 그래프", estimatedMinutes: 14 },
+        { title: "평균과 대표값의 의미", description: "평균을 공평하게 나누는 값으로 이해하고 자료의 대표성을 판단합니다.", conceptId: "math_mean_data", conceptName: "평균과 대표값", estimatedMinutes: 14 },
+        { title: "경우의 수와 가능성의 언어", description: "가능한 결과를 빠짐없이 세고, 가능성이 큰지 작은지 비교합니다.", conceptId: "math_counting_probability", conceptName: "경우의 수와 가능성", estimatedMinutes: 16 },
+        { title: "초등 수학 종합 프로젝트: 생활 속 계획 세우기", description: "예산·시간·거리·자료를 함께 사용해 풀이 계획과 검산 보고서를 작성합니다.", conceptId: "math_elementary_capstone", conceptName: "초등 수학 종합 문제 해결", estimatedMinutes: 20 },
+      ] },
+    ],
+  },
+  {
+    roadmapId: "math-lv2",
+    courseId: "course-math-lv2",
+    stepLevelLabel: "2단계: 중학교 1~3학년 대수·기하",
+    title: "수학 Lv.2: 중등 수학의 구조",
+    tagline: "문자와 식에서 함수·증명·확률까지, 중학교 수학을 하나의 언어로 연결",
+    description: "정수와 문자식에서 출발해 방정식·함수·기하 증명·통계와 확률까지 중학교 전 과정을 선수관계에 맞춰 학습합니다. 계산 절차를 외우는 대신 식이 보존하는 의미를 설명합니다.",
+    targetAudience: "중학교 수학을 체계적으로 다시 배우거나 고등 수학으로 넘어갈 준비를 하는 학습자",
+    level: "beginner",
+    levelLabel: "중학교 1~3학년",
+    estimatedWeeks: 32,
+    badge: "중등 핵심",
+    goal: "문장제 상황을 대수식과 그래프로 모델링하고, 핵심 기하 정리를 근거와 함께 설명",
+    summary: "정수·유리수, 문자식·방정식, 함수, 도형의 증명, 통계·확률을 중등 선수지식 순서로 완성합니다.",
+    learningTypeExplanation: "문제 상황을 식·표·그래프로 세 번 표현하고, 풀이의 각 변형이 왜 가능한지 말하게 합니다.",
+    dailyMinutes: 20,
+    recommendedPrerequisites: ["수학 Lv.1의 분수·소수·비율과 기본 도형을 완수했거나 진단 문제를 통과해야 합니다."],
+    learningOutcomes: ["일차·연립·이차방정식을 상황과 그래프의 교점으로 해석합니다.", "닮음·피타고라스·원·통계 문제의 조건을 구조화합니다.", "풀이에서 사용한 정의와 정리를 근거로 제시합니다."],
+    stages: [
+      { step: 1, title: "중1: 수와 문자식", description: "수의 확장에서 문자의 필요성을 이해하고 식을 다룹니다.", durationWeeks: 8, topics: ["정수·유리수 계산", "문자식과 분배법칙", "일차방정식", "좌표평면", "기본 작도와 도형"] },
+      { step: 2, title: "중2: 함수와 연립방정식", description: "두 양의 대응과 변화율을 표·식·그래프로 연결합니다.", durationWeeks: 8, topics: ["일차함수", "기울기와 절편", "연립방정식", "일차부등식", "확률의 기본"] },
+      { step: 3, title: "중3: 이차식과 기하 증명", description: "인수분해와 이차방정식, 닮음과 피타고라스를 한 흐름으로 학습합니다.", durationWeeks: 8, topics: ["다항식 곱셈과 인수분해", "이차방정식", "이차함수 맛보기", "삼각형의 성질", "피타고라스와 원"] },
+      { step: 4, title: "중등 통합: 자료 분석과 문제 해결", description: "대수·기하·확률이 섞인 문제를 스스로 설계하고 검증합니다.", durationWeeks: 8, topics: ["대푯값과 산포", "산점도와 상관", "경우의 수", "도형의 닮음 활용", "고등 수학 진단 프로젝트"] },
+    ],
+    chapters: [
+      { title: "Chapter 1. 수에서 문자로: 대수의 문법", description: "수의 성질을 문자식으로 일반화하고 등식의 의미를 지킵니다.", lessons: [
+        { title: "정수·유리수와 수직선의 연산", description: "음수의 방향과 절댓값을 수직선으로 해석하고 연산 규칙을 재구성합니다.", conceptId: "math_integer_rational", conceptName: "정수와 유리수", estimatedMinutes: 18 },
+        { title: "문자식과 분배법칙", description: "문자가 나타내는 양을 구분하고 동류항과 분배법칙으로 식을 정리합니다.", conceptId: "math_algebraic_expression", conceptName: "문자식과 분배법칙", estimatedMinutes: 18 },
+        { title: "일차방정식: 등식의 균형", description: "양변에 같은 연산을 하는 이유를 저울 모델과 역연산으로 설명합니다.", conceptId: "math_linear_equation", conceptName: "일차방정식", estimatedMinutes: 20 },
+        { title: "일차부등식과 해의 범위", description: "부등호 방향이 바뀌는 조건을 수직선과 음수 곱셈으로 검증합니다.", conceptId: "math_linear_inequality", conceptName: "일차부등식", estimatedMinutes: 20 },
+        { title: "문장제를 식으로 번역하는 4단계", description: "미지량·관계·단위를 표시해 식을 세우고 답의 범위를 검산합니다.", conceptId: "math_word_problem_modeling", conceptName: "대수적 모델링", estimatedMinutes: 22 },
+      ] },
+      { title: "Chapter 2. 함수와 좌표로 변화를 읽기", description: "입력과 출력, 변화율, 교점을 표·식·그래프로 오갑니다.", lessons: [
+        { title: "좌표평면과 대응 관계", description: "순서쌍과 좌표축을 사용해 관계를 점들의 집합으로 표현합니다.", conceptId: "math_coordinate_plane", conceptName: "좌표평면", estimatedMinutes: 16 },
+        { id: "les-m2-101", title: "직선의 기울기와 변화율", description: "두 점의 변화량 비율이 직선의 가파름을 나타내는 이유를 수직선과 그래프로 설명합니다.", conceptId: "math_slope_rate", conceptName: "기울기와 변화율", estimatedMinutes: 20 },
+        { title: "일차함수의 식·표·그래프", description: "y=ax+b의 각 항이 시작값과 변화율을 어떻게 표현하는지 해석합니다.", conceptId: "math_linear_function", conceptName: "일차함수", estimatedMinutes: 20 },
+        { title: "연립방정식과 두 직선의 교점", description: "대입·가감·그래프 풀이가 같은 해를 찾는 과정임을 비교합니다.", conceptId: "math_systems_intersection", conceptName: "연립방정식과 교점", estimatedMinutes: 22 },
+        { title: "정비례·반비례와 실제 모델", description: "비례상수와 반비례 곱의 보존을 요금·속력·작업량에 적용합니다.", conceptId: "math_direct_inverse_variation", conceptName: "정비례와 반비례", estimatedMinutes: 20 },
+      ] },
+      { title: "Chapter 3. 이차식과 유클리드 기하", description: "대수적 변형과 도형의 정리를 서로 다른 표현으로 증명합니다.", lessons: [
+        { title: "다항식의 곱셈과 인수분해", description: "분배법칙을 거꾸로 적용해 공통 구조를 찾아 식을 인수의 곱으로 바꿉니다.", conceptId: "math_factorization", conceptName: "인수분해", estimatedMinutes: 20 },
+        { title: "이차방정식과 근의 의미", description: "인수분해·완전제곱·근의 공식이 같은 해를 찾는 여러 도구임을 이해합니다.", conceptId: "math_quadratic_equation", conceptName: "이차방정식", estimatedMinutes: 22 },
+        { title: "삼각형의 합동과 닮음", description: "조건이 충분한 이유를 대응변·대응각과 함께 증명하고 닮음비를 활용합니다.", conceptId: "math_congruence_similarity", conceptName: "합동과 닮음", estimatedMinutes: 22 },
+        { id: "les-m2-102", title: "피타고라스 정리의 시각적 증명", description: "넓이 재배열로 a²+b²=c²를 만들고 역정리까지 거리 문제에 적용합니다.", conceptId: "math_pythagoras", conceptName: "피타고라스 정리", estimatedMinutes: 22 },
+        { title: "원·부채꼴·입체도형의 측정", description: "원주율과 닮음, 전개도를 이용해 길이·넓이·부피를 계산합니다.", conceptId: "math_circle_solids", conceptName: "원과 입체도형", estimatedMinutes: 22 },
+      ] },
+      { title: "Chapter 4. 통계·확률과 중등 종합 문제", description: "자료의 변동과 불확실성을 수치와 문장으로 판단합니다.", lessons: [
+        { title: "평균·중앙값·최빈값의 선택", description: "이상치와 자료의 목적에 따라 대표값을 선택하고 근거를 설명합니다.", conceptId: "math_statistics_center", conceptName: "대표값", estimatedMinutes: 18 },
+        { title: "범위·분산 감각과 자료의 흩어짐", description: "같은 평균이라도 자료가 다를 수 있음을 산포로 비교합니다.", conceptId: "math_statistics_spread", conceptName: "산포", estimatedMinutes: 18 },
+        { title: "경우의 수와 확률 모델", description: "표·나무그림·곱셈법칙으로 결과를 빠짐없이 세고 확률을 계산합니다.", conceptId: "math_probability_model", conceptName: "경우의 수와 확률", estimatedMinutes: 20 },
+        { title: "산점도와 상관관계의 함정", description: "상관과 인과를 구분하고 자료의 맥락 없이 결론을 단정하지 않습니다.", conceptId: "math_scatter_correlation", conceptName: "산점도와 상관", estimatedMinutes: 20 },
+        { title: "중등 수학 종합 프로젝트: 학교 축제 설계", description: "예산·수요·공간·확률을 함께 모델링하고 풀이 보고서와 검산표를 완성합니다.", conceptId: "math_middle_capstone", conceptName: "중등 수학 종합 문제 해결", estimatedMinutes: 24 },
+      ] },
+    ],
+  },
+  {
+    roadmapId: "math-lv3",
+    courseId: "course-roadmap-math-01",
+    stepLevelLabel: "3단계: 고등학교 수학·대학 예비",
+    title: "수학 Lv.3: 고등 수학과 미적분의 연결",
+    tagline: "함수·수열·미적분·기하·확률을 대학 수학으로 잇는 마지막 공통 기반",
+    description: "고등학교 수학의 핵심 단원들을 단편적인 공식 모음이 아니라 함수라는 공통 언어로 묶습니다. 수능형 문제뿐 아니라 대학에서 정의와 증명을 읽기 위한 준비까지 포함합니다.",
+    targetAudience: "고등 수학을 처음부터 정리하는 학습자, 수능·편입·이공계 대학 진학을 준비하는 학습자",
+    level: "intermediate",
+    levelLabel: "고등학교·대학 예비",
+    estimatedWeeks: 40,
+    badge: "고등·미적분",
+    goal: "함수의 성질을 분석하고 미적분·기하·확률 문제를 모델링하며 풀이를 논리적으로 서술",
+    summary: "다항·지수·로그·삼각함수, 수열, 극한·미분·적분, 공간도형·벡터, 확률·통계를 완성합니다.",
+    learningTypeExplanation: "그래프와 변화율을 중심에 두고 공식을 직접 유도한 뒤, 문제풀이·증명·모델링을 반복합니다.",
+    dailyMinutes: 30,
+    recommendedPrerequisites: ["수학 Lv.2의 방정식·함수·피타고라스·확률 기초와 분수 계산을 안정적으로 사용할 수 있어야 합니다."],
+    learningOutcomes: ["다양한 함수의 그래프와 매개변수를 변환·비교합니다.", "극한·미분·적분의 정의와 서로의 관계를 설명합니다.", "기하·확률·통계 문제를 대수와 함수로 모델링하고 풀이를 검증합니다."],
+    stages: [
+      { step: 1, title: "고1: 식·함수·수열의 공통 언어", description: "대수식과 함수의 구조를 고등 수준으로 확장합니다.", durationWeeks: 10, topics: ["다항식과 방정식", "함수의 합성·역함수", "지수·로그", "삼각함수", "수열과 귀납적 사고"] },
+      { step: 2, title: "고2: 극한과 미분", description: "평균변화율에서 순간변화율로 넘어가는 논리를 완성합니다.", durationWeeks: 10, topics: ["수열의 극한", "함수의 연속", "미분계수", "도함수 활용", "최적화와 속도"] },
+      { step: 3, title: "고3: 적분·기하·벡터", description: "누적량과 공간을 수식으로 표현합니다.", durationWeeks: 10, topics: ["부정·정적분", "넓이·부피", "평면·공간도형", "벡터와 내적", "좌표기하"] },
+      { step: 4, title: "고등 통합: 확률·통계와 대학 준비", description: "불확실성과 증명·모델링을 함께 연습합니다.", durationWeeks: 10, topics: ["순열·조합", "조건부확률", "이산·연속확률변수", "통계적 추정 감각", "대학 수학 진단 프로젝트"] },
+    ],
+    chapters: [
+      { title: "Chapter 1. 고등 함수와 수열", description: "대수 구조를 함수의 변환과 일반항으로 읽습니다.", lessons: [
+        { title: "다항식의 구조와 방정식의 근", description: "인수정리·나머지정리와 근의 관계를 이용해 다항식을 분석합니다.", conceptId: "math_polynomial_structure", conceptName: "다항식과 근", estimatedMinutes: 22 },
+        { title: "함수의 합성·역함수·변환", description: "입출력 관점으로 합성과 역함수 조건, 그래프의 이동을 설명합니다.", conceptId: "math_function_transform", conceptName: "함수의 변환", estimatedMinutes: 22 },
+        { title: "지수·로그함수와 스케일", description: "곱셈적 변화를 덧셈으로 바꾸는 로그의 역할을 성장·감쇠 모델에 적용합니다.", conceptId: "math_exponential_log", conceptName: "지수와 로그", estimatedMinutes: 24 },
+        { title: "삼각함수와 주기적 현상", description: "단위원에서 사인·코사인을 정의하고 진폭·주기·위상으로 현상을 모델링합니다.", conceptId: "math_trigonometric_functions", conceptName: "삼각함수", estimatedMinutes: 24 },
+        { title: "수열·점화식과 수학적 귀납법", description: "규칙을 점화식과 일반항으로 표현하고 귀납법으로 명제를 증명합니다.", conceptId: "math_sequences_induction", conceptName: "수열과 귀납법", estimatedMinutes: 24 },
+      ] },
+      { title: "Chapter 2. 극한에서 미분으로", description: "변화의 개념을 정의에서 응용까지 밀어붙입니다.", lessons: [
+        { id: "les-rm-math-101", title: "직선의 기울기와 변화의 비율", description: "평균변화율을 두 점의 할선 기울기로 보고 순간변화율의 출발점을 만듭니다.", conceptId: "math_slope_rate", conceptName: "기울기와 변화율", estimatedMinutes: 18 },
+        { id: "les-rm-math-201", title: "평균변화율에서 순간변화율로", description: "Δx가 0으로 갈 때 할선이 접선으로 가까워지는 극한의 직관을 수식으로 씁니다.", conceptId: "math_instantaneous_rate", conceptName: "미분계수와 접선", estimatedMinutes: 24 },
+        { id: "les-rm-math-202", title: "도함수의 정의와 거듭제곱 공식 유도", description: "미분의 정의에서 다항함수 미분법을 직접 유도하고 연쇄법칙으로 확장합니다.", conceptId: "math_derivative_power_rule", conceptName: "도함수와 미분 공식", estimatedMinutes: 26 },
+        { title: "도함수로 그래프와 최적화 분석", description: "증가·감소, 극대·극소, 접선과 최적화 문제를 하나의 판정 과정으로 묶습니다.", conceptId: "math_derivative_optimization", conceptName: "도함수의 활용", estimatedMinutes: 26 },
+        { title: "미분방정식 맛보기: 변화가 변화를 만든다", description: "간단한 지수 성장·감쇠를 미분방정식 관점으로 바라보며 대학 수학으로 연결합니다.", conceptId: "math_intro_differential_equation", conceptName: "미분방정식 입문", estimatedMinutes: 24 },
+      ] },
+      { title: "Chapter 3. 적분·기하·벡터", description: "누적과 공간을 계산 가능한 구조로 바꿉니다.", lessons: [
+        { title: "부정적분과 미적분학의 기본정리", description: "미분의 역과정으로서의 적분과 넓이 함수의 관계를 설명합니다.", conceptId: "math_antiderivative_ftc", conceptName: "부정적분과 기본정리", estimatedMinutes: 26 },
+        { title: "정적분과 넓이·부피·평균값", description: "구분구적의 극한으로 정적분을 이해하고 넓이·부피·평균값을 계산합니다.", conceptId: "math_definite_integral", conceptName: "정적분의 응용", estimatedMinutes: 26 },
+        { title: "평면곡선과 원뿔곡선", description: "거리 조건으로 원·포물선·타원·쌍곡선을 정의하고 방정식과 그래프를 연결합니다.", conceptId: "math_conic_sections", conceptName: "원뿔곡선", estimatedMinutes: 24 },
+        { title: "벡터·내적과 공간의 거리", description: "벡터 연산과 내적으로 각도·투영·직선과 평면의 관계를 표현합니다.", conceptId: "math_vectors_dot_product", conceptName: "벡터와 내적", estimatedMinutes: 26 },
+        { title: "공간도형과 좌표 모델링", description: "3차원 좌표로 구·원기둥·평면의 교차와 최단거리를 분석합니다.", conceptId: "math_3d_coordinate_geometry", conceptName: "공간도형과 좌표", estimatedMinutes: 26 },
+      ] },
+      { title: "Chapter 4. 확률·통계와 대학 수학의 문턱", description: "불확실성을 모델링하고 정의·증명 중심 학습으로 전환합니다.", lessons: [
+        { title: "순열·조합과 이항정리", description: "곱셈법칙과 중복 여부를 기준으로 경우의 수를 설계하고 이항계수를 연결합니다.", conceptId: "math_combinatorics_binomial", conceptName: "순열·조합", estimatedMinutes: 24 },
+        { title: "조건부확률과 베이즈 관점", description: "정보가 추가될 때 표본공간이 어떻게 바뀌는지 나무그림과 식으로 설명합니다.", conceptId: "math_conditional_bayes", conceptName: "조건부확률", estimatedMinutes: 26 },
+        { title: "확률변수·기댓값·분산", description: "결과를 숫자로 바꾸고 평균적 결과와 변동성을 계산합니다.", conceptId: "math_random_variable", conceptName: "확률변수와 기댓값", estimatedMinutes: 26 },
+        { title: "정규분포와 통계적 추론의 직관", description: "표본과 모집단, 표준화, 신뢰구간의 의미를 계산보다 해석 중심으로 익힙니다.", conceptId: "math_normal_inference", conceptName: "정규분포와 추론", estimatedMinutes: 26 },
+        { title: "고등 수학 종합 프로젝트: 현상 모델링", description: "실제 자료를 함수·미적분·확률로 모델링하고 가정·오차·한계를 설명합니다.", conceptId: "math_highschool_capstone", conceptName: "고등 수학 종합 모델링", estimatedMinutes: 30 },
+      ] },
+    ],
+  },
+  {
+    roadmapId: "math-lv4",
+    courseId: "course-math-lv4",
+    stepLevelLabel: "4단계: 대학 수학 전공 핵심",
+    title: "수학 Lv.4: 대학 수학의 증명과 구조",
+    tagline: "정의·정리·증명으로 선형대수·해석학·대수학의 공통 언어 세우기",
+    description: "대학 수학에서 요구하는 읽기·쓰기·증명 능력을 먼저 만들고, 이산수학·선형대수·해석학·미분방정식·추상대수의 핵심을 연구 입문 수준으로 연결합니다.",
+    targetAudience: "수학·컴퓨터과학·물리·공학 전공자, 대학 수학을 독학하거나 대학원 진학을 준비하는 학습자",
+    level: "advanced",
+    levelLabel: "대학 전공 기초",
+    estimatedWeeks: 44,
+    badge: "학부 핵심",
+    goal: "정의를 정확히 사용해 증명을 작성하고, 핵심 학부 과목의 정리와 계산을 서로 연결",
+    summary: "증명과 이산수학, 선형대수, 실해석·다변수해석, 추상대수·미분방정식·수치해석을 다룹니다.",
+    learningTypeExplanation: "직관을 버리지 않되 모든 주장을 정의·가정·결론으로 분해하고 짧은 증명과 계산 실습을 함께 수행합니다.",
+    dailyMinutes: 40,
+    recommendedPrerequisites: ["수학 Lv.3의 미적분·벡터·확률과 수학적 귀납법을 완수해야 합니다."],
+    learningOutcomes: ["명제와 정의를 바탕으로 직접증명·대우·귀류·귀납 증명을 작성합니다.", "선형 변환과 고유구조를 기하·계산·응용 관점에서 해석합니다.", "해석학·대수학·미분방정식의 기본 정리를 가정과 함께 사용할 수 있습니다."],
+    stages: [
+      { step: 1, title: "증명과 이산수학", description: "대학 수학의 언어인 논리와 구조를 익힙니다.", durationWeeks: 10, topics: ["논리·집합·함수", "증명법", "귀납법", "조합·그래프", "알고리즘의 점화식"] },
+      { step: 2, title: "선형대수학", description: "행렬 계산을 벡터공간과 선형사상의 언어로 승격합니다.", durationWeeks: 11, topics: ["벡터공간·기저", "선형사상·랭크", "고유값·대각화", "내적공간", "SVD와 응용"] },
+      { step: 3, title: "해석학과 다변수 미적분", description: "극한과 연속을 엄밀하게 정의하고 여러 변수로 확장합니다.", durationWeeks: 12, topics: ["실수의 완비성", "수열·급수", "연속·미분", "다변수 미적분", "적분과 정리"] },
+      { step: 4, title: "대수·방정식·수치해석", description: "구조와 변화의 방정식을 학부 수준으로 다룹니다.", durationWeeks: 11, topics: ["군·환·체 입문", "상미분방정식", "푸리에 관점", "수치근사", "학부 종합 프로젝트"] },
+    ],
+    chapters: [
+      { title: "Chapter 1. 증명과 이산수학", description: "대학 수학 텍스트를 읽고 직접 논리를 세우는 기본기입니다.", lessons: [
+        { title: "명제·양화사·집합과 함수", description: "수학 문장을 논리식으로 읽고 함수의 정의역·공역·치역을 구분합니다.", conceptId: "math_proof_logic_sets", conceptName: "논리와 집합", estimatedMinutes: 28 },
+        { title: "직접증명·대우·귀류법", description: "주장의 형태에 맞는 증명 전략을 선택하고 가정과 결론을 명시합니다.", conceptId: "math_proof_methods", conceptName: "증명법", estimatedMinutes: 30 },
+        { title: "수학적 귀납법과 재귀 구조", description: "기초 단계와 귀납 단계를 분리해 수열·알고리즘의 명제를 증명합니다.", conceptId: "math_induction_recursion", conceptName: "귀납법과 재귀", estimatedMinutes: 28 },
+        { title: "조합론과 생성함수의 출발", description: "세기 문제를 점화식과 다항식의 계수로 표현합니다.", conceptId: "math_combinatorics_generating", conceptName: "조합론과 생성함수", estimatedMinutes: 30 },
+        { title: "그래프·트리와 알고리즘의 수학", description: "연결성·경로·트리 구조를 증명하고 알고리즘의 복잡도 감각을 만듭니다.", conceptId: "math_graph_theory", conceptName: "그래프 이론", estimatedMinutes: 30 },
+      ] },
+      { title: "Chapter 2. 선형대수: 공간과 변환", description: "행렬을 계산표가 아니라 공간 사이의 함수로 이해합니다.", lessons: [
+        { title: "벡터공간·부분공간·기저", description: "선형결합과 생성, 독립, 차원의 의미를 유한차원 예시로 증명합니다.", conceptId: "math_vector_spaces_basis", conceptName: "벡터공간과 기저", estimatedMinutes: 30 },
+        { title: "선형사상·핵·상과 랭크", description: "선형 변환의 정보 손실을 핵과 상, 차원정리로 분석합니다.", conceptId: "math_linear_maps_rank", conceptName: "선형사상과 랭크", estimatedMinutes: 32 },
+        { title: "행렬식과 고유값", description: "행렬식의 기하학적 의미와 고유값 방정식을 연결합니다.", conceptId: "math_determinant_eigen", conceptName: "행렬식과 고유값", estimatedMinutes: 32 },
+        { id: "les-m4-101", title: "행렬식과 면적·부피의 변화", description: "행렬식이 방향·넓이·부피를 어떻게 바꾸는지 선형 변환으로 해석합니다.", conceptId: "math_determinant_geom", conceptName: "행렬식의 기하", estimatedMinutes: 30 },
+        { id: "les-m4-102", title: "고유벡터·직교대각화·PCA", description: "대칭행렬의 주축과 데이터 분산 방향을 고유구조로 설명합니다.", conceptId: "math_eigen_pca", conceptName: "고유값과 PCA", estimatedMinutes: 34 },
+      ] },
+      { title: "Chapter 3. 실해석과 다변수해석", description: "고등학교의 극한을 엄밀한 정의와 정리로 다시 세웁니다.", lessons: [
+        { title: "실수의 완비성과 수열의 수렴", description: "상한공리와 코시 수열을 통해 실수 체계가 갖는 완비성을 이해합니다.", conceptId: "math_real_completeness", conceptName: "실수의 완비성", estimatedMinutes: 34 },
+        { title: "급수·절대수렴·테일러 근사", description: "무한합의 수렴을 판정하고 함수 근사를 오차와 함께 다룹니다.", conceptId: "math_series_taylor", conceptName: "급수와 테일러 전개", estimatedMinutes: 34 },
+        { title: "ε-δ 연속성과 미분가능성", description: "극한과 연속의 정의를 직접 쓰고 미분가능성이 주는 결과를 증명합니다.", conceptId: "math_epsilon_delta", conceptName: "엄밀한 극한과 연속", estimatedMinutes: 36 },
+        { title: "다변수 미분·야코비안·최적화", description: "편미분·전미분·연쇄법칙과 라그랑주 승수를 좌표 변화와 연결합니다.", conceptId: "math_multivariable_jacobian", conceptName: "다변수 미적분", estimatedMinutes: 36 },
+        { title: "다중적분과 벡터 미적분 정리", description: "그린·발산·스토크스 정리의 공통 구조를 영역과 경계의 관계로 바라봅니다.", conceptId: "math_vector_calculus_theorems", conceptName: "벡터 미적분 정리", estimatedMinutes: 36 },
+      ] },
+      { title: "Chapter 4. 대수·방정식·수치해석", description: "구조와 변화의 대표적인 학부 주제를 연구 준비 수준으로 연결합니다.", lessons: [
+        { title: "군·환·체의 공리와 예시", description: "정수·행렬·다항식에서 공통 구조를 추출해 추상대수의 언어를 만듭니다.", conceptId: "math_groups_rings_fields", conceptName: "군·환·체 입문", estimatedMinutes: 34 },
+        { title: "상미분방정식과 안정성", description: "초기값 문제·선형 방정식·위상선으로 변화 모델의 해와 안정성을 분석합니다.", conceptId: "math_ode_stability", conceptName: "상미분방정식", estimatedMinutes: 34 },
+        { title: "푸리에 급수와 주파수의 관점", description: "주기 함수를 사인·코사인의 합으로 표현하고 근사의 의미를 확인합니다.", conceptId: "math_fourier_series", conceptName: "푸리에 급수", estimatedMinutes: 34 },
+        { title: "수치해석: 오차·수렴·근사", description: "이분법·뉴턴법·수치적분을 오차 한계와 수렴 조건을 포함해 사용합니다.", conceptId: "math_numerical_analysis", conceptName: "수치해석", estimatedMinutes: 30 },
+        { title: "학부 수학 종합 프로젝트: 정리 하나를 재구성하기", description: "정의부터 보조정리·증명·수치 실험까지 하나의 주제를 학부 논문 형식으로 정리합니다.", conceptId: "math_undergraduate_capstone", conceptName: "학부 수학 종합 프로젝트", estimatedMinutes: 40 },
+      ] },
+    ],
+  },
+  {
+    roadmapId: "math-lv5",
+    courseId: "course-math-lv5",
+    stepLevelLabel: "5단계: 대학원 핵심과 연구 입문",
+    title: "수학 Lv.5: 대학원 수학과 연구의 시작",
+    tagline: "해석학·대수학·위상수학을 연구 질문과 증명으로 연결",
+    description: "대학원 진학 후 공통으로 만나는 핵심 개념을 폭넓게 다루고, 각 분야의 정의·대표 정리·예시·반례·문헌 읽기까지 경험합니다. 특정 전공의 모든 내용을 대신하지 않으며, 연구 분야를 선택할 수 있는 기반을 만드는 과정입니다.",
+    targetAudience: "수학 대학원 진학 준비자, 이론 연구를 시작하는 학습자, 학부 핵심 과목을 끝내고 분야를 탐색하려는 학습자",
+    level: "advanced",
+    levelLabel: "대학원 연구 입문",
+    estimatedWeeks: 52,
+    badge: "대학원 연구",
+    goal: "대학원 핵심 과목의 정의와 정리를 읽고 증명을 재구성하며, 작은 연구 질문과 문헌 조사를 계획",
+    summary: "측도·함수해석, 군·환·체·갈루아, 위상·다양체·대수적 위상, 확률·PDE·범주론과 연구 프로젝트를 탐색합니다.",
+    learningTypeExplanation: "정의→예시→반례→정리→증명→응용의 순서를 지키고, 모르는 부분은 문헌과 계산 실험으로 확인합니다.",
+    dailyMinutes: 45,
+    recommendedPrerequisites: ["수학 Lv.4의 증명·선형대수·실해석·추상대수 기초를 완수해야 합니다."],
+    learningOutcomes: ["측도·위상·대수 구조의 정의를 예시와 반례로 구별합니다.", "대학원 핵심 정리의 가정과 결론을 분해해 증명 전략을 설명합니다.", "관심 분야의 교과서·논문을 찾고 작은 재현·증명 프로젝트를 계획합니다."],
+    stages: [
+      { step: 1, title: "해석학의 확장: 측도와 함수공간", description: "길이·적분·수렴의 개념을 더 넓은 공간으로 확장합니다.", durationWeeks: 13, topics: ["위상·거리공간", "측도와 르베그 적분", "Lp 공간", "바나흐·힐베르트 공간", "함수해석 입문"] },
+      { step: 2, title: "대수학의 확장: 구조와 대칭", description: "학부 대수의 구조를 정리·확장하고 갈루아 관점으로 연결합니다.", durationWeeks: 13, topics: ["군 작용·실로 정리", "환·아이디얼", "체의 확대", "갈루아 이론", "가환대수 맛보기"] },
+      { step: 3, title: "위상·기하·다양체", description: "국소 구조와 전역 불변량을 통해 공간을 연구합니다.", durationWeeks: 13, topics: ["점집합 위상", "기본군·호몰로지", "매끄러운 다양체", "미분형식·드람", "리만기하 입문"] },
+      { step: 4, title: "분야 선택과 연구 프로젝트", description: "확률·PDE·수치·범주 등 관심 분야를 선택해 문헌과 질문을 연결합니다.", durationWeeks: 13, topics: ["확률과 마팅게일", "편미분방정식", "최적화·수치 연구", "범주론의 언어", "문헌 읽기와 재현 프로젝트"] },
+    ],
+    chapters: [
+      { title: "Chapter 1. 위상·측도·함수해석", description: "수렴과 적분을 더 일반적인 공간에서 다루는 대학원 해석학의 기반입니다.", lessons: [
+        { title: "거리공간·위상공간·수렴", description: "거리 없이도 열린집합과 수렴을 정의하고 여러 위상 예시와 반례를 비교합니다.", conceptId: "math_metric_topology", conceptName: "거리공간과 위상", estimatedMinutes: 38 },
+        { title: "측도와 르베그 적분의 필요성", description: "길이와 적분이 다루기 어려운 집합을 측도로 확장하고 단순함수에서 적분을 쌓습니다.", conceptId: "math_measure_lebesgue", conceptName: "측도와 르베그 적분", estimatedMinutes: 42 },
+        { title: "Lp 공간과 수렴 정리", description: "점별·거의 모든 곳·평균 수렴을 구분하고 주요 수렴 정리의 가정을 확인합니다.", conceptId: "math_lp_convergence", conceptName: "Lp 공간과 수렴", estimatedMinutes: 42 },
+        { title: "바나흐·힐베르트 공간과 직교성", description: "완비 노름공간과 내적공간에서 근사와 직교투영의 구조를 이해합니다.", conceptId: "math_banach_hilbert", conceptName: "바나흐·힐베르트 공간", estimatedMinutes: 42 },
+        { title: "함수해석의 기본 정리", description: "유계 선형사상과 Hahn–Banach·열린 사상 정리의 역할을 개념 지도에 배치합니다.", conceptId: "math_functional_analysis", conceptName: "함수해석 입문", estimatedMinutes: 44 },
+      ] },
+      { title: "Chapter 2. 현대대수와 수론의 구조", description: "대수적 대상의 구조·작용·확장을 연구하는 언어를 만듭니다.", lessons: [
+        { id: "les-m5-101", title: "군 작용과 실로 정리", description: "대칭이 집합에 작용하는 방식과 유한군의 구조를 궤도·안정자와 함께 분석합니다.", conceptId: "math_group_actions_sylow", conceptName: "군 작용과 실로 정리", estimatedMinutes: 40 },
+        { title: "환·아이디얼·몫환", description: "정수와 다항식의 나눗셈 구조를 아이디얼과 몫환의 언어로 일반화합니다.", conceptId: "math_ring_ideals", conceptName: "환과 아이디얼", estimatedMinutes: 40 },
+        { title: "체의 확대와 작도 가능성", description: "차수와 최소다항식으로 체의 확대를 계산하고 작도 문제와 연결합니다.", conceptId: "math_field_extensions", conceptName: "체의 확대", estimatedMinutes: 42 },
+        { title: "갈루아 이론과 방정식의 대칭", description: "다항식의 근 사이 대칭군으로 근의 공식 가능성을 설명합니다.", conceptId: "math_galois_theory", conceptName: "갈루아 이론", estimatedMinutes: 44 },
+        { title: "가환대수·대수기하의 첫 지도", description: "소 아이디얼과 대수적 집합을 통해 방정식의 해 공간을 구조적으로 바라봅니다.", conceptId: "math_commutative_algebra", conceptName: "가환대수와 대수기하", estimatedMinutes: 44 },
+      ] },
+      { title: "Chapter 3. 위상수학·다양체·기하", description: "공간의 국소 좌표와 전역 불변량을 함께 연구합니다.", lessons: [
+        { id: "les-m5-102", title: "콤팩트성과 연결성", description: "열린 덮개·연결성·완비성의 차이를 예시와 반례로 구분하고 주요 정리를 적용합니다.", conceptId: "math_compactness", conceptName: "콤팩트성과 연결성", estimatedMinutes: 40 },
+        { title: "기본군과 덮개공간", description: "연속 변형으로 보존되는 고리 구조를 기본군과 덮개공간으로 계산합니다.", conceptId: "math_fundamental_group", conceptName: "기본군과 덮개공간", estimatedMinutes: 42 },
+        { title: "매끄러운 다양체와 접공간", description: "좌표계의 호환성과 접공간을 정의해 곡면을 국소적으로 선형화합니다.", conceptId: "math_smooth_manifolds", conceptName: "매끄러운 다양체", estimatedMinutes: 44 },
+        { title: "미분형식·드람 코호몰로지·스토크스", description: "경계에서의 적분과 내부 미분의 관계를 일반화하고 위상 불변량을 살핍니다.", conceptId: "math_differential_forms", conceptName: "미분형식과 드람 코호몰로지", estimatedMinutes: 44 },
+        { title: "리만 계량과 곡률의 첫 관점", description: "거리·측지선·곡률을 계량 텐서와 연결해 기하학적 구조를 탐색합니다.", conceptId: "math_riemann_geometry", conceptName: "리만기하 입문", estimatedMinutes: 44 },
+      ] },
+      { title: "Chapter 4. 분야 선택과 연구 프로젝트", description: "핵심 이론을 실제 연구 질문과 문헌 읽기로 연결합니다.", lessons: [
+        { title: "확률과 마팅게일의 언어", description: "조건부기댓값과 정보의 흐름을 통해 현대 확률론의 기본 구조를 경험합니다.", conceptId: "math_probability_martingale", conceptName: "확률과 마팅게일", estimatedMinutes: 42 },
+        { title: "편미분방정식과 약한 해", description: "열·파동·라플라스 방정식을 모델링하고 약한 해와 에너지 방법의 필요성을 이해합니다.", conceptId: "math_pde_weak_solution", conceptName: "편미분방정식", estimatedMinutes: 44 },
+        { title: "최적화·수치 연구와 재현성", description: "문제 정의·알고리즘·오차·실험 기록을 갖춘 작은 계산 연구를 설계합니다.", conceptId: "math_optimization_reproducibility", conceptName: "최적화와 재현 연구", estimatedMinutes: 40 },
+        { title: "범주론을 공통 언어로 보기", description: "대상보다 사상과 합성에 집중해 서로 다른 분야의 구조를 비교합니다.", conceptId: "math_category_theory", conceptName: "범주론 입문", estimatedMinutes: 40 },
+        { title: "대학원 수학 연구 프로젝트", description: "관심 주제의 교과서·논문을 찾아 정의·정리·예시를 재구성하고 작은 결과나 계산을 재현합니다.", conceptId: "math_graduate_research_project", conceptName: "수학 연구 프로젝트", estimatedMinutes: 50 },
+      ] },
+    ],
+  },
+];
+
+const applyMathCurriculum = (roadmap: LearningRoadmap, spec: MathRoadmapSpec): LearningRoadmap => {
+  const chapters = mathChapters(spec.courseId, spec.roadmapId, spec.chapters);
+  return {
+    ...roadmap,
+    stepLevelLabel: spec.stepLevelLabel,
+    title: spec.title,
+    tagline: spec.tagline,
+    description: spec.description,
+    targetAudience: spec.targetAudience,
+    level: spec.level,
+    levelLabel: spec.levelLabel,
+    estimatedWeeks: spec.estimatedWeeks,
+    totalLessons: chapters.reduce((total, chapter) => total + chapter.lessons.length, 0),
+    badge: spec.badge,
+    stages: spec.stages,
+    recommendedPrerequisites: spec.recommendedPrerequisites,
+    learningOutcomes: spec.learningOutcomes,
+    course: {
+      ...roadmap.course,
+      id: spec.courseId,
+      title: spec.title,
+      learningType: "concept",
+      learningTypeExplanation: spec.learningTypeExplanation,
+      summary: spec.summary,
+      level: spec.level,
+      goal: spec.goal,
+      dailyMinutes: spec.dailyMinutes,
+      chapters,
+      updatedAt: "2026-09-18T00:00:00.000Z",
+    },
+  };
+};
+
+export const LEARNING_ROADMAPS: LearningRoadmap[] = BASE_LEARNING_ROADMAPS.map((roadmap) => {
+  const mathSpec = MATH_CURRICULUM.find((spec) => spec.roadmapId === roadmap.id);
+  return mathSpec ? applyMathCurriculum(roadmap, mathSpec) : roadmap;
+});
 
 // Fallback preset content for quick interactive testing
 export const PRESET_ROADMAP_CONTENTS: Record<string, LessonContent> = {
