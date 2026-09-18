@@ -45,6 +45,10 @@ export const LEARNHUB_SCOPED_STORAGE_PREFIXES = {
 } as const;
 
 const KEYS = LEARNHUB_STORAGE_KEYS;
+const LESSON_CONTENT_CACHE_VERSION = "v3";
+
+const lessonCacheKey = (lessonId: string) =>
+  `${KEYS.LESSONS_CACHE}_${LESSON_CONTENT_CACHE_VERSION}_${lessonId}`;
 
 export class StorageService {
   static getCourses(): Course[] {
@@ -328,7 +332,7 @@ export class StorageService {
 
   static getCachedLessonContent(lessonId: string): LessonContent | null {
     try {
-      const data = localStorage.getItem(`${KEYS.LESSONS_CACHE}_${lessonId}`);
+      const data = localStorage.getItem(lessonCacheKey(lessonId));
       if (data) return JSON.parse(data);
       if (PRESET_ROADMAP_CONTENTS[lessonId]) return PRESET_ROADMAP_CONTENTS[lessonId];
       return null;
@@ -340,7 +344,7 @@ export class StorageService {
 
   static cacheLessonContent(lessonId: string, content: LessonContent) {
     try {
-      localStorage.setItem(`${KEYS.LESSONS_CACHE}_${lessonId}`, JSON.stringify(content));
+      localStorage.setItem(lessonCacheKey(lessonId), JSON.stringify(content));
       notifyLearningDataChanged();
     } catch (e) {
       console.error("Failed to cache lesson:", e);

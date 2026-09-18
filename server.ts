@@ -397,6 +397,7 @@ app.post("/api/ai/generate-lesson", async (req, res) => {
     ? "실용형은 사진·디자인·도구 작업도 포함할 수 있으며 코드에 한정하지 마세요. 실행·파일 생성·외부 도구 검증은 하지 않는다고 명시하세요."
     : "";
   const prompt = `성인 학습자를 위한 수업을 생성하세요. 과목: "${body.courseTitle}" 챕터: "${body.chapterTitle}" 수업: "${body.lessonTitle}" 유형: "${body.learningType}" 수준: "${body.level}" 개념: "${body.conceptName}" (${body.conceptId}). ${guidance} ${typeGuidance}
+설명 원칙: 초등학생에게 처음 설명한다고 생각하고 가장 쉬운 한국어로 작성하세요. 한 문장에는 한 가지 생각만 담고, 문장을 짧게 쓰세요. 전문용어는 먼저 쉬운 말과 생활 속 비유로 설명한 뒤 괄호 안에 공식 용어를 붙이세요. 계산과 증명은 중간 과정을 한 줄씩 보여 주세요. 대학·대학원 수준의 주제라도 정확성을 낮추지 말고, 쉬운 뜻 → 공식 표현 → 엄밀한 예시 순서로 설명하세요. 어린이처럼 과도하게 단순화하거나 잘못된 비유를 사실처럼 말하지 마세요.
 정확히 4개 단계로 구성하세요. 순서는 concept(핵심 정의와 왜 필요한지), example(구체적인 예시를 처음부터 끝까지 풀이), practice(학습자가 직접 해볼 문제나 과제와 스스로 확인할 기준), summary(헷갈리기 쉬운 반례와 핵심 정리)입니다. 각 단계는 짧은 카드 문구가 아니라 학습자가 혼자 읽고 따라갈 수 있는 긴 설명으로 작성하세요. 핵심 원리, 실제 숫자·상황·과정이 담긴 예시, 자주 하는 오해와 확인 질문을 충분히 포함하고 단계 사이가 자연스럽게 이어지는 하나의 챕터 본문처럼 구성하세요. practice 단계에는 정답을 숨긴 채 시도할 수 있는 짧은 과제를 넣으세요. 발음·대화·음성 대본과 레슨 안의 확인 퀴즈는 만들지 마세요. 지정된 JSON만 반환하세요.`;
   return runAi(req, res, "generate-lesson", prompt, { responseMimeType: "application/json", responseSchema: lessonSchema }, 4096, (payload) => {
     const errors = validateLessonPayload(payload, learningType, { requireLearningArc: true });
@@ -426,7 +427,7 @@ app.post("/api/ai/tutor-chat", async (req, res) => {
   const fields = ["courseTitle", "lessonTitle", "currentStepContent", "userQuestion", "conceptName", "history"];
   if (!isRecord(body) || !hasOnlyKeys(body, fields) || ["courseTitle", "lessonTitle", "currentStepContent", "userQuestion", "conceptName"].some((key) => boundedString(body, key, key === "currentStepContent" ? 8_000 : 400) === null) || (body.history !== undefined && (!Array.isArray(body.history) || body.history.length > 12 || body.history.some((item) => !isRecord(item) || !isAllowed(item.role, ["user", "assistant"]) || boundedString(item, "text", 900) === null)))) return invalidBody(res, "튜터 질문과 레슨 맥락을 확인해 주세요.");
   const history = Array.isArray(body.history) ? body.history.map((item) => `${item.role === "user" ? "학습자" : "튜터"}: ${item.text}`).join("\n").slice(0, 6_000) : "이전 대화 없음";
-  const prompt = `친절한 AI 튜터입니다. 과목: "${body.courseTitle}" 수업: "${body.lessonTitle}" 개념: "${body.conceptName}" 현재 내용: "${body.currentStepContent}" 이전 대화:\n${history}\n질문: "${body.userQuestion}". 단계별 힌트와 쉬운 비유를 사용하고 후속 추천 질문 2~3개를 JSON으로 반환하세요.`;
+  const prompt = `친절한 AI 튜터입니다. 과목: "${body.courseTitle}" 수업: "${body.lessonTitle}" 개념: "${body.conceptName}" 현재 내용: "${body.currentStepContent}" 이전 대화:\n${history}\n질문: "${body.userQuestion}". 초등학생에게 설명하듯 쉬운 한국어와 짧은 문장을 사용하세요. 전문용어는 먼저 쉬운 뜻과 생활 속 비유로 설명하고 괄호 안에 공식 용어를 적으세요. 사용자가 묻지 않은 어려운 내용을 한꺼번에 늘어놓지 말고, 한 번에 한 가지 생각만 설명한 뒤 이해 확인 질문을 덧붙이세요. 대학·대학원 개념도 정확성은 유지하되 쉬운 뜻에서 공식 표현으로 단계적으로 올라가세요. 단계별 힌트와 쉬운 비유를 사용하고 후속 추천 질문 2~3개를 JSON으로 반환하세요.`;
   return runAi(req, res, "tutor-chat", prompt, { responseMimeType: "application/json", responseSchema: tutorSchema }, 900, (payload) => {
     if (!isRecord(payload) || typeof payload.reply !== "string" || !payload.reply.trim()) return ["invalid"];
     if (payload.suggestionChips !== undefined && (!Array.isArray(payload.suggestionChips) || payload.suggestionChips.some((item) => typeof item !== "string"))) return ["invalid"];
@@ -439,7 +440,7 @@ app.post("/api/ai/generate-practice", async (req, res) => {
   const body = req.body;
   const fields = ["courseTitle", "chapterTitle", "lessonTitle", "learningType", "level", "conceptId", "conceptName", "lessonContext"];
   if (!isRecord(body) || !hasOnlyKeys(body, fields) || ["courseTitle", "chapterTitle", "lessonTitle", "level", "conceptId", "conceptName"].some((key) => boundedString(body, key, 400) === null) || boundedString(body, "lessonContext", 8_000) === null || !isAllowed(body.learningType, LEARNING_TYPES)) return invalidBody(res, "문제 생성 설정을 확인해 주세요.");
-  const prompt = `성인 학습자를 위한 개인 튜터입니다. 과목: "${body.courseTitle}" 챕터: "${body.chapterTitle}" 레슨: "${body.lessonTitle}" 학습 유형: "${body.learningType}" 수준: "${body.level}" 개념: "${body.conceptName}" (${body.conceptId}). 현재 학습 내용: "${body.lessonContext}". 방금 배운 내용을 확인하는 문제를 딱 1개 생성하세요. 학습자가 직접 생각해야 하므로 정답이나 풀이를 질문에 넣지 마세요. 객관식이면 서로 겹치지 않는 선택지 3~4개와 선택지 중 하나인 정답을 만들고, 단답형이면 짧은 답을 허용하세요. 힌트는 정답을 바로 말하지 않는 단계별 힌트 2개를 만드세요. 지정된 JSON만 반환하세요.`;
+  const prompt = `성인 학습자를 위한 개인 튜터입니다. 과목: "${body.courseTitle}" 챕터: "${body.chapterTitle}" 레슨: "${body.lessonTitle}" 학습 유형: "${body.learningType}" 수준: "${body.level}" 개념: "${body.conceptName}" (${body.conceptId}). 현재 학습 내용: "${body.lessonContext}". 문제 지문은 초등학생도 이해할 수 있는 짧고 쉬운 한국어로 작성하되, 대학·대학원 개념의 정확한 조건은 빠뜨리지 마세요. 방금 배운 내용을 확인하는 문제를 딱 1개 생성하세요. 학습자가 직접 생각해야 하므로 정답이나 풀이를 질문에 넣지 마세요. 객관식이면 서로 겹치지 않는 선택지 3~4개와 선택지 중 하나인 정답을 만들고, 단답형이면 짧은 답을 허용하세요. 힌트는 정답을 바로 말하지 않는 단계별 힌트 2개를 만드세요. 지정된 JSON만 반환하세요.`;
   return runAi(req, res, "generate-practice", prompt, { responseMimeType: "application/json", responseSchema: practiceSchema }, 1100, validatePracticePayload);
 });
 

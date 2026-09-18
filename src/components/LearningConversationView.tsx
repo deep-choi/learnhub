@@ -56,7 +56,7 @@ const MAX_HISTORY_MESSAGES = 12;
 const MAX_HISTORY_CHARS = 6_000;
 
 const getHistoryKey = (courseId: string, lessonId: string) =>
-  `learnhub_tutor_history_v2_${encodeURIComponent(`${courseId}:${lessonId}`)}`;
+  `learnhub_tutor_history_v3_${encodeURIComponent(`${courseId}:${lessonId}`)}`;
 
 const readConversation = (key: string): ConversationMessage[] => {
   try {

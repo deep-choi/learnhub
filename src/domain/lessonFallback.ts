@@ -38,7 +38,7 @@ export const createFallbackLessonContent = (
         id: "fallback-concept",
         type: "concept",
         title: "핵심 개념 이해하기",
-        content: `${chapterTitle}에서 다루는 핵심 개념은 “${lesson.conceptName}”입니다. 과목에 저장된 설명은 “${description}”입니다.\n\n먼저 “${lesson.conceptName}”라는 개념이 무엇을 설명하는지 한 문장으로 바꿔 적어 보세요. 설명이 막히면 레슨 목표와 과목의 설명을 다시 읽고, 개념의 대상·조건·결과를 나누어 보세요.`,
+        content: `${chapterTitle}에서 오늘 배울 것은 “${lesson.conceptName}”입니다. 아주 쉽게 말하면, ${description}\n\n먼저 이 개념을 자기 말로 한 문장으로 바꿔 보세요. 어려우면 “무엇을 보고”, “어떻게 하고”, “무슨 결과가 나오는지”를 차례로 생각하면 됩니다.`,
       },
       {
         id: "fallback-example",
@@ -56,13 +56,13 @@ export const createFallbackLessonContent = (
         id: "fallback-boundary",
         type: "example",
         title: "헷갈리는 경우 구분하기",
-        content: `“${lesson.conceptName}”을 잘못 적용하기 쉬운 경우는 조건을 확인하지 않고 이름만 보고 사용하는 때입니다. 방금 만든 예시에서 조건 하나를 바꾸었을 때도 같은 결론이 나오는지 살펴보고, 달라진다면 무엇이 달라졌는지 한 문장으로 적어 보세요.\n\n이 비교가 되면 “${lesson.conceptName}”의 적용 범위와 한계를 함께 이해할 수 있습니다.`,
+        content: `“${lesson.conceptName}”을 잘못 쓰기 쉬운 때는 조건을 확인하지 않고 이름만 보고 사용할 때입니다. 방금 예시에서 조건 하나만 바꿔 보세요. 결과가 달라진다면 무엇이 달라졌는지 한 문장으로 적어 보세요.\n\n이렇게 비교하면 이 개념을 언제 쓰고, 언제 조심해야 하는지 알 수 있습니다.`,
       },
       {
         id: "fallback-summary",
         type: "summary",
         title: "핵심을 자기 말로 정리해 보세요",
-        content: `개념 “${lesson.conceptName}”에 대한 설명은 “${description}”입니다. 오늘 배운 내용을 보지 않고, “언제 이 개념을 쓰며 무엇을 확인해야 하는가?”에 답하는 문장을 하나 만들어 보세요.`,
+        content: `오늘 배운 핵심은 “${lesson.conceptName}”입니다. 책을 보지 말고 “이 개념은 언제 쓰고, 무엇을 확인해야 할까?”에 한 문장으로 답해 보세요. 설명은 “${description}”입니다.`,
       },
     ],
   };
