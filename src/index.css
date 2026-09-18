@@ -144,6 +144,12 @@ body {
 button, input, textarea, select { font: inherit; }
 button, [role="button"], summary { -webkit-tap-highlight-color: transparent; }
 button, [role="button"], input, textarea, select { min-height: 44px; }
+button:not(:disabled),
+[role="button"]:not([aria-disabled="true"]),
+summary,
+a[href] { cursor: pointer; }
+button:disabled,
+[role="button"][aria-disabled="true"] { cursor: not-allowed; }
 
 button:focus-visible,
 input:focus-visible,
