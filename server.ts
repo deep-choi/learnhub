@@ -397,8 +397,8 @@ app.post("/api/ai/generate-lesson", async (req, res) => {
     ? "실용형은 사진·디자인·도구 작업도 포함할 수 있으며 코드에 한정하지 마세요. 실행·파일 생성·외부 도구 검증은 하지 않는다고 명시하세요."
     : "";
   const prompt = `성인 학습자를 위한 수업을 생성하세요. 과목: "${body.courseTitle}" 챕터: "${body.chapterTitle}" 수업: "${body.lessonTitle}" 유형: "${body.learningType}" 수준: "${body.level}" 개념: "${body.conceptName}" (${body.conceptId}). ${guidance} ${typeGuidance}
-정확히 4개 단계로 구성하세요. 순서는 concept(핵심 정의와 왜 필요한지), example(구체적인 예시를 처음부터 끝까지 풀이), practice(학습자가 직접 해볼 문제나 과제와 스스로 확인할 기준), summary(헷갈리기 쉬운 반례와 핵심 정리)입니다. 각 단계는 최소 두 문단 또는 50자 이상의 충분한 설명을 포함하고, 예시는 실제 숫자·상황·과정을 사용해 추상적인 말로 끝내지 마세요. practice 단계에는 정답을 숨긴 채 시도할 수 있는 짧은 과제를 넣으세요. 발음·대화·음성 대본과 레슨 안의 확인 퀴즈는 만들지 마세요. 지정된 JSON만 반환하세요.`;
-  return runAi(req, res, "generate-lesson", prompt, { responseMimeType: "application/json", responseSchema: lessonSchema }, 2600, (payload) => {
+정확히 4개 단계로 구성하세요. 순서는 concept(핵심 정의와 왜 필요한지), example(구체적인 예시를 처음부터 끝까지 풀이), practice(학습자가 직접 해볼 문제나 과제와 스스로 확인할 기준), summary(헷갈리기 쉬운 반례와 핵심 정리)입니다. 각 단계는 짧은 카드 문구가 아니라 학습자가 혼자 읽고 따라갈 수 있는 긴 설명으로 작성하세요. 핵심 원리, 실제 숫자·상황·과정이 담긴 예시, 자주 하는 오해와 확인 질문을 충분히 포함하고 단계 사이가 자연스럽게 이어지는 하나의 챕터 본문처럼 구성하세요. practice 단계에는 정답을 숨긴 채 시도할 수 있는 짧은 과제를 넣으세요. 발음·대화·음성 대본과 레슨 안의 확인 퀴즈는 만들지 마세요. 지정된 JSON만 반환하세요.`;
+  return runAi(req, res, "generate-lesson", prompt, { responseMimeType: "application/json", responseSchema: lessonSchema }, 4096, (payload) => {
     const errors = validateLessonPayload(payload, learningType, { requireLearningArc: true });
     return errors;
   });

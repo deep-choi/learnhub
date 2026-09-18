@@ -6,7 +6,6 @@ import {
   CircleHelp,
   Lightbulb,
   Loader2,
-  Play,
   RotateCcw,
   Send,
 } from "lucide-react";
@@ -55,13 +54,9 @@ interface PracticeResult {
 
 const MAX_HISTORY_MESSAGES = 12;
 const MAX_HISTORY_CHARS = 6_000;
-const SESSION_STEP_KEY = "__learningConversationStep";
 
 const getHistoryKey = (courseId: string, lessonId: string) =>
-  `learnhub_tutor_history_${encodeURIComponent(`${courseId}:${lessonId}`)}`;
-
-const getPracticeStorageKey = (courseId: string, lessonId: string) =>
-  `learnhub_practice_${encodeURIComponent(courseId)}_${encodeURIComponent(lessonId)}`;
+  `learnhub_tutor_history_v2_${encodeURIComponent(`${courseId}:${lessonId}`)}`;
 
 const readConversation = (key: string): ConversationMessage[] => {
   try {
@@ -72,26 +67,6 @@ const readConversation = (key: string): ConversationMessage[] => {
     ).slice(-50);
   } catch {
     return [];
-  }
-};
-
-const readStepIndex = (key: string) => {
-  try {
-    const value = JSON.parse(localStorage.getItem(key) || "null");
-    const index = value && typeof value === "object" ? Number(value[SESSION_STEP_KEY]) : 0;
-    return Number.isInteger(index) && index >= 0 ? index : 0;
-  } catch {
-    return 0;
-  }
-};
-
-const saveStepIndex = (key: string, index: number) => {
-  try {
-    const current = JSON.parse(localStorage.getItem(key) || "{}") as Record<string, unknown>;
-    localStorage.setItem(key, JSON.stringify({ ...current, [SESSION_STEP_KEY]: String(index) }));
-    notifyLearningDataChanged();
-  } catch {
-    // The conversation remains usable if the browser storage is unavailable.
   }
 };
 
@@ -116,15 +91,9 @@ const boundedHistory = (messages: ConversationMessage[]) => {
   return result;
 };
 
-const stepMessage = (step: LessonStep, index: number): ConversationMessage => ({
+const chapterMessage = (course: Course, lesson: LessonMeta, chapterTitle: string, content: LessonContent): ConversationMessage => ({
   sender: "tutor",
-  text: `## ${index + 1}. ${step.title}\n\n${step.content}`,
-  chips: ["이 부분을 더 쉽게 설명해줘", "구체적인 예시를 보여줘"],
-});
-
-const welcomeMessage = (course: Course, lesson: LessonMeta, step: LessonStep, index: number): ConversationMessage => ({
-  sender: "tutor",
-  text: `# ${lesson.title}\n\n좋아요. 이제 **${course.title}**의 ${lesson.conceptName}을 함께 배워볼게요. 먼저 오늘의 학습 목표를 잡고, 한 단계씩 설명한 뒤 여러분의 질문과 답변을 반영해 다음 단계로 넘어가겠습니다.\n\n${stepMessage(step, index).text}`,
+  text: `# ${lesson.title}\n\n좋아요. 이제 **${course.title}**의 **${chapterTitle}**에서 ${lesson.conceptName}을 한 번에 흐름으로 배워볼게요. 아래 설명은 여러 카드로 쪼개지 않고, 개념에서 예시·적용·정리까지 이어지는 하나의 학습 본문으로 구성했습니다. 읽다가 막히는 부분은 바로 질문해 주세요.\n\n${content.steps.map((step, index) => `## ${index + 1}. ${step.title}\n\n${step.content}`).join("\n\n")}`,
   chips: ["이 개념을 아주 쉽게 설명해줘", "내가 이해했는지 질문해줘"],
 });
 
@@ -143,10 +112,8 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
   onBackToAssessment,
 }) => {
   const historyKey = useMemo(() => getHistoryKey(course.id, lessonMeta.id), [course.id, lessonMeta.id]);
-  const practiceStorageKey = useMemo(() => getPracticeStorageKey(course.id, lessonMeta.id), [course.id, lessonMeta.id]);
   const [content, setContent] = useState<LessonContent | null>(null);
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
-  const [currentStepIndex, setCurrentStepIndex] = useState(0);
   const [isLoadingContent, setIsLoadingContent] = useState(true);
   const [input, setInput] = useState("");
   const [isSending, setIsSending] = useState(false);
@@ -166,7 +133,6 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
   const lessonEntries = latestCourse.chapters.flatMap((chapter) => chapter.lessons.map((lesson) => ({ course: latestCourse, lesson, chapterTitle: chapter.title })));
   const currentLessonIndex = lessonEntries.findIndex((entry) => entry.lesson.id === lessonMeta.id);
   const nextLesson = currentLessonIndex >= 0 && currentLessonIndex < lessonEntries.length - 1 ? lessonEntries[currentLessonIndex + 1] : null;
-  const currentStep = content?.steps[Math.min(currentStepIndex, Math.max(0, (content?.steps.length || 1) - 1))] || null;
   const allCompleted = courseIsComplete(latestCourse);
 
   useEffect(() => {
@@ -236,18 +202,16 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
 
   useEffect(() => {
     if (!content) return;
-    const storedStep = Math.min(readStepIndex(practiceStorageKey), content.steps.length - 1);
     const storedMessages = readConversation(historyKey);
     const hasConversationOpening = storedMessages.some((message) =>
       message.sender === "tutor" && message.text.startsWith(`# ${lessonMeta.title}`),
     );
     const initialMessages = hasConversationOpening
       ? storedMessages
-      : [welcomeMessage(course, lessonMeta, content.steps[storedStep] || content.steps[0], storedStep), ...storedMessages.filter((message) => message.text.trim() !== "")];
-    setCurrentStepIndex(Math.max(0, storedStep));
+      : [chapterMessage(course, lessonMeta, chapterTitle, content), ...storedMessages.filter((message) => message.text.trim() !== "")];
     setMessages(initialMessages);
     saveConversation(historyKey, initialMessages);
-  }, [content, course, historyKey, lessonMeta, practiceStorageKey]);
+  }, [chapterTitle, content, course, historyKey, lessonMeta]);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -275,7 +239,7 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
           courseTitle: course.title,
           lessonTitle: lessonMeta.title,
           conceptName: lessonMeta.conceptName,
-          currentStepContent: `${course.summary}\n\n현재 학습 단계: ${currentStep?.title || lessonMeta.title}\n${currentStep?.content || lessonMeta.description}`.slice(0, 8_000),
+          currentStepContent: `${course.summary}\n\n현재 챕터: ${chapterTitle}\n현재 학습 본문:\n${content.steps.map((step, index) => `${index + 1}. ${step.title}\n${step.content}`).join("\n\n")}`.slice(0, 8_000),
           history: boundedHistory(messages),
           userQuestion: trimmed,
         }),
@@ -296,15 +260,6 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
     } finally {
       setIsSending(false);
     }
-  };
-
-  const showNextStep = () => {
-    if (!content || currentStepIndex >= content.steps.length - 1) return;
-    const nextIndex = currentStepIndex + 1;
-    const nextStep = content.steps[nextIndex];
-    setCurrentStepIndex(nextIndex);
-    saveStepIndex(practiceStorageKey, nextIndex);
-    appendMessage({ ...stepMessage(nextStep, nextIndex), chips: ["이 부분을 더 쉽게 설명해줘", "문제 풀기"] });
   };
 
   const generatePractice = async () => {
@@ -466,11 +421,10 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
               <textarea value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void sendQuestion(input); } }} rows={1} placeholder="궁금한 내용을 바로 물어보세요" className="min-h-12 flex-1 resize-none bg-transparent px-4 py-3 text-sm leading-6 outline-none placeholder:text-[var(--lh-ink-tertiary)]" />
               <button type="submit" disabled={!input.trim() || isSending} className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[var(--lh-primary)] text-white disabled:opacity-30" aria-label="질문 보내기"><Send className="h-4 w-4" /></button>
             </div>
-            <p className="mt-2 text-center text-[11px] text-[var(--lh-ink-tertiary)]">AI 답변은 현재 레슨 문맥을 기준으로 생성됩니다. 모르는 부분은 언제든 질문하세요.</p>
+            <p className="mt-2 text-center text-[11px] text-[var(--lh-ink-tertiary)]">AI 답변은 현재 챕터의 학습 본문을 기준으로 생성됩니다. 모르는 부분은 언제든 질문하세요.</p>
           </form>
 
           <div className="mt-3 flex flex-wrap gap-2 border-t border-[var(--lh-line)] pt-4">
-            {currentStepIndex < content.steps.length - 1 && <button type="button" onClick={showNextStep} className="inline-flex min-h-11 items-center gap-2 rounded-full bg-[var(--lh-primary)] px-5 text-sm font-medium text-white shadow-xs"><Play className="h-3.5 w-3.5" /> 다음 설명</button>}
             <button type="button" onClick={() => void generatePractice()} className="inline-flex min-h-11 items-center gap-2 rounded-full border border-[var(--lh-primary-border)] bg-[var(--lh-primary-subtle)] px-5 text-sm font-medium text-[var(--lh-primary-text)]"><CircleHelp className="h-4 w-4" /> 문제 풀기</button>
             <button type="button" onClick={() => void sendQuestion("방금 배운 내용을 더 쉬운 비유와 예시로 다시 설명해줘.")} disabled={isSending} className="inline-flex min-h-11 items-center gap-2 rounded-full border border-[var(--lh-line)] bg-[var(--lh-surface)] px-5 text-sm font-medium text-[var(--lh-ink-secondary)] disabled:opacity-40"><RotateCcw className="h-3.5 w-3.5" /> 다시 설명</button>
             <button type="button" onClick={markLessonComplete} className="ml-auto inline-flex min-h-11 items-center gap-2 rounded-full border border-[var(--lh-line)] bg-[var(--lh-surface)] px-5 text-sm font-medium text-[var(--lh-ink)]"><CheckCircle2 className="h-4 w-4" /> {isCompleted ? "학습 완료 보기" : "충분히 학습했어요"}</button>
