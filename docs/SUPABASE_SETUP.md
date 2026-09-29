@@ -63,6 +63,19 @@ Supabase Dashboard → Authentication에서 다음을 운영 정책에 맞게 �
 
 Supabase 기본 이메일 전송 제한에 의존한 상태로 공개 출시하지 않는다. 실제 외부 이메일 주소로 가입 확인, 재전송, 비밀번호 재설정, 재로그인을 각각 확인한다.
 
+## 로그인이 전부 실패할 때 (2026-09-29 점검 기록)
+
+Google·이메일 로그인이 모두 실패하면 앱 코드보다 먼저 아래를 순서대로 확인한다.
+
+1. **프로젝트 주소가 살아 있는지**: `nslookup <project-ref>.supabase.co`가 "Non-existent domain"이면 프로젝트가 일시중지되었거나 삭제된 상태다. Free 플랜은 일정 기간 사용이 없으면 자동 일시중지된다. Dashboard에서 프로젝트를 복구(Restore)하고, 삭제되었다면 새 프로젝트를 만든 뒤 migration을 다시 적용하고 `SUPABASE_URL`·`SUPABASE_PUBLISHABLE_KEY`를 교체한다.
+2. **배포 secret에 줄바꿈이 섞였는지**: `/api/public-config` 응답의 `supabaseUrl` 끝에 `
+`이 보이면 Windows에서 secret을 등록하며 CRLF가 포함된 것이다. 서버·클라이언트가 공백을 제거하도록 수정했지만 `firebase functions:secrets:set`으로 값을 다시 등록해 두는 것이 안전하다.
+3. **Google Provider**: Authentication → Sign In / Providers → Google이 켜져 있고 Client ID/Secret이 입력됐는지 확인한다. Google Cloud의 Authorized redirect URI는 `https://<project-ref>.supabase.co/auth/v1/callback`이어야 한다.
+4. **Redirect URLs**: Site URL이 `http://localhost:3000`만 있으면 배포 주소에서 로그인한 사용자가 localhost로 돌아간다. `https://learnhub-1de94.web.app/**`, `https://learnhub-1de94.firebaseapp.com/**`, `http://localhost:3000/**`를 모두 허용 목록에 넣는다.
+5. **메일 발송**: custom SMTP가 꺼져 있으면 Supabase 기본 메일은 조직 구성원 주소로만 발송되고 시간당 발송량도 매우 적다. 외부 사용자의 가입 확인·비밀번호 재설정 메일이 도착하지 않으므로 공개 전 custom SMTP를 연결한다.
+
+앱은 인증 서버에 연결할 수 없으면 Google 로그인 redirect를 시작하지 않고 로그인 창에 "로그인 서버에 연결하지 못했습니다" 안내를 표시한다.
+
 ## snapshot API
 
 - `GET /api/learning-snapshot`: 인증된 사용자의 snapshot만 반환한다.

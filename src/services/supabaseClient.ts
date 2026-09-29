@@ -23,8 +23,13 @@ export interface SupabaseAuthHandle {
   config: PublicSupabaseConfig;
 }
 
+/** `unreachable` means the auth server itself could not be contacted (DNS, paused project, offline). */
+export type GoogleProviderState = boolean | "unreachable" | null;
+
+export const AUTH_SERVER_UNREACHABLE_MESSAGE = "로그인 서버에 연결하지 못했습니다. 인터넷 연결을 확인하고 잠시 후 다시 시도해 주세요. 계속되면 서비스 관리자에게 알려 주세요.";
+
 interface SupabaseAuthAdapterOptions {
-  getGoogleProviderEnabled?: () => Promise<boolean | null>;
+  getGoogleProviderEnabled?: () => Promise<GoogleProviderState>;
 }
 
 const isSafePublicConfig = (value: unknown): value is PublicSupabaseConfig => {
@@ -50,7 +55,9 @@ export const fetchPublicSupabaseConfig = async (
   });
   if (!response.ok) return null;
   const body: unknown = await response.json();
-  return isSafePublicConfig(body) ? body : null;
+  if (!isSafePublicConfig(body)) return null;
+  // Deployed secrets have carried a trailing CRLF before; normalize before the SDK sees it.
+  return { supabaseUrl: body.supabaseUrl.trim().replace(/\/+$/u, ""), publishableKey: body.publishableKey.trim() };
 };
 
 const dispatchAuthChanged = (event: AuthChangeEvent, session: Session | null): void => {
@@ -104,6 +111,8 @@ export const createSupabaseAuthAdapter = async (
     },
     signInWithGoogle: async () => {
       const providerEnabled = await options.getGoogleProviderEnabled?.();
+      // Redirecting to an unreachable auth host strands the user on a browser error page.
+      if (providerEnabled === "unreachable") throw new Error(AUTH_SERVER_UNREACHABLE_MESSAGE);
       if (providerEnabled === false) {
         throw new Error("Google 로그인이 아직 준비되지 않았습니다. 서비스 관리자가 Google Provider를 연결해야 합니다.");
       }
@@ -169,12 +178,19 @@ export const createSupabaseAuthAdapter = async (
 const getGoogleProviderEnabled = async (
   config: PublicSupabaseConfig,
   fetchImpl: typeof fetch,
-): Promise<boolean | null> => {
+): Promise<GoogleProviderState> => {
+  let response: Response;
   try {
-    const response = await fetchImpl(`${config.supabaseUrl}/auth/v1/settings`, {
+    response = await fetchImpl(`${config.supabaseUrl}/auth/v1/settings`, {
       headers: { apikey: config.publishableKey, Accept: "application/json" },
     });
-    if (!response.ok) return null;
+  } catch {
+    return "unreachable";
+  }
+  // Any non-2xx response means the configured auth endpoint cannot be trusted for OAuth.
+  // Fail closed so a stale/deleted project never strands the learner on a browser error page.
+  if (!response.ok) return "unreachable";
+  try {
     const body: unknown = await response.json();
     if (!body || typeof body !== "object" || Array.isArray(body)) return null;
     const external = (body as Record<string, unknown>).external;

@@ -40,8 +40,9 @@ const isPublishableKey = (value: string | undefined): value is string =>
   typeof value === "string" && value.startsWith("sb_publishable_") && value.length <= 500;
 
 export const getSupabasePublicConfig = (): SupabasePublicConfig | null => {
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const publishableKey = process.env.SUPABASE_PUBLISHABLE_KEY;
+  // Secrets set from Windows shells can carry a trailing CRLF; never forward it to the browser.
+  const supabaseUrl = process.env.SUPABASE_URL?.trim();
+  const publishableKey = process.env.SUPABASE_PUBLISHABLE_KEY?.trim();
   if (!validUrl(supabaseUrl) || !isPublishableKey(publishableKey)) return null;
   return { supabaseUrl, publishableKey };
 };

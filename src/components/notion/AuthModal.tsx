@@ -9,6 +9,7 @@ import {
   resendSignUpConfirmation,
   updatePassword,
 } from "../../services/authClient";
+import { AUTH_SERVER_UNREACHABLE_MESSAGE } from "../../services/supabaseClient";
 import { LearnHubLogo } from "../common/LearnHubLogo";
 
 interface AuthModalProps {
@@ -23,6 +24,14 @@ type AuthMode = "login" | "signup" | "forgot" | "recovery";
 
 const authErrorMessage = (error: unknown, fallback: string): string => {
   const message = error instanceof Error ? error.message : "";
+  const name = error instanceof Error ? error.name : "";
+  // fetch() failures surface with browser-specific wording; the SDK wraps them as AuthRetryableFetchError.
+  if (name === "AuthRetryableFetchError" || /failed to fetch|networkerror|load failed|network request failed/iu.test(message)) return AUTH_SERVER_UNREACHABLE_MESSAGE;
+  if (/email not confirmed/iu.test(message)) return "이메일 인증이 아직 끝나지 않았습니다. 가입할 때 받은 메일의 링크를 눌러 주세요.";
+  if (/error sending .*email|sending.*(confirmation|recovery|magic)/iu.test(message)) return "인증 메일을 보내지 못했습니다. 잠시 후 다시 시도하거나 서비스 관리자에게 알려 주세요.";
+  if (/signups? not allowed|signup is disabled/iu.test(message)) return "지금은 새 회원가입을 받지 않고 있습니다.";
+  if (/email address .*invalid|invalid email/iu.test(message)) return "이메일 주소 형식을 확인해 주세요.";
+  if (/provider is not enabled|unsupported provider/iu.test(message)) return "Google 로그인이 아직 준비되지 않았습니다. 이메일로 로그인해 주세요.";
   if (/invalid login credentials/iu.test(message)) return "이메일 또는 비밀번호가 올바르지 않습니다.";
   if (/user already registered/iu.test(message)) return "이미 가입된 이메일입니다. 로그인하거나 비밀번호를 재설정해 주세요.";
   if (/email.*rate|rate.*email|too many requests/iu.test(message)) return "요청이 많습니다. 잠시 후 다시 시도해 주세요.";
@@ -37,6 +46,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, initialEr
   const [password, setPassword] = useState("");
   const [passwordConfirmation, setPasswordConfirmation] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [ageConfirmed, setAgeConfirmed] = useState(false);
   const [signupConfirmationPending, setSignupConfirmationPending] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
@@ -50,6 +60,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, initialEr
       setPasswordConfirmation("");
       setShowPassword(false);
       setSignupConfirmationPending(false);
+      setAgeConfirmed(false);
       return;
     }
     setMode(recoveryMode ? "recovery" : "login");
@@ -111,6 +122,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, initialEr
       setErrorMessage("비밀번호는 8자 이상 입력해 주세요.");
       return;
     }
+    if (mode === "signup" && !ageConfirmed) {
+      setErrorMessage("만 14세 이상인지 확인해 주세요. 만 14세 미만은 보호자가 가입해 주세요.");
+      return;
+    }
     if (mode === "recovery" && password !== passwordConfirmation) {
       setErrorMessage("새 비밀번호가 서로 일치하지 않습니다.");
       return;
@@ -133,6 +148,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, initialEr
         await signInWithPassword(email.trim(), password);
       }
     } catch (error) {
+      if (mode === "login" && error instanceof Error && /email not confirmed/iu.test(error.message)) setSignupConfirmationPending(true);
       setErrorMessage(authErrorMessage(error, "계정 인증을 완료하지 못했습니다."));
     } finally {
       setIsSubmitting(false);
@@ -165,13 +181,22 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, initialEr
 
         {errorMessage && <p role="alert" className="mt-4 rounded-xl border border-[var(--lh-line)] bg-[var(--lh-surface-subtle)] px-4 py-3 text-xs text-[var(--lh-danger)]">{errorMessage}</p>}
         {successMessage && <p role="status" className="mt-4 rounded-xl border border-[var(--lh-line)] bg-[var(--lh-surface-subtle)] px-4 py-3 text-xs text-[var(--lh-ink)]">{successMessage}</p>}
-        {signupConfirmationPending && <button type="button" disabled={isSubmitting} onClick={async () => { resetFeedback(); setIsSubmitting(true); try { await resendSignUpConfirmation(email.trim()); setSuccessMessage("가입 확인 메일을 다시 보냈습니다."); } catch (error) { setErrorMessage(error instanceof Error ? error.message : "확인 메일을 다시 보내지 못했습니다."); } finally { setIsSubmitting(false); } }} className="mt-3 text-xs font-medium text-[var(--lh-primary)] underline disabled:opacity-50">확인 메일 다시 보내기</button>}
+        {signupConfirmationPending && <button type="button" disabled={isSubmitting} onClick={async () => { resetFeedback(); setIsSubmitting(true); try { await resendSignUpConfirmation(email.trim()); setSuccessMessage("가입 확인 메일을 다시 보냈습니다."); } catch (error) { setErrorMessage(authErrorMessage(error, "확인 메일을 다시 보내지 못했습니다.")); } finally { setIsSubmitting(false); } }} className="mt-3 text-xs font-medium text-[var(--lh-primary)] underline disabled:opacity-50">확인 메일 다시 보내기</button>}
 
         <form onSubmit={handlePasswordAuth} className="mt-5 space-y-4">
           {mode === "signup" && <div className="space-y-1.5"><label htmlFor="learnhub-auth-name" className="text-xs font-medium text-[var(--lh-ink-secondary)]">이름</label><input id="learnhub-auth-name" value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" placeholder="학습자 이름" className="min-h-12 w-full rounded-xl border border-[var(--lh-line)] bg-[var(--lh-surface)] px-4 text-sm outline-none transition focus:border-[var(--lh-line-strong)]" /></div>}
           {mode !== "recovery" && <div className="space-y-1.5"><label htmlFor="learnhub-auth-email" className="text-xs font-medium text-[var(--lh-ink-secondary)]">이메일</label><input id="learnhub-auth-email" ref={emailInputRef} type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" placeholder="you@example.com" required className="min-h-12 w-full rounded-xl border border-[var(--lh-line)] bg-[var(--lh-surface)] px-4 text-sm outline-none transition focus:border-[var(--lh-line-strong)]" /></div>}
           {mode !== "forgot" && <div className="space-y-1.5"><label htmlFor="learnhub-auth-password" className="text-xs font-medium text-[var(--lh-ink-secondary)]">{mode === "recovery" ? "새 비밀번호" : "비밀번호"}</label><div className="relative"><input id="learnhub-auth-password" type={showPassword ? "text" : "password"} value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={mode === "login" ? "current-password" : "new-password"} placeholder="8자 이상" required minLength={8} className="min-h-12 w-full rounded-xl border border-[var(--lh-line)] bg-[var(--lh-surface)] px-4 pr-12 text-sm outline-none transition focus:border-[var(--lh-line-strong)]" /><button type="button" onClick={() => setShowPassword((visible) => !visible)} aria-label={showPassword ? "비밀번호 숨기기" : "비밀번호 보기"} className="absolute inset-y-0 right-2 flex w-10 items-center justify-center text-[var(--lh-ink-secondary)]">{showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button></div></div>}
           {mode === "recovery" && <div className="space-y-1.5"><label htmlFor="learnhub-auth-password-confirmation" className="text-xs font-medium text-[var(--lh-ink-secondary)]">새 비밀번호 확인</label><input id="learnhub-auth-password-confirmation" type={showPassword ? "text" : "password"} value={passwordConfirmation} onChange={(event) => setPasswordConfirmation(event.target.value)} autoComplete="new-password" required minLength={8} className="min-h-12 w-full rounded-xl border border-[var(--lh-line)] bg-[var(--lh-surface)] px-4 text-sm outline-none transition focus:border-[var(--lh-line-strong)]" /></div>}
+          {mode === "signup" && (
+            <div className="space-y-1.5">
+              <label className="flex items-start gap-2.5 text-sm text-[var(--lh-ink)] cursor-pointer">
+                <input type="checkbox" checked={ageConfirmed} onChange={(event) => setAgeConfirmed(event.target.checked)} className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--lh-primary)]" />
+                <span>만 14세 이상입니다.</span>
+              </label>
+              <p className="pl-6.5 text-xs leading-5 text-[var(--lh-ink-secondary)]">만 14세 미만은 법정대리인(보호자)의 동의가 필요해요. 보호자가 직접 가입한 뒤 함께 이용해 주세요.</p>
+            </div>
+          )}
           {mode === "login" && <button type="button" onClick={() => { setMode("forgot"); setPassword(""); resetFeedback(); }} className="text-xs font-medium text-[var(--lh-primary)] underline">비밀번호를 잊으셨나요?</button>}
           <button type="submit" disabled={isSubmitting} className="flex min-h-12 w-full items-center justify-center rounded-full bg-[var(--lh-primary)] px-6 text-sm font-medium text-white transition hover:bg-[var(--lh-primary-hover)] disabled:opacity-50 shadow-xs cursor-pointer">{isSubmitting ? "처리 중…" : mode === "login" ? "로그인" : mode === "signup" ? "계정 만들기" : mode === "forgot" ? "재설정 링크 보내기" : "새 비밀번호 저장"}</button>
         </form>
@@ -180,7 +205,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, initialEr
 
         <button type="button" onClick={handleGoogleLogin} disabled={isSubmitting} className="flex min-h-12 w-full items-center justify-center gap-3 rounded-full border border-[var(--lh-line)] bg-[var(--lh-surface)] px-5 text-sm font-medium transition hover:bg-[var(--lh-surface-subtle)] disabled:opacity-50 shadow-xs cursor-pointer">
           <span aria-hidden="true" className="text-base font-medium">G</span> Google로 계속하기
-        </button></>}
+        </button>
+        <p className="mt-2 text-center text-xs leading-5 text-[var(--lh-ink-tertiary)]">Google로 처음 가입하면 만 14세 이상임을 확인한 것으로 봅니다.</p></>}
 
         <div className="mt-6 space-y-3 border-t border-[var(--lh-line)] pt-5">
           <div className="flex items-start gap-2 text-xs leading-relaxed text-[var(--lh-ink-secondary)]"><ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-[var(--lh-primary)]" /><span>로그인하면 학습 과정과 기록이 고객 계정에 연결됩니다. 비밀번호는 LearnHub가 직접 저장하지 않습니다.</span></div>

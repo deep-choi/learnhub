@@ -5,7 +5,12 @@ import {
   configureAuthAdapter,
   authorizedFetch,
 } from "../src/services/authClient";
-import { fetchPublicSupabaseConfig } from "../src/services/supabaseClient";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import {
+  AUTH_SERVER_UNREACHABLE_MESSAGE,
+  createSupabaseAuthAdapter,
+  fetchPublicSupabaseConfig,
+} from "../src/services/supabaseClient";
 
 const originalFetch = globalThis.fetch;
 const originalWindow = globalThis.window;
@@ -33,6 +38,34 @@ test("public config accepts only the browser-safe Supabase fields", async () => 
     publishableKey: "service_role_secret",
   }), { status: 200 }));
   assert.equal(unsafe, null);
+});
+
+test("public config strips a trailing CRLF carried by deployed secrets", async () => {
+  const config = await fetchPublicSupabaseConfig(async () => new Response(JSON.stringify({
+    supabaseUrl: "https://learnhub.supabase.co\r\n",
+    publishableKey: "sb_publishable_test\n",
+  }), { status: 200 }));
+  assert.deepEqual(config, { supabaseUrl: "https://learnhub.supabase.co", publishableKey: "sb_publishable_test" });
+});
+
+test("Google sign-in never redirects when the auth server is unreachable", async () => {
+  let redirected = false;
+  const fakeClient = {
+    auth: {
+      getSession: async () => ({ data: { session: null }, error: null }),
+      onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => undefined } } }),
+      signInWithOAuth: async () => {
+        redirected = true;
+        return { data: {}, error: null };
+      },
+    },
+  } as unknown as SupabaseClient;
+  const { adapter, dispose } = await createSupabaseAuthAdapter(fakeClient, {
+    getGoogleProviderEnabled: async () => "unreachable",
+  });
+  await assert.rejects(adapter.signInWithGoogle!(), { message: AUTH_SERVER_UNREACHABLE_MESSAGE });
+  assert.equal(redirected, false);
+  dispose();
 });
 
 test("authorizedFetch attaches a fresh bearer only to same-origin API routes", async () => {
