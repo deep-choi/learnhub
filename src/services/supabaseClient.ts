@@ -28,6 +28,27 @@ export type GoogleProviderState = boolean | "unreachable" | null;
 
 export const AUTH_SERVER_UNREACHABLE_MESSAGE = "로그인 서버에 연결하지 못했습니다. 인터넷 연결을 확인하고 잠시 후 다시 시도해 주세요. 계속되면 서비스 관리자에게 알려 주세요.";
 
+const AUTH_REQUEST_TIMEOUT_MS = 8_000;
+
+const fetchWithTimeout = (fetchImpl: typeof fetch): typeof fetch => async (input: RequestInfo | URL, init?: RequestInit) => {
+  const requestInit = init || {};
+  if (typeof AbortController === "undefined") return fetchImpl(input, requestInit);
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), AUTH_REQUEST_TIMEOUT_MS);
+  const callerSignal = requestInit.signal;
+  const abortFromCaller = () => controller.abort(callerSignal?.reason);
+  if (callerSignal) {
+    if (callerSignal.aborted) controller.abort(callerSignal.reason);
+    else callerSignal.addEventListener("abort", abortFromCaller, { once: true });
+  }
+  try {
+    return await fetchImpl(input, { ...requestInit, signal: controller.signal });
+  } finally {
+    clearTimeout(timeoutId);
+    callerSignal?.removeEventListener("abort", abortFromCaller);
+  }
+};
+
 interface SupabaseAuthAdapterOptions {
   getGoogleProviderEnabled?: () => Promise<GoogleProviderState>;
 }
@@ -50,7 +71,7 @@ const isSafePublicConfig = (value: unknown): value is PublicSupabaseConfig => {
 export const fetchPublicSupabaseConfig = async (
   fetchImpl: typeof fetch = fetch,
 ): Promise<PublicSupabaseConfig | null> => {
-  const response = await fetchImpl("/api/public-config", {
+  const response = await fetchWithTimeout(fetchImpl)("/api/public-config", {
     headers: { Accept: "application/json" },
   });
   if (!response.ok) return null;
@@ -206,7 +227,8 @@ const getGoogleProviderEnabled = async (
 export const initializeSupabaseAuth = async (
   fetchImpl: typeof fetch = fetch,
 ): Promise<SupabaseAuthHandle | null> => {
-  const config = await fetchPublicSupabaseConfig(fetchImpl);
+  const authFetch = fetchWithTimeout(fetchImpl);
+  const config = await fetchPublicSupabaseConfig(authFetch);
   if (!config) return null;
   const client = createClient(config.supabaseUrl, config.publishableKey, {
     auth: {
@@ -214,9 +236,10 @@ export const initializeSupabaseAuth = async (
       autoRefreshToken: true,
       detectSessionInUrl: true,
     },
+    global: { fetch: authFetch },
   });
   const { adapter, dispose } = await createSupabaseAuthAdapter(client, {
-    getGoogleProviderEnabled: () => getGoogleProviderEnabled(config, fetchImpl),
+    getGoogleProviderEnabled: () => getGoogleProviderEnabled(config, authFetch),
   });
   return { client, adapter, dispose, config };
 };

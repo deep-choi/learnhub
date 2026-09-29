@@ -11,6 +11,16 @@ const renderApp = () => createRoot(document.getElementById('root')!).render(
   </StrictMode>,
 );
 
+// React effects subscribe after the initial render. Defer the auth result one
+// macrotask so a fast configuration/network failure cannot be lost before App mounts.
+const notifyAuthChanged = (event: string, userId: string | null) => {
+  window.setTimeout(() => {
+    window.dispatchEvent(new CustomEvent(LEARNHUB_AUTH_CHANGED_EVENT, {
+      detail: { event, userId },
+    }));
+  }, 0);
+};
+
 // Render immediately even if the local API or public Supabase config is down.
 renderApp();
 
@@ -18,20 +28,14 @@ void initializeSupabaseAuth()
   .then((handle) => {
     if (!handle) {
       clearAuthAdapter();
-      window.dispatchEvent(new CustomEvent(LEARNHUB_AUTH_CHANGED_EVENT, {
-        detail: { event: "CONFIGURATION_ERROR", userId: null },
-      }));
+      notifyAuthChanged("CONFIGURATION_ERROR", null);
       return;
     }
     configureAuthAdapter(handle.adapter);
-    window.dispatchEvent(new CustomEvent(LEARNHUB_AUTH_CHANGED_EVENT, {
-      detail: { event: "INITIAL_SESSION", userId: handle.adapter.getAuthStatus?.()?.userId || null },
-    }));
+    notifyAuthChanged("INITIAL_SESSION", handle.adapter.getAuthStatus?.()?.userId || null);
   })
   .catch(() => {
     // Missing/unavailable public config remains the default fail-closed state.
     clearAuthAdapter();
-    window.dispatchEvent(new CustomEvent(LEARNHUB_AUTH_CHANGED_EVENT, {
-      detail: { event: "CONFIGURATION_ERROR", userId: null },
-    }));
+    notifyAuthChanged("CONFIGURATION_ERROR", null);
   });
