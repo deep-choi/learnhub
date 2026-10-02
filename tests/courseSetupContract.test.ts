@@ -118,7 +118,7 @@ const startRouter = async (t: test.TestContext, generate: (req: AiGatewayRequest
   app.use("/api/ai", knowledgeGraphRouter({
     gateway, previewGateway: gateway, previewQuota: new PreviewQuota(),
     authorize: async (_req, res) => { if (!authorized) { res.status(401).json({ code: "AUTH_REQUIRED" }); return false; } return true; },
-    selection: () => DEFAULT_AI_SELECTION, reserveUser: async () => { reserved++; }, clientKey: () => "t", error: (res) => res.status(503).end(),
+    selection: () => DEFAULT_AI_SELECTION, defaultSelection: () => DEFAULT_AI_SELECTION, reserveUser: async () => { reserved++; }, clientKey: () => "t", error: (res) => res.status(503).end(),
   }));
   const server = app.listen(0, "127.0.0.1");
   await new Promise<void>((resolve) => server.once("listening", resolve));

@@ -398,7 +398,7 @@ const validateReviewPayload = (payload: unknown): string[] => {
 };
 
 app.use("/api/ai", assessmentRouter({ gateway: aiGateway, authorize: requireAiAccess, clientKey: clientKeyFor, selection: aiSelectionFor, error: sendAiError }));
-app.use("/api/ai", knowledgeGraphRouter({ gateway: aiGateway, previewGateway, previewQuota, authorize: requireAiAccess, clientKey: clientKeyFor, selection: aiSelectionFor, error: sendAiError,
+app.use("/api/ai", knowledgeGraphRouter({ gateway: aiGateway, previewGateway, previewQuota, authorize: requireAiAccess, clientKey: clientKeyFor, selection: aiSelectionFor, defaultSelection: defaultAiSelection, error: sendAiError,
   reserveUser: async (_req, res, tokens) => { if (typeof res.locals.userId === "string") await reserveFirebaseAiUsage(res.locals.userId, tokens); },
 }));
 

@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import express from "express";
 import type { AddressInfo } from "node:net";
-import { DEFAULT_AI_SELECTION } from "../src/domain/aiModels";
+import { DEFAULT_AI_SELECTION, type AiRuntimeSelection } from "../src/domain/aiModels";
 import { validateCurriculumPayload } from "../src/domain/contentValidation";
 import { coursePrompt, lessonPrompt, extractConceptLinks, knowledgeGraphRouter, normalizeNudgeRequest, nudgeFallback, nudgePrompt, validCourseRequest, validTutorRequest, validateTutorResponse, tutorPrompt } from "../server/knowledgeGraphApi";
 import { PreviewQuota, PreviewQuotaExceededError, reservePreviewCount } from "../server/previewQuota";
@@ -178,7 +178,7 @@ test("preview API is anonymous, preserves reusable response, rejects spoofed IPs
     calls++; assert.deepEqual(req.validate(curriculum), []); assert.equal(req.maxOutputTokens, 2600);
     return { payload: curriculum as T, selection: DEFAULT_AI_SELECTION, usage: { promptTokenCount: 0, candidatesTokenCount: 0, totalTokenCount: 0 } };
   } };
-  app.use("/api/ai", knowledgeGraphRouter({ gateway, previewGateway: gateway, previewQuota: new PreviewQuota({ perIp: 1 }), authorize: async () => { authCalls++; return true; }, selection: () => DEFAULT_AI_SELECTION, reserveUser: async () => {}, clientKey: () => "test", error: (res) => res.status(503).json({ code: "AI_UNAVAILABLE" }) }));
+  app.use("/api/ai", knowledgeGraphRouter({ gateway, previewGateway: gateway, previewQuota: new PreviewQuota({ perIp: 1 }), authorize: async () => { authCalls++; return true; }, selection: () => DEFAULT_AI_SELECTION, defaultSelection: () => DEFAULT_AI_SELECTION, reserveUser: async () => {}, clientKey: () => "test", error: (res) => res.status(503).json({ code: "AI_UNAVAILABLE" }) }));
   const server = app.listen(0, "127.0.0.1"); await new Promise<void>(resolve => server.once("listening", resolve));
   t.after(() => new Promise<void>(resolve => server.close(() => resolve())));
   const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/ai/preview-course`;
@@ -189,12 +189,33 @@ test("preview API is anonymous, preserves reusable response, rejects spoofed IPs
   assert.equal((await request({ subject: "요리" }, "198.51.100.2")).status, 429);
   assert.equal(calls, 1); assert.equal(authCalls, 0);
 });
+test("anonymous preview ignores client model and reasoning headers and always uses the default selection", async t => {
+  const app = express(); app.use(express.json());
+  const fallback: AiRuntimeSelection = { ...DEFAULT_AI_SELECTION };
+  const expensive: AiRuntimeSelection = { provider: "openai", model: "gpt-6-astra", reasoningEffort: "max", maxOutputTokens: 16_384 };
+  const seen: AiRuntimeSelection[] = []; let headerSelectionCalls = 0;
+  const gateway = { async generateJson<T>(req: AiGatewayRequest<T>): Promise<AiGatewayResult<T>> {
+    seen.push(req.selection);
+    return { payload: curriculum as T, selection: req.selection, usage: { promptTokenCount: 0, candidatesTokenCount: 0, totalTokenCount: 0 } };
+  } };
+  app.use("/api/ai", knowledgeGraphRouter({ gateway, previewGateway: gateway, previewQuota: new PreviewQuota(), authorize: async () => true, selection: () => { headerSelectionCalls++; return expensive; }, defaultSelection: () => fallback, reserveUser: async () => {}, clientKey: () => "test", error: res => res.status(503).end() }));
+  const server = app.listen(0, "127.0.0.1"); await new Promise<void>(resolve => server.once("listening", resolve));
+  t.after(() => new Promise<void>(resolve => server.close(() => resolve())));
+  const response = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/ai/preview-course`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-learnhub-ai-provider": expensive.provider, "x-learnhub-ai-model": expensive.model, "x-learnhub-ai-reasoning": expensive.reasoningEffort, "x-learnhub-ai-max-output-tokens": String(expensive.maxOutputTokens) },
+    body: JSON.stringify({ subject: "낚시" }),
+  });
+  assert.equal(response.status, 200);
+  assert.deepEqual(seen, [fallback]);
+  assert.equal(headerSelectionCalls, 0);
+});
 test("nudge accepts coder 2 request and falls back without losing response contract or making wrap-up AI calls", async t => {
   const body = { currentConceptName: "통분", steps: [{ kind: "next_lesson", conceptName: "분수 덧셈", becauseOfConceptName: "통분" }] };
   assert.ok(normalizeNudgeRequest(body)); assert.equal(normalizeNudgeRequest({ ...body, steps: Array(4).fill(body.steps[0]) }), null);
   const app = express(); app.use(express.json()); let calls = 0;
   const gateway = { async generateJson<T>(_req: AiGatewayRequest<T>): Promise<AiGatewayResult<T>> { calls++; throw new Error("AI unavailable"); } };
-  app.use("/api/ai", knowledgeGraphRouter({ gateway, previewGateway: gateway, previewQuota: new PreviewQuota(), authorize: async () => true, selection: () => DEFAULT_AI_SELECTION, reserveUser: async () => {}, clientKey: () => "test", error: res => res.status(503).end() }));
+  app.use("/api/ai", knowledgeGraphRouter({ gateway, previewGateway: gateway, previewQuota: new PreviewQuota(), authorize: async () => true, selection: () => DEFAULT_AI_SELECTION, defaultSelection: () => DEFAULT_AI_SELECTION, reserveUser: async () => {}, clientKey: () => "test", error: res => res.status(503).end() }));
   const server = app.listen(0, "127.0.0.1"); await new Promise<void>(resolve => server.once("listening", resolve));
   t.after(() => new Promise<void>(resolve => server.close(() => resolve())));
   const request = (b: unknown) => fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/ai/next-nudge`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(b) });

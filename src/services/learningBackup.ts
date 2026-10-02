@@ -15,7 +15,7 @@ import { isChatSessionList, mergeChatSessions } from "../domain/chatSession";
 import type { LearningNote } from "../types/learningNotes";
 import type { LessonProgressState } from "../types/lessonProgress";
 import { isLearningNoteList, mergeNotes } from "../domain/learningNote";
-import { isLessonProgressList, mergeLessonProgress } from "../domain/lessonProgress";
+import { isLessonProgressList, lessonProgressKey, mergeLessonProgress } from "../domain/lessonProgress";
 import type { TutorPersona } from "../types/tutorPersona";
 import { isTutorPersona, newerPersona } from "../domain/tutorPersona";
 import {
@@ -779,6 +779,53 @@ export const readLearningBackupFile = async (file: File): Promise<LearningBackup
   const validation = validateLearningBackup(JSON.parse(await file.text()) as unknown);
   if (!validation.ok) throw new Error(validation.errors.join(" "));
   return validation.value;
+};
+
+/**
+ * Records in `local` that the remote snapshot cannot already contain.
+ * A local record wins when its `updatedAt` is later than the remote copy, or
+ * when the remote has no copy and the record changed after the remote was
+ * exported. Older local-only records are treated as deleted elsewhere.
+ */
+const newerLocalRecords = <T extends { updatedAt: string }>(
+  remote: T[] | undefined,
+  local: T[] | undefined,
+  keyOf: (item: T) => string,
+  remoteExportedAt: number,
+): T[] => {
+  const remoteByKey = new Map((remote || []).map((item) => [keyOf(item), item]));
+  return (local || []).filter((item) => {
+    const updatedAt = Date.parse(item.updatedAt);
+    const remoteItem = remoteByKey.get(keyOf(item));
+    return remoteItem ? updatedAt > Date.parse(remoteItem.updatedAt) : updatedAt > remoteExportedAt;
+  });
+};
+
+/**
+ * Put timestamped local records that were never uploaded (learning notes,
+ * lesson progress, chat sessions) on top of a remote snapshot. Everything else
+ * stays exactly as the remote snapshot has it.
+ */
+export const carryNewerLocalRecords = (
+  remote: LearningBackupDocument,
+  local: LearningBackupDocument,
+): { snapshot: LearningBackupDocument; carried: number } => {
+  const exportedAt = Date.parse(remote.exportedAt);
+  const notes = newerLocalRecords(remote.data.learningNotes, local.data.learningNotes, (note) => note.id, exportedAt);
+  const progress = newerLocalRecords(
+    remote.data.lessonProgress,
+    local.data.lessonProgress,
+    (state) => lessonProgressKey(state.courseId, state.lessonId),
+    exportedAt,
+  );
+  const chats = newerLocalRecords(remote.data.chatSessions, local.data.chatSessions, (session) => session.id, exportedAt);
+  const carried = notes.length + progress.length + chats.length;
+  if (carried === 0) return { snapshot: remote, carried };
+  const data: LearningBackupData = { ...remote.data };
+  if (notes.length > 0) data.learningNotes = mergeNotes(remote.data.learningNotes || [], notes);
+  if (progress.length > 0) data.lessonProgress = mergeLessonProgress(remote.data.lessonProgress || [], progress);
+  if (chats.length > 0) data.chatSessions = mergeChatSessions(remote.data.chatSessions || [], chats);
+  return { snapshot: { ...remote, data }, carried };
 };
 
 // Compatibility aliases for callers that prefer export/import terminology.

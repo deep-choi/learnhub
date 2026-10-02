@@ -194,6 +194,8 @@ export function knowledgeGraphRouter(deps: {
   previewQuota: PreviewQuota;
   authorize: (req: Request, res: Response) => Promise<boolean>;
   selection: (req: Request) => AiRuntimeSelection;
+  /** 로그인하지 않은 미리보기용. 요청 헤더의 모델·추론 선택은 받지 않는다. */
+  defaultSelection: () => AiRuntimeSelection;
   reserveUser: (req: Request, res: Response, tokens: number) => Promise<void>;
   clientKey: (req: Request, res: Response) => string;
   error: (res: Response, error: unknown) => unknown;
@@ -203,7 +205,8 @@ export function knowledgeGraphRouter(deps: {
     if (!validCourseRequest(req.body)) return res.status(400).json({ error: "주제와 학습 설정을 확인해 주세요.", code: "INVALID_REQUEST" });
     res.setHeader("Cache-Control", "no-store");
     try {
-      const selection = deps.selection(req);
+      // 미리보기는 인증 없이 열려 있으므로 비싼 모델을 고를 수 없게 항상 기본 선택을 쓴다.
+      const selection = deps.defaultSelection();
       await deps.previewQuota.reserve(req.ip || req.socket.remoteAddress || "unknown");
       const result = await deps.previewGateway.generateJson<Record<string, unknown>>({ endpoint: "preview-course", requestId: res.locals.requestId, clientKey: `preview:${req.ip || req.socket.remoteAddress}`, prompt: coursePrompt(req.body), config: { responseMimeType: "application/json", responseSchema: graphCurriculumSchema }, maxOutputTokens: 2600, selection, validate: v => validateCurriculumPayload(v, { requireConceptLinks: true }) });
       return res.json({ preview: true, curriculum: result.payload, conceptLinks: extractConceptLinks(result.payload) });

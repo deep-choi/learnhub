@@ -69,6 +69,20 @@ export const NotesPane: React.FC<{ context: PaneContext }> = ({ context }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [noteTarget.conceptId]);
 
+  // 새로고침·탭 닫기는 컴포넌트 정리 함수를 부르지 않으므로, 자동 저장 대기 중인 메모를 이때 바로 저장합니다.
+  const flushRef = useRef(flush);
+  flushRef.current = flush;
+  useEffect(() => {
+    const flushNow = () => flushRef.current();
+    const flushWhenHidden = () => { if (document.visibilityState === "hidden") flushRef.current(); };
+    window.addEventListener("pagehide", flushNow);
+    document.addEventListener("visibilitychange", flushWhenHidden);
+    return () => {
+      window.removeEventListener("pagehide", flushNow);
+      document.removeEventListener("visibilitychange", flushWhenHidden);
+    };
+  }, []);
+
   const change = (value: string) => {
     const next = value.slice(0, NOTE_LIMITS.maxBodyLength);
     setBody(next);

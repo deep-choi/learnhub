@@ -27,14 +27,11 @@ import { getAuthStatus, type AuthStatus } from "./services/authClient";
 import { LEARNHUB_AUTH_CHANGED_EVENT } from "./services/firebaseClient";
 import {
   clearPendingSync,
-  getCloudDataOwnerId,
   getLearningSnapshot,
-  getPendingSyncOwnerId,
   markPendingSync,
-  restoreLearningSnapshot,
   syncCurrentLearningSnapshot,
 } from "./services/cloudSync";
-import { createLearningBackup, importLearningBackup, type LearningBackupDocument } from "./services/learningBackup";
+import { captureLocalCacheForAccount, reconcileAccountSnapshot } from "./services/accountSync";
 import { AiChatView } from "./components/AiChatView";
 import { shouldIgnoreAuthEvent } from "./components/authEvents";
 import { resolveCourseSetup } from "./domain/courseSetup";
@@ -175,20 +172,14 @@ export default function App() {
       if (authStatus.signedIn && authStatus.userId) {
         const isPasswordRecovery = authEvent === "PASSWORD_RECOVERY";
         if (activeUserIdRef.current === authStatus.userId && dataReadyRef.current) return;
-        let pendingLocalSnapshot: LearningBackupDocument | null = null;
-        try {
-          if (getCloudDataOwnerId() === authStatus.userId && getPendingSyncOwnerId() === authStatus.userId) {
-            pendingLocalSnapshot = createLearningBackup();
-          }
-        } catch {
-          pendingLocalSnapshot = null;
-        }
+        // 이 계정의 기기 기록은 서버 기록을 받기 전까지 지우지 않습니다. 아직 올리지 못한 변경을 살려야 하기 때문입니다.
+        const localCache = captureLocalCacheForAccount(authStatus.userId);
         setDataReady(false);
         dataReadyRef.current = false;
         suppressSyncRef.current = true;
         setSyncStatus("loading");
         setSyncError("");
-        if (!pendingLocalSnapshot) StorageService.clearLearningData();
+        if (!localCache.snapshot) StorageService.clearLearningData();
         const account: UserAccount = {
           id: authStatus.userId,
           name: authStatus.name?.trim() || authStatus.email?.split("@")[0] || "LearnHub 학습자",
@@ -206,32 +197,16 @@ export default function App() {
         setIsAuthModalOpen(isPasswordRecovery);
         try {
           const snapshot = await getLearningSnapshot(authStatus.userId);
-          if (generation !== authGenerationRef.current || getAuthStatus().userId !== authStatus.userId) return;
-          if (pendingLocalSnapshot) {
-            const localRestored = restoreLearningSnapshot(authStatus.userId, pendingLocalSnapshot, "overwrite", { confirmed: true });
-            if (!localRestored.ok) throw new Error(localRestored.error || "이 기기에 남은 변경사항을 복구하지 못했습니다.");
-            if (snapshot) {
-              const remoteMerged = importLearningBackup(snapshot.snapshot, { strategy: "merge" });
-              if (!remoteMerged.ok) throw new Error(remoteMerged.error || "서버 기록과 이 기기의 변경사항을 합치지 못했습니다.");
-            }
-            const saved = await syncCurrentLearningSnapshot(authStatus.userId, snapshot?.revision ?? null);
-            if (generation !== authGenerationRef.current || getAuthStatus().userId !== authStatus.userId) return;
-            snapshotRevisionRef.current = saved.revision;
-            setLastSyncedAt(saved.updatedAt);
-            clearPendingSync(authStatus.userId);
-          } else if (snapshot) {
-            const restored = restoreLearningSnapshot(authStatus.userId, snapshot.snapshot, "overwrite", { confirmed: true });
-            if (!restored.ok) throw new Error(restored.error || "계정의 학습 기록을 적용하지 못했습니다.");
-            snapshotRevisionRef.current = snapshot.revision;
-            setLastSyncedAt(snapshot.updatedAt);
-          } else {
-            const created = await syncCurrentLearningSnapshot(authStatus.userId, null);
-            if (generation !== authGenerationRef.current || getAuthStatus().userId !== authStatus.userId) return;
-            snapshotRevisionRef.current = created.revision;
-            setLastSyncedAt(created.updatedAt);
-          }
+          const isCurrent = () => generation === authGenerationRef.current && getAuthStatus().userId === authStatus.userId;
+          if (!isCurrent()) return;
+          const synced = await reconcileAccountSnapshot(authStatus.userId, localCache, snapshot, isCurrent);
+          if (!synced) return;
+          snapshotRevisionRef.current = synced.revision;
+          setLastSyncedAt(synced.updatedAt);
           refreshDataState();
           dataReadyRef.current = true;
+          // 로그인 직후 만드는 과목(미리보기 이어서 만들기)도 미동기화 표시와 업로드 대상이 되도록 바로 풉니다.
+          suppressSyncRef.current = false;
           setDataReady(true);
           setSyncStatus("synced");
           if (pendingViewAfterAuth) {
@@ -252,9 +227,9 @@ export default function App() {
           }
         } catch (error) {
           if (generation !== authGenerationRef.current) return;
-          if (!pendingLocalSnapshot) StorageService.clearLearningData();
+          if (!localCache.snapshot) StorageService.clearLearningData();
           StorageService.setUser(account);
-          if (pendingLocalSnapshot) markPendingSync(authStatus.userId);
+          if (localCache.pending) markPendingSync(authStatus.userId);
           refreshDataState();
           activeUserIdRef.current = null;
           snapshotRevisionRef.current = null;
@@ -286,6 +261,7 @@ export default function App() {
   }, [pendingViewAfterAuth]);
 
   useEffect(() => {
+    let scheduledSync: (() => void) | null = null;
     const handleDataChanged = () => {
       refreshDataState();
       const userId = activeUserIdRef.current;
@@ -295,7 +271,9 @@ export default function App() {
       if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
       setSyncStatus("syncing");
       setSyncError("");
-      syncTimerRef.current = setTimeout(() => {
+      const runSync = () => {
+        syncTimerRef.current = null;
+        scheduledSync = null;
         if (activeUserIdRef.current !== userId) return;
         setSyncStatus("syncing");
         const requestId = ++syncRequestRef.current;
@@ -314,11 +292,27 @@ export default function App() {
             setSyncStatus("error");
             setSyncError(toFriendlySyncError(error, SYNC_UNAVAILABLE_MESSAGE));
           });
-      }, 800);
+      };
+      scheduledSync = runSync;
+      syncTimerRef.current = setTimeout(runSync, 800);
+    };
+    // 탭을 숨기거나 떠날 때는 800ms를 기다리지 않고 바로 올립니다. 새로고침으로 요청이 끊겨도
+    // 미동기화 표시가 남아 있어 다음 로그인에서 이 기기 기록을 먼저 살립니다.
+    const flushScheduledSync = () => {
+      if (!scheduledSync || !syncTimerRef.current) return;
+      clearTimeout(syncTimerRef.current);
+      scheduledSync();
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") flushScheduledSync();
     };
     window.addEventListener(LEARNHUB_DATA_CHANGED_EVENT, handleDataChanged);
+    window.addEventListener("pagehide", flushScheduledSync);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => {
       window.removeEventListener(LEARNHUB_DATA_CHANGED_EVENT, handleDataChanged);
+      window.removeEventListener("pagehide", flushScheduledSync);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
       if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
     };
   }, []);
