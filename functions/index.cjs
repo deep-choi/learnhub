@@ -3,8 +3,6 @@ const { defineSecret } = require("firebase-functions/params");
 
 const geminiApiKey = defineSecret("GEMINI_API_KEY");
 const openAiApiKey = defineSecret("OPENAI_API_KEY");
-const supabaseUrl = defineSecret("SUPABASE_URL");
-const supabasePublishableKey = defineSecret("SUPABASE_PUBLISHABLE_KEY");
 let app;
 
 exports.learnhubApi = onRequest(
@@ -16,7 +14,7 @@ exports.learnhubApi = onRequest(
     concurrency: 20,
     timeoutSeconds: 120,
     memory: "1GiB",
-    secrets: [geminiApiKey, openAiApiKey, supabaseUrl, supabasePublishableKey],
+    secrets: [geminiApiKey, openAiApiKey],
   },
   (req, res) => {
     app ||= require("./server.cjs").app;

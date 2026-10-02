@@ -9,7 +9,7 @@ import {
   resendSignUpConfirmation,
   updatePassword,
 } from "../../services/authClient";
-import { AUTH_SERVER_UNREACHABLE_MESSAGE } from "../../services/supabaseClient";
+import { AUTH_SERVER_UNREACHABLE_MESSAGE } from "../../services/firebaseClient";
 import { LearnHubLogo } from "../common/LearnHubLogo";
 
 interface AuthModalProps {
@@ -25,17 +25,19 @@ type AuthMode = "login" | "signup" | "forgot" | "recovery";
 const authErrorMessage = (error: unknown, fallback: string): string => {
   const message = error instanceof Error ? error.message : "";
   const name = error instanceof Error ? error.name : "";
+  const code = error && typeof error === "object" && "code" in error && typeof error.code === "string" ? error.code : "";
   // fetch() failures surface with browser-specific wording; the SDK wraps them as AuthRetryableFetchError.
-  if (name === "AuthRetryableFetchError" || /failed to fetch|networkerror|load failed|network request failed/iu.test(message)) return AUTH_SERVER_UNREACHABLE_MESSAGE;
+  if (name === "AuthRetryableFetchError" || code === "auth/network-request-failed" || /failed to fetch|networkerror|load failed|network request failed/iu.test(message)) return AUTH_SERVER_UNREACHABLE_MESSAGE;
   if (/email not confirmed/iu.test(message)) return "이메일 인증이 아직 끝나지 않았습니다. 가입할 때 받은 메일의 링크를 눌러 주세요.";
   if (/error sending .*email|sending.*(confirmation|recovery|magic)/iu.test(message)) return "인증 메일을 보내지 못했습니다. 잠시 후 다시 시도하거나 서비스 관리자에게 알려 주세요.";
-  if (/signups? not allowed|signup is disabled/iu.test(message)) return "지금은 새 회원가입을 받지 않고 있습니다.";
-  if (/email address .*invalid|invalid email/iu.test(message)) return "이메일 주소 형식을 확인해 주세요.";
-  if (/provider is not enabled|unsupported provider/iu.test(message)) return "Google 로그인이 아직 준비되지 않았습니다. 이메일로 로그인해 주세요.";
-  if (/invalid login credentials/iu.test(message)) return "이메일 또는 비밀번호가 올바르지 않습니다.";
-  if (/user already registered/iu.test(message)) return "이미 가입된 이메일입니다. 로그인하거나 비밀번호를 재설정해 주세요.";
-  if (/email.*rate|rate.*email|too many requests/iu.test(message)) return "요청이 많습니다. 잠시 후 다시 시도해 주세요.";
-  if (/password/iu.test(message) && /weak|least|characters/iu.test(message)) return "더 안전한 비밀번호를 입력해 주세요.";
+  if (["auth/operation-not-allowed", "auth/admin-restricted-operation"].includes(code) || /signups? not allowed|signup is disabled/iu.test(message)) return "이 로그인 방식이 아직 준비되지 않았습니다. 서비스 관리자에게 알려 주세요.";
+  if (code === "auth/invalid-email" || /email address .*invalid|invalid email/iu.test(message)) return "이메일 주소 형식을 확인해 주세요.";
+  if (code === "auth/unauthorized-domain") return "이 웹사이트가 Firebase 로그인 허용 도메인에 등록되지 않았습니다.";
+  if (code === "auth/popup-blocked") return "브라우저에서 로그인 팝업이 차단되었습니다. 팝업을 허용한 뒤 다시 시도해 주세요.";
+  if (["auth/invalid-credential", "auth/user-not-found", "auth/wrong-password", "auth/invalid-login-credentials"].includes(code) || /invalid login credentials/iu.test(message)) return "이메일 또는 비밀번호가 올바르지 않습니다.";
+  if (["auth/email-already-in-use", "auth/account-exists-with-different-credential"].includes(code) || /user already registered/iu.test(message)) return "이미 가입된 이메일입니다. 로그인하거나 비밀번호를 재설정해 주세요.";
+  if (code === "auth/too-many-requests" || /email.*rate|rate.*email|too many requests/iu.test(message)) return "요청이 많습니다. 잠시 후 다시 시도해 주세요.";
+  if (code === "auth/weak-password" || (/password/iu.test(message) && /weak|least|characters/iu.test(message))) return "더 안전한 비밀번호를 입력해 주세요.";
   return message || fallback;
 };
 

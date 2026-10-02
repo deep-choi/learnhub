@@ -6,13 +6,14 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 const nonEmpty = (value: unknown): value is string => typeof value === "string" && value.trim().length > 0;
 
-export function validateCurriculumPayload(payload: unknown): string[] {
+export function validateCurriculumPayload(payload: unknown, options: { requireConceptLinks?: boolean } = {}): string[] {
   const errors: string[] = [];
   if (!isRecord(payload)) return ["커리큘럼 응답이 객체가 아닙니다."];
   if (!nonEmpty(payload.courseTitle)) errors.push("커리큘럼 제목이 없습니다.");
   if (!LEARNING_TYPES.includes(payload.learningType as LearningType)) errors.push("지원하지 않는 학습 유형입니다.");
   if (!nonEmpty(payload.learningTypeExplanation)) errors.push("학습 방식 설명이 없습니다.");
   if (!nonEmpty(payload.summary)) errors.push("커리큘럼 요약이 없습니다.");
+  if ((options.requireConceptLinks || payload.domain !== undefined) && (!nonEmpty(payload.domain) || payload.domain.length > 200)) errors.push("과목 분야를 확인해 주세요.");
   if (!Array.isArray(payload.chapters) || payload.chapters.length === 0) {
     errors.push("챕터가 하나 이상 필요합니다.");
     return errors;
@@ -41,8 +42,15 @@ export function validateCurriculumPayload(payload: unknown): string[] {
       if (!nonEmpty(lesson.conceptId) || !nonEmpty(lesson.conceptName)) {
         errors.push(`챕터 ${chapterIndex + 1} 레슨 ${lessonIndex + 1} 핵심 개념이 없습니다.`);
       }
+      for (const key of ["prerequisites", "relatedConcepts", "aliases"]) {
+        const names = lesson[key];
+        if ((options.requireConceptLinks && key !== "aliases") || names !== undefined) {
+          if (!Array.isArray(names) || names.length > 20 || names.some(n => !nonEmpty(n) || n.length > 200) || new Set(names).size !== names.length) errors.push(`레슨 개념 연결 ${key} 형식이 올바르지 않습니다.`);
+        }
+      }
     });
   });
+  if (payload.chapters.length > 12 || payload.chapters.some(c => isRecord(c) && Array.isArray(c.lessons) && c.lessons.length > 12)) errors.push("커리큘럼 분량이 너무 큽니다.");
   return errors;
 }
 

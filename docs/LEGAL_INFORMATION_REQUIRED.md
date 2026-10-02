@@ -21,7 +21,7 @@
 
 ## 3. 개인정보 보유·삭제 정책
 
-- 회원 이메일, 표시 이름, Supabase 사용자 ID의 보유 기간
+- 회원 이메일, 표시 이름, Firebase 사용자 UID의 보유 기간
 - 과목·진도·퀴즈·노트·AI 대화 등 학습 기록의 보유 기간
 - 콘텐츠 신고 기록의 보유 기간
 - 회원 탈퇴 후 즉시 삭제 대상과 법적 의무로 별도 보관할 항목
@@ -32,7 +32,8 @@
 
 현재 코드상 확인이 필요한 공급자는 다음과 같다. 실제 계약 계정의 법인명, 처리 국가/리전, 이전 일시·방법, 보유 기간을 운영 콘솔과 계약 문서에서 확인한다.
 
-- Supabase: 인증과 학습 snapshot 데이터베이스
+- Firebase Authentication/Firestore: 계정 인증, 학습 기록, 신고 및 사용량 저장
+- Firebase Hosting/Cloud Functions: 웹 호스팅, API 처리, 운영 로그
 - Google OAuth: Google 로그인 사용 시
 - Google Gemini API: AI 학습 과정·레슨·평가 생성 시 전송되는 입력
 - 이메일/SMTP 공급자: 가입 확인과 비밀번호 재설정 메일

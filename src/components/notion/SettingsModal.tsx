@@ -616,7 +616,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         <div className="flex items-center gap-2">
                           <Sparkles className="h-4 w-4 text-[var(--lh-point)]" />
                           <span className="text-xs font-medium text-[var(--lh-ink)]">
-                            AI 소크라테스 튜터
+                            AI 튜터
                           </span>
                         </div>
                         <p className="text-[11px] font-normal text-[var(--lh-ink-secondary)] leading-relaxed">

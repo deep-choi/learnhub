@@ -3,7 +3,7 @@ import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
 import { clearAuthAdapter, configureAuthAdapter } from './services/authClient';
-import { initializeSupabaseAuth, LEARNHUB_AUTH_CHANGED_EVENT } from './services/supabaseClient';
+import { initializeFirebaseAuth, LEARNHUB_AUTH_CHANGED_EVENT } from './services/firebaseClient';
 
 const renderApp = () => createRoot(document.getElementById('root')!).render(
   <StrictMode>
@@ -21,10 +21,10 @@ const notifyAuthChanged = (event: string, userId: string | null) => {
   }, 0);
 };
 
-// Render immediately even if the local API or public Supabase config is down.
+// Render immediately even if the local API or public Firebase config is down.
 renderApp();
 
-void initializeSupabaseAuth()
+void initializeFirebaseAuth()
   .then((handle) => {
     if (!handle) {
       clearAuthAdapter();

@@ -45,7 +45,7 @@ LearnHub는 Google Gemini와 OpenAI GPT를 하나의 서버 gateway에서 사용
 - `AI_GLOBAL_REQUESTS_PER_DAY`
 - `AI_GLOBAL_RESERVED_OUTPUT_TOKENS_PER_DAY`
 
-인증된 사용자별 일일 요청·token 한도는 `ai_usage_daily`의 Supabase RPC로 원자적으로 예약하므로 Functions 재시작 후에도 유지된다. 일일 token 값은 실제 청구량이 아니라 요청별 최대 출력 token을 보수적으로 예약한 값이다. 전역 동시성·전역 일일 한도는 서버 프로세스에서 유지하므로 서버 재시작, 여러 인스턴스, 공급자 dashboard의 rate limit·결제 한도까지 통합하지 않는다. 수평 확장 전에는 전역 한도도 Redis/DB 기반 원자적 quota store로 옮긴다.
+인증된 사용자별 일일 요청·token 한도는 Firestore의 UID별 `aiUsage/{UTC-day}` 문서에서 transaction으로 원자적으로 예약하므로 Functions 재시작 후에도 유지된다. 전역 요청 동시성·일일 한도는 서버 프로세스에서 유지하므로 서버 재시작, 여러 인스턴스, 공급자 dashboard의 rate limit·결제 한도까지 통합하지 않는다. 수평 확장 전에는 전역 한도도 Firestore 등 공유 quota store로 옮긴다.
 
 `GET /api/ai/config`는 로그인 사용자에게 다음 정보만 반환한다.
 
@@ -61,7 +61,7 @@ API 키 값, 조직 ID, 결제 정보는 반환하지 않는다.
 - `GEMINI_API_KEY`
 - `OPENAI_API_KEY`
 
-키는 서버 환경이나 secret manager에만 저장한다. `VITE_` 접두사, 브라우저 localStorage, Supabase 공개 설정, source control에 넣지 않는다. 키 하나가 없으면 그 공급자의 모델은 설정 화면에 “서버 API 키 필요”로 표시되고 저장을 막는다. 다른 공급자는 계속 사용할 수 있다.
+키는 서버 환경이나 secret manager에만 저장한다. `VITE_` 접두사, 브라우저 localStorage, Firebase 공개 웹 설정, source control에 넣지 않는다. 키 하나가 없으면 그 공급자의 모델은 설정 화면에 “서버 API 키 필요”로 표시되고 저장을 막는다. 다른 공급자는 계속 사용할 수 있다.
 
 ## 공개 전 검증
 

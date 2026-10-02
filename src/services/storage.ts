@@ -1,5 +1,6 @@
 import { Course, UserSkill, UserProgress, ReviewQuestion, LessonContent, LessonMeta, MistakeItem, UserAccount } from "../types/learning";
 import { PRESET_ROADMAP_CONTENTS } from "../data/roadmapData";
+import { mergeCourseIntoGraph, markConceptLearned, recordQuizConcept } from "./knowledgeGraphStore";
 
 export const LEARNHUB_DATA_CHANGED_EVENT = "learnhub:data-changed";
 
@@ -33,6 +34,8 @@ export const LEARNHUB_STORAGE_KEYS = {
   QUIZ_ATTEMPTS: "ai_learnhub_quiz_attempts_v2",
   MISTAKES: "ai_learnhub_mistakes_v2",
   AI_PREFERENCES: "learnhub_ai_preferences_v1",
+  KNOWLEDGE_GRAPH: "ai_learnhub_knowledge_graph_v1",
+  CHAT_SESSIONS: "ai_learnhub_chat_sessions_v1",
   USER: "ai_learnhub_user_v2",
 } as const;
 
@@ -49,6 +52,13 @@ const LESSON_CONTENT_CACHE_VERSION = "v3";
 
 const lessonCacheKey = (lessonId: string) =>
   `${KEYS.LESSONS_CACHE}_${LESSON_CONTENT_CACHE_VERSION}_${lessonId}`;
+
+const restoreGraphRaw = (raw: string | null): void => {
+  if (localStorage.getItem(KEYS.KNOWLEDGE_GRAPH) === raw) return;
+  if (raw === null) localStorage.removeItem(KEYS.KNOWLEDGE_GRAPH);
+  else localStorage.setItem(KEYS.KNOWLEDGE_GRAPH, raw);
+  notifyLearningDataChanged();
+};
 
 export class StorageService {
   static getCourses(): Course[] {
@@ -74,8 +84,12 @@ export class StorageService {
 
   static addCourse(course: Course) {
     const courses = this.getCourses();
+    const graphBefore = localStorage.getItem(KEYS.KNOWLEDGE_GRAPH);
     const updated = [{ ...course, status: course.status || "active" }, ...courses];
-    this.saveCourses(updated);
+    if (this.saveCourses(updated)) {
+      try { mergeCourseIntoGraph(course); }
+      catch (error) { this.saveCourses(courses); restoreGraphRaw(graphBefore); throw error; }
+    }
   }
 
   static updateCourseStatus(courseId: string, status: NonNullable<Course["status"]>): boolean {
@@ -95,6 +109,8 @@ export class StorageService {
     const courses = this.getCourses();
     const courseIndex = courses.findIndex((c) => c.id === courseId);
     if (courseIndex === -1) return false;
+    const coursesBefore = structuredClone(courses);
+    const graphBefore = localStorage.getItem(KEYS.KNOWLEDGE_GRAPH);
 
     let updatedLesson: LessonMeta | null = null;
     let wasAlreadyCompleted = false;
@@ -113,6 +129,14 @@ export class StorageService {
 
     if (this.saveCourses(courses)) {
       // Reading/completing a lesson is not evidence of quiz correctness.
+      try {
+        mergeCourseIntoGraph(courses[courseIndex]);
+        markConceptLearned(updatedLesson.conceptName, { courseId, lessonId });
+      } catch {
+        this.saveCourses(coursesBefore);
+        try { restoreGraphRaw(graphBefore); } catch { console.error("개념 지도 복구를 확인하지 못했습니다."); }
+        return false;
+      }
       this.incrementProgress(updatedLesson.estimatedMinutes || 10);
       return true;
     }
@@ -161,6 +185,7 @@ export class StorageService {
 
     const previousAttempts = attemptId ? this.getQuizAttemptIds() : null;
     if (attemptId && previousAttempts?.has(attemptId)) return false;
+    const graphBefore = localStorage.getItem(KEYS.KNOWLEDGE_GRAPH);
 
     const skills = this.getSkills();
     const previousSkills = JSON.parse(JSON.stringify(skills)) as UserSkill[];
@@ -206,6 +231,13 @@ export class StorageService {
       }
     }
 
+    try { recordQuizConcept(conceptId, conceptName, courseId, isCorrect); }
+    catch {
+      this.saveSkills(previousSkills);
+      if (previousAttempts) this.saveQuizAttemptIds(previousAttempts);
+      try { restoreGraphRaw(graphBefore); } catch { console.error("개념 지도 복구를 확인하지 못했습니다."); }
+      return false;
+    }
     return true;
   }
 

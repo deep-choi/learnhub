@@ -1881,9 +1881,26 @@ const applyMathCurriculum = (roadmap: LearningRoadmap, spec: MathRoadmapSpec): L
   };
 };
 
+// 모든 분야의 로드맵 단계를 학교 급(초등~대학원) 기준으로 표시합니다.
+export const ROADMAP_STAGE_LABELS: Record<LearningRoadmap["stepLevel"], string> = {
+  1: "초등",
+  2: "중학교",
+  3: "고등학교",
+  4: "대학",
+  5: "대학원",
+};
+
+const STAGE_LEVEL_LABELS: Record<LearningRoadmap["stepLevel"], string> = {
+  1: "초등 과정",
+  2: "중학교 과정",
+  3: "고등학교 과정",
+  4: "대학 전공",
+  5: "대학원 연구",
+};
+
 export const LEARNING_ROADMAPS: LearningRoadmap[] = BASE_LEARNING_ROADMAPS.map((roadmap) => {
   const mathSpec = MATH_CURRICULUM.find((spec) => spec.roadmapId === roadmap.id);
-  return mathSpec ? applyMathCurriculum(roadmap, mathSpec) : roadmap;
+  return mathSpec ? applyMathCurriculum(roadmap, mathSpec) : { ...roadmap, levelLabel: STAGE_LEVEL_LABELS[roadmap.stepLevel] };
 });
 
 // Fallback preset content for quick interactive testing

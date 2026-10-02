@@ -1,0 +1,11 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // The application uses authenticated server routes and the Admin SDK.
+    // Browser clients only use Firebase Authentication, never direct Firestore access.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

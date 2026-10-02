@@ -1,67 +1,92 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
-  BookOpen,
-  ChevronDown,
-  ChevronLeft,
-  ChevronRight,
+  Archive,
   BarChart3,
-  FileText,
-  Home,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  ClipboardCheck,
+  Folder,
+  FolderOpen,
+  ListTree,
+  Menu,
   MessageCircle,
+  MoreHorizontal,
+  Network,
+  PanelLeft,
+  PanelLeftClose,
   Plus,
-  RotateCcw,
   Search,
   Settings,
+  SquarePen,
+  Trash2,
   User,
-  Layers,
-  PanelLeftClose,
-  MoreHorizontal,
-  Archive,
-  XCircle,
 } from "lucide-react";
 import { Course, LessonMeta, UserAccount } from "../../types/learning";
 import { LearnHubLogo } from "../common/LearnHubLogo";
 
 export type NotionPageView =
-  | { type: "home" }
-  | { type: "courses" }
+  | { type: "courses"; roadmapId?: string }
   | { type: "course-detail"; course: Course }
   | { type: "assessment"; course: Course }
-  | { type: "ai-chat" }
+  | { type: "ai-chat"; sessionId?: string; startInCourseMode?: boolean }
   | { type: "records" }
-  | { type: "lesson"; course: Course; lesson: LessonMeta; chapterTitle: string; assessmentReturn?: boolean }
+  | { type: "lesson"; course: Course; lesson: LessonMeta; chapterTitle: string; assessmentReturn?: boolean; autoPractice?: boolean }
   | { type: "knowledge-map" }
   | { type: "skill-matrix" }
   | { type: "review-queue" }
   | { type: "mistake-archive" };
 
+export interface SidebarChatItem {
+  id: string;
+  title: string;
+}
+
 interface SidebarProps {
   courses: Course[];
   activeView: NotionPageView;
   onSelectView: (view: NotionPageView) => void;
-  onOpenLearning: () => void;
-  onOpenCreateCourse: () => void;
+  /** 빈 새 대화를 엽니다. */
+  onNewChat: () => void;
+  /** 새 대화를 "과목으로 만들기" 모드로 엽니다. */
+  onCreateCourse: () => void;
   onOpenSearch: () => void;
-  onOpenTutor: () => void;
   pendingReviewsCount: number;
+  /** 데스크톱에서는 오른쪽 패널, 모바일에서는 레일과 패널을 함께 담은 서랍이 열려 있는지 */
   isOpen: boolean;
   onToggleSidebar: () => void;
   userAccount?: UserAccount;
   onOpenAuth?: () => void;
   onOpenSettings?: () => void;
   onUpdateCourseStatus?: (courseId: string, status: "completed" | "cancelled" | "active") => void;
+  /** 마지막으로 학습한 레슨(현재 위치). 레슨을 열지 않은 화면에서도 표시합니다. */
+  lastLessonId?: string | null;
+  chats: SidebarChatItem[];
+  activeChatId?: string | null;
+  onOpenChat: (id: string) => void;
+  onDeleteChat: (id: string) => void;
 }
 
-type RailCategory = "home" | "courses" | "ai-chat" | "records" | "review-queue";
+type RailCategory = "chat" | "map" | "records";
+
+const railOf = (view: NotionPageView): RailCategory => {
+  if (view.type === "knowledge-map") return "map";
+  if (view.type === "records" || view.type === "skill-matrix" || view.type === "mistake-archive" || view.type === "review-queue") return "records";
+  return "chat";
+};
+
+const RAIL_BUTTON =
+  "relative flex h-11 w-11 items-center justify-center rounded-xl transition cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--lh-primary)]";
+const RAIL_IDLE = "text-[var(--lh-ink-secondary)] hover:bg-[var(--lh-surface-subtle)] hover:text-[var(--lh-ink)]";
+const RAIL_ACTIVE = "bg-[var(--lh-primary-subtle)] text-[var(--lh-primary-text)]";
 
 export const Sidebar: React.FC<SidebarProps> = ({
   courses,
   activeView,
   onSelectView,
-  onOpenLearning,
-  onOpenCreateCourse,
+  onNewChat,
+  onCreateCourse,
   onOpenSearch,
-  onOpenTutor,
   pendingReviewsCount,
   isOpen,
   onToggleSidebar,
@@ -69,545 +94,301 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onOpenAuth,
   onOpenSettings,
   onUpdateCourseStatus,
+  lastLessonId,
+  chats,
+  activeChatId,
+  onOpenChat,
+  onDeleteChat,
 }) => {
-  // 1번째 사진 (Rail only) vs 2번째 사진 (Rail + Expanded Drawer)
-  const [isPanelExpanded, setIsPanelExpanded] = useState<boolean>(false);
-
-  useEffect(() => {
-    if (userAccount?.isGuest) setIsPanelExpanded(false);
-  }, [userAccount?.isGuest]);
-
-  const [selectedRailCategory, setSelectedRailCategory] = useState<RailCategory>(() => {
-    if (activeView.type === "courses" || activeView.type === "course-detail" || activeView.type === "lesson" || activeView.type === "assessment") return "courses";
-    if (activeView.type === "ai-chat") return "ai-chat";
-    if (activeView.type === "review-queue") return "review-queue";
-    if (["records", "knowledge-map", "skill-matrix", "mistake-archive"].includes(activeView.type)) return "records";
-    return "home";
-  });
-
-  const [expandedCourseIds, setExpandedCourseIds] = useState<{ [id: string]: boolean }>({
-    "course-high-math-01": true,
-    "course-mid-math-01": false,
-  });
-  const [courseMenuId, setCourseMenuId] = useState<string | null>(null);
   const activeCourses = courses.filter((course) => course.status !== "completed" && course.status !== "cancelled");
+  const activeLessonId = activeView.type === "lesson" ? activeView.lesson.id : null;
+  const activeLessonCourseId = activeView.type === "lesson" ? activeView.course.id : null;
+  const rail = railOf(activeView);
+  const isGuest = Boolean(userAccount?.isGuest);
 
-  const toggleCourse = (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setExpandedCourseIds((prev) => ({ ...prev, [id]: !prev[id] }));
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [courseMenuId, setCourseMenuId] = useState<string | null>(null);
+
+  // 지금 보고 있는 레슨의 과목 폴더는 자동으로 펼칩니다.
+  useEffect(() => {
+    if (activeLessonCourseId) setExpanded((prev) => (prev[activeLessonCourseId] ? prev : { ...prev, [activeLessonCourseId]: true }));
+  }, [activeLessonCourseId]);
+
+  // 과목 관리 메뉴는 바깥 클릭이나 Esc로 닫습니다.
+  useEffect(() => {
+    if (!courseMenuId) return;
+    const close = (event: Event) => {
+      if (event instanceof KeyboardEvent && event.key !== "Escape") return;
+      if (event instanceof MouseEvent && (event.target as Element | null)?.closest?.("[data-course-menu]")) return;
+      setCourseMenuId(null);
+    };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", close);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", close);
+    };
+  }, [courseMenuId]);
+
+  const isMobile = () => typeof window !== "undefined" && window.innerWidth < 768;
+  /** 모바일에서는 항목을 고르면 서랍을 닫습니다. */
+  const afterNavigate = () => {
+    if (isMobile() && isOpen) onToggleSidebar();
+  };
+  const go = (action: () => void) => {
+    action();
+    afterNavigate();
   };
 
-  const handleSelectView = (view: NotionPageView) => {
-    onSelectView(view);
-    if (typeof window !== "undefined" && window.innerWidth < 768) {
-      onToggleSidebar();
-    }
-  };
-
-  // Determine current active rail tab from activeView
-  const currentActiveRail: RailCategory = (() => {
-    if (activeView.type === "courses" || activeView.type === "course-detail" || activeView.type === "lesson" || activeView.type === "assessment") return "courses";
-    if (activeView.type === "ai-chat") return "ai-chat";
-    if (activeView.type === "review-queue") return "review-queue";
-    if (["records", "knowledge-map", "skill-matrix", "mistake-archive"].includes(activeView.type)) return "records";
-    return "home";
-  })();
-
-  // Handle clicking a Rail Item
-  const handleRailClick = (category: RailCategory) => {
-    if (category !== "home" && category !== "courses" && userAccount?.isGuest && onOpenAuth) {
-      onOpenAuth();
-      return;
-    }
-    setSelectedRailCategory(category);
-
-    if (category === "home") {
-      setIsPanelExpanded(false);
-      handleSelectView({ type: "home" });
-      return;
-    }
-
-    if (category === "courses") {
-      // 내 과목 클릭 시: 이미 펼쳐져 있는 상태라면 접고, 아니면 펼치기
-      if (currentActiveRail === "courses" && isPanelExpanded) {
-        setIsPanelExpanded(false);
-      } else {
-        setIsPanelExpanded(true);
-        handleSelectView({ type: "courses" });
-      }
-      return;
-    }
-
-    if (category === "ai-chat") {
-      setIsPanelExpanded(false);
-      handleSelectView({ type: "ai-chat" });
-      return;
-    }
-
-    if (category === "records") {
-      setIsPanelExpanded(false);
-      handleSelectView({ type: "records" });
-      return;
-    }
-
-    if (category === "review-queue") {
-      setIsPanelExpanded(false);
-      handleSelectView({ type: "review-queue" });
-      return;
-    }
-  };
-
-  if (!isOpen) {
-    return (
-      <div className="fixed left-4 top-3.5 z-40">
-        <button
-          onClick={onToggleSidebar}
-          title="사이드바 열기 (⌘\)"
-          className="flex h-11 w-11 items-center justify-center rounded-full border border-[var(--lh-line)] bg-[var(--lh-surface)] text-[var(--lh-ink-secondary)] shadow-sm transition hover:bg-[var(--lh-surface-subtle)] hover:text-[var(--lh-ink)] cursor-pointer"
-        >
-          <ChevronRight className="h-4 w-4" />
-        </button>
-      </div>
-    );
-  }
+  const reviewLabel = pendingReviewsCount > 0 ? `기록 · 복습 ${pendingReviewsCount}개` : "기록";
 
   return (
     <>
-      {/* Mobile Backdrop */}
-      <div
-        onClick={onToggleSidebar}
-        className="fixed inset-0 z-40 bg-black/30 backdrop-blur-[2px] transition-opacity md:hidden cursor-pointer"
-      />
-
-      {/* Main Container: Slim Rail + Expansible Drawer */}
-      <aside
-        className={`fixed inset-y-0 left-0 z-50 flex h-screen shrink-0 border-r border-t border-b border-l-0 border-[var(--lh-line)] bg-[var(--lh-surface)] text-sm select-none shadow-2xl md:relative md:shadow-none transition-all duration-200 rounded-tr-2xl rounded-br-2xl overflow-hidden`}
-      >
-
-        {/* =========================================================================
-            SECTION 1: M3 Navigation Rail (1번째 사진)
-            - Fixed slim width (~76px)
-            - Top Search Button in rounded container
-            - Navigation Destinations (Centered Icon in Pill + Text Label below)
-            - Bottom Utilities (Theme, Tutor, Expand/Collapse Toggle, Profile)
-           ========================================================================= */}
-        <div
-          className="flex h-full w-[76px] shrink-0 flex-col items-center justify-between border-r border-[var(--lh-line-strong)] bg-[var(--lh-surface)] py-3 transition-all duration-200"
+      {/* 모바일: 서랍 열기 버튼 */}
+      {!isOpen && (
+        <button
+          type="button"
+          onClick={onToggleSidebar}
+          aria-label="메뉴 열기"
+          title="메뉴 열기"
+          className="fixed left-3 top-3 z-30 flex h-11 w-11 items-center justify-center rounded-full border border-[var(--lh-line)] bg-[var(--lh-surface)] text-[var(--lh-ink-secondary)] shadow-sm transition hover:bg-[var(--lh-surface-subtle)] hover:text-[var(--lh-ink)] cursor-pointer md:hidden"
         >
+          <Menu aria-hidden className="h-5 w-5" />
+        </button>
+      )}
+      {/* 모바일: 서랍 뒷배경 */}
+      {isOpen && <div aria-hidden onClick={onToggleSidebar} className="fixed inset-0 z-40 bg-black/30 backdrop-blur-[2px] md:hidden cursor-pointer" />}
 
-          {/* Top: LearnHub Official Brand Emblem (No box wrapper) & Quick Search */}
-          <div className="flex flex-col items-center gap-3 pt-2">
+      <aside
+        aria-label="LearnHub 메뉴"
+        className={`${isOpen ? "fixed inset-y-0 left-0 z-50 flex shadow-2xl" : "hidden"} h-screen shrink-0 border-r border-[var(--lh-line)] bg-[var(--lh-surface)] text-sm select-none md:relative md:z-auto md:flex md:shadow-none`}
+      >
+        {/* 1단: 아이콘 레일 */}
+        <div className="flex h-full w-[60px] shrink-0 flex-col items-center justify-between border-r border-[var(--lh-line)] py-3">
+          <div className="flex flex-col items-center gap-1.5">
             <button
               type="button"
-              onClick={() => handleRailClick("home")}
-              title="LearnHub 홈"
-              className="flex items-center justify-center p-1 transition-transform hover:scale-110 cursor-pointer"
+              onClick={() => go(onNewChat)}
+              aria-label="LearnHub 대화 첫 화면"
+              title="LearnHub"
+              className="flex h-11 w-11 items-center justify-center rounded-xl transition hover:bg-[var(--lh-surface-subtle)] cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--lh-primary)]"
             >
-              <LearnHubLogo size={32} />
+              <LearnHubLogo size={28} />
             </button>
-
-            <button
-              type="button"
-              onClick={onOpenSearch}
-              title="검색 (⌘K)"
-              className="group flex h-10 w-10 items-center justify-center rounded-2xl bg-[var(--lh-surface-subtle)] border border-[var(--lh-line)] text-[var(--lh-ink)] shadow-2xs transition hover:bg-[var(--lh-primary)] hover:text-white hover:border-[var(--lh-primary)] cursor-pointer"
-            >
-              <Search className="h-5 w-5 transition group-hover:scale-105" />
-            </button>
+            <nav aria-label="주요 화면" className="mt-2 flex flex-col items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => go(onNewChat)}
+                aria-label="대화"
+                title="대화"
+                aria-current={rail === "chat" ? "page" : undefined}
+                className={`${RAIL_BUTTON} ${rail === "chat" ? RAIL_ACTIVE : RAIL_IDLE}`}
+              >
+                <MessageCircle aria-hidden className="h-5 w-5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => go(() => onSelectView({ type: "knowledge-map" }))}
+                aria-label="지도"
+                title="개념 지도"
+                aria-current={rail === "map" ? "page" : undefined}
+                className={`${RAIL_BUTTON} ${rail === "map" ? RAIL_ACTIVE : RAIL_IDLE}`}
+              >
+                <Network aria-hidden className="h-5 w-5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => go(() => onSelectView({ type: "records" }))}
+                aria-label={reviewLabel}
+                title={reviewLabel}
+                aria-current={rail === "records" ? "page" : undefined}
+                className={`${RAIL_BUTTON} ${rail === "records" ? RAIL_ACTIVE : RAIL_IDLE}`}
+              >
+                <BarChart3 aria-hidden className="h-5 w-5" />
+                {pendingReviewsCount > 0 && (
+                  <span aria-hidden className="absolute right-0.5 top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--lh-secondary)] px-1 text-[9px] font-medium text-white">
+                    {pendingReviewsCount > 99 ? "99+" : pendingReviewsCount}
+                  </span>
+                )}
+              </button>
+            </nav>
           </div>
 
-          {/* Middle: Navigation Rail Destinations (Icon on top with Pill indicator, Text label below) */}
-          <nav className="flex flex-col items-center gap-2 py-3" aria-label="메인 레일 네비게이션">
-            {/* 1. 홈 (Home) */}
-            <button
-              type="button"
-              onClick={() => handleRailClick("home")}
-              title="공부 홈"
-              className="group flex flex-col items-center justify-center w-16 py-1 cursor-pointer"
-            >
-              <div
-                className={`flex h-9 w-14 items-center justify-center rounded-full transition ${
-                  currentActiveRail === "home"
-                    ? "bg-[var(--lh-primary)] text-white shadow-xs"
-                    : "text-[var(--lh-ink-secondary)] group-hover:bg-[var(--lh-surface-subtle)] group-hover:text-[var(--lh-ink)]"
-                }`}
-              >
-                <Home className="h-5 w-5" />
-              </div>
-              <span
-                className={`mt-1 text-[11px] tracking-tight text-center ${
-                  currentActiveRail === "home"
-                    ? "font-medium text-[var(--lh-primary)]"
-                    : "font-medium text-[var(--lh-ink-secondary)] group-hover:text-[var(--lh-ink)]"
-                }`}
-              >
-                홈
-              </span>
+          <div className="flex flex-col items-center gap-1.5">
+            {!isOpen && (
+              <button type="button" onClick={onToggleSidebar} aria-label="패널 열기" title="패널 열기 (⌘\)" className={`${RAIL_BUTTON} ${RAIL_IDLE} hidden md:flex`}>
+                <PanelLeft aria-hidden className="h-5 w-5" />
+              </button>
+            )}
+            <button type="button" onClick={() => onOpenSettings?.()} aria-label="설정" title="설정" className={`${RAIL_BUTTON} ${RAIL_IDLE}`}>
+              <Settings aria-hidden className="h-5 w-5" />
             </button>
-
-            {/* 2. 내 과목 (My Courses / Curriculum) -> 클릭 시 서브 드로어 자동 펼침 */}
             <button
               type="button"
-              onClick={() => handleRailClick("courses")}
-              title="내 과목 (클릭하여 챕터/레슨 펼치기)"
-              className="group flex flex-col items-center justify-center w-16 py-1 cursor-pointer relative"
+              onClick={() => (isGuest ? onOpenAuth?.() : onOpenSettings?.())}
+              aria-label={isGuest ? "로그인하기" : `${userAccount?.name || "회원"} 프로필`}
+              title={isGuest ? "로그인하기" : `${userAccount?.name || "회원"} 프로필`}
+              className="flex h-11 w-11 items-center justify-center rounded-xl transition hover:bg-[var(--lh-surface-subtle)] cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--lh-primary)]"
             >
-              <div
-                className={`flex h-9 w-14 items-center justify-center rounded-full transition relative ${
-                  currentActiveRail === "courses" || (isPanelExpanded && selectedRailCategory === "courses")
-                    ? "bg-[var(--lh-primary)] text-white shadow-xs"
-                    : "text-[var(--lh-ink-secondary)] group-hover:bg-[var(--lh-surface-subtle)] group-hover:text-[var(--lh-ink)]"
-                }`}
-              >
-                <BookOpen className="h-5 w-5" />
-                {activeCourses.length > 0 && (
-                  <span className={`absolute -top-1 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full text-[9px] font-medium border ${
-                    currentActiveRail === "courses" || (isPanelExpanded && selectedRailCategory === "courses")
-                      ? "bg-white text-[var(--lh-primary)] border-white/80"
-                      : "bg-[var(--lh-primary)] text-white border-white"
-                  }`}>
-                    {activeCourses.length}
-                  </span>
-                )}
-              </div>
-              <span
-                className={`mt-1 text-[11px] tracking-tight text-center ${
-                  currentActiveRail === "courses" || (isPanelExpanded && selectedRailCategory === "courses")
-                    ? "font-medium text-[var(--lh-primary)]"
-                    : "font-medium text-[var(--lh-ink-secondary)] group-hover:text-[var(--lh-ink)]"
-                }`}
-              >
-                내 과목
-              </span>
-            </button>
-
-            {/* 3. AI 대화 */}
-            <button
-              type="button"
-              onClick={() => handleRailClick("ai-chat")}
-              title="AI와 대화하기"
-              className="group flex flex-col items-center justify-center w-16 py-1 cursor-pointer"
-            >
-              <div
-                className={`flex h-9 w-14 items-center justify-center rounded-full transition ${
-                  currentActiveRail === "ai-chat"
-                    ? "bg-[var(--lh-primary)] text-white shadow-xs"
-                    : "text-[var(--lh-ink-secondary)] group-hover:bg-[var(--lh-surface-subtle)] group-hover:text-[var(--lh-ink)]"
-                }`}
-              >
-                <MessageCircle className="h-5 w-5" />
-              </div>
-              <span
-                className={`mt-1 text-[11px] tracking-tight text-center ${
-                  currentActiveRail === "ai-chat"
-                    ? "font-medium text-[var(--lh-primary)]"
-                    : "font-medium text-[var(--lh-ink-secondary)] group-hover:text-[var(--lh-ink)]"
-                }`}
-              >
-                AI 대화
-              </span>
-            </button>
-
-            {/* 4. 학습 기록 */}
-            <button
-              type="button"
-              onClick={() => handleRailClick("records")}
-              title="학습 기록"
-              className="group flex flex-col items-center justify-center w-16 py-1 cursor-pointer"
-            >
-              <div
-                className={`flex h-9 w-14 items-center justify-center rounded-full transition ${
-                  currentActiveRail === "records"
-                    ? "bg-[var(--lh-primary)] text-white shadow-xs"
-                    : "text-[var(--lh-ink-secondary)] group-hover:bg-[var(--lh-surface-subtle)] group-hover:text-[var(--lh-ink)]"
-                }`}
-              >
-                <BarChart3 className="h-5 w-5" />
-              </div>
-              <span
-                className={`mt-1 text-[11px] tracking-tight text-center ${
-                  currentActiveRail === "records"
-                    ? "font-medium text-[var(--lh-primary)]"
-                    : "font-medium text-[var(--lh-ink-secondary)] group-hover:text-[var(--lh-ink)]"
-                }`}
-              >
-                기록
-              </span>
-            </button>
-
-            {/* 5. 예정 복습 (Review Queue) */}
-            <button
-              type="button"
-              onClick={() => handleRailClick("review-queue")}
-              title="예정된 복습 문제"
-              className="group flex flex-col items-center justify-center w-16 py-1 cursor-pointer relative"
-            >
-              <div
-                className={`flex h-9 w-14 items-center justify-center rounded-full transition relative ${
-                  currentActiveRail === "review-queue"
-                    ? "bg-[var(--lh-primary)] text-white shadow-xs"
-                    : "text-[var(--lh-ink-secondary)] group-hover:bg-[var(--lh-surface-subtle)] group-hover:text-[var(--lh-ink)]"
-                }`}
-              >
-                <RotateCcw className="h-5 w-5" />
-                {pendingReviewsCount > 0 && (
-                  <span className="absolute -top-1 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full text-[9px] font-medium bg-[var(--lh-secondary)] text-white border border-white shadow-xs">
-                    {pendingReviewsCount}
-                  </span>
-                )}
-              </div>
-              <span
-                className={`mt-1 text-[11px] tracking-tight text-center ${
-                  currentActiveRail === "review-queue"
-                    ? "font-medium text-[var(--lh-primary)]"
-                    : "font-medium text-[var(--lh-ink-secondary)] group-hover:text-[var(--lh-ink)]"
-                }`}
-              >
-                복습
-              </span>
-            </button>
-          </nav>
-
-          {/* Bottom: Settings Icon + Profile Icon */}
-          <div className="flex flex-col items-center gap-1.5 border-t border-[var(--lh-line)] pt-2.5 pb-1">
-            {/* 설정 아이콘 */}
-            <button
-              type="button"
-              onClick={onOpenSettings}
-              title="설정 (테마 시스템, 프로필 계정, 기본 설정)"
-              className="group flex flex-col items-center justify-center w-16 py-0.5 cursor-pointer"
-            >
-              <div className="flex h-8.5 w-14 items-center justify-center rounded-full text-[var(--lh-ink-secondary)] transition group-hover:bg-[var(--lh-surface-subtle)] group-hover:text-[var(--lh-ink)]">
-                <Settings className="h-5 w-5" />
-              </div>
-              <span className="mt-0.5 text-[11px] font-medium tracking-tight text-[var(--lh-ink-secondary)] group-hover:text-[var(--lh-ink)] text-center">
-                설정
-              </span>
-            </button>
-
-            {/* 프로필 아이콘 (설정 바로 밑에 위치) */}
-            <button
-              type="button"
-              onClick={() => {
-                if (userAccount?.isGuest && onOpenAuth) {
-                  onOpenAuth();
-                } else if (onOpenSettings) {
-                  onOpenSettings();
-                }
-              }}
-              title={userAccount?.isGuest ? "로그인하기" : `${userAccount?.name || "회원"} 프로필`}
-              className="group flex flex-col items-center justify-center w-16 py-0.5 cursor-pointer"
-            >
-              <div
-                className={`flex h-8.5 w-8.5 items-center justify-center rounded-full text-xs font-medium shadow-2xs transition group-hover:scale-105 ${
-                  userAccount?.isGuest
-                    ? "border border-[var(--lh-line)] bg-[var(--lh-surface)] text-[var(--lh-ink-secondary)] group-hover:text-[var(--lh-ink)] group-hover:bg-[var(--lh-surface-subtle)]"
-                    : "bg-[var(--lh-primary)] text-white"
-                }`}
-              >
-                {userAccount?.isGuest ? (
-                  <User className="h-4.5 w-4.5" />
-                ) : (
-                  <span className="text-xs font-medium">{userAccount?.name?.slice(0, 1) || "U"}</span>
-                )}
-              </div>
-              <span className="mt-0.5 text-[11px] font-medium tracking-tight text-[var(--lh-ink-secondary)] group-hover:text-[var(--lh-ink)] text-center truncate max-w-[58px]">
-                {userAccount?.isGuest ? "로그인" : (userAccount?.name || "프로필")}
+              <span className={`flex h-8 w-8 items-center justify-center rounded-full text-xs font-medium ${isGuest ? "border border-[var(--lh-line)] text-[var(--lh-ink-secondary)]" : "bg-[var(--lh-primary)] text-white"}`}>
+                {isGuest ? <User aria-hidden className="h-4 w-4" /> : userAccount?.name?.slice(0, 1) || "U"}
               </span>
             </button>
           </div>
         </div>
 
-        {/* =========================================================================
-            SECTION 2: M3 Expansible Sub-Drawer Panel (2번째 사진)
-            - Attached immediately next to the Rail
-            - Appears when user toggles expand or clicks "내 과목"
-            - Header with section overview pill & fold button
-            - Hierarchical Course Tree & Chapters / Lessons
-            ========================================================================= */}
-        {isPanelExpanded && (
-          <div className="flex h-full w-[260px] sm:w-[280px] shrink-0 flex-col bg-[var(--lh-surface)] p-3 text-sm animate-fade-in transition-all">
-
-            {/* 1. Header Overview Pill with Logo */}
-            <div className="flex items-center justify-between gap-2 pb-3 pt-1 border-b border-[var(--lh-line)]">
-              <div className="flex items-center gap-2 truncate">
-                <span className="inline-flex items-center gap-2 rounded-full bg-[var(--lh-surface-subtle)] border border-[var(--lh-line)] px-3.5 py-1.5 text-xs font-medium text-[var(--lh-ink)] shadow-xs">
-                  <LearnHubLogo size={16} />
-                  <span>내 과목 커리큘럼</span>
-                </span>
+        {/* 2단: 패널 */}
+        {isOpen && (
+          <div className="flex h-full w-[264px] shrink-0 flex-col">
+            <div className="flex items-center justify-between gap-2 px-3 pb-2 pt-3">
+              <span className="px-1 text-sm font-medium tracking-tight text-[var(--lh-ink)]">LearnHub</span>
+              <div className="flex items-center gap-0.5">
+                <button type="button" onClick={onOpenSearch} aria-label="검색" title="검색 (⌘K)" className="flex h-9 w-9 items-center justify-center rounded-lg text-[var(--lh-ink-secondary)] transition hover:bg-[var(--lh-surface-subtle)] hover:text-[var(--lh-ink)] cursor-pointer">
+                  <Search aria-hidden className="h-4 w-4" />
+                </button>
+                <button type="button" onClick={onToggleSidebar} aria-label="패널 접기" title="패널 접기 (⌘\)" className="flex h-9 w-9 items-center justify-center rounded-lg text-[var(--lh-ink-secondary)] transition hover:bg-[var(--lh-surface-subtle)] hover:text-[var(--lh-ink)] cursor-pointer">
+                  <PanelLeftClose aria-hidden className="h-4 w-4" />
+                </button>
               </div>
+            </div>
+
+            <div className="px-3 pb-2">
               <button
                 type="button"
-                onClick={() => setIsPanelExpanded(false)}
-                title="사이드바 접기"
-                className="flex h-8 w-8 items-center justify-center rounded-xl border border-[var(--lh-line)] bg-[var(--lh-surface-subtle)] text-[var(--lh-ink-secondary)] hover:bg-[var(--lh-surface)] hover:text-[var(--lh-ink)] hover:border-[var(--lh-point)] shadow-2xs transition cursor-pointer group"
-                aria-label="사이드바 접기"
+                onClick={() => go(onNewChat)}
+                className="flex min-h-10 w-full items-center gap-2 rounded-xl px-3 text-sm font-medium text-[var(--lh-ink)] transition hover:bg-[var(--lh-surface-subtle)] cursor-pointer"
               >
-                <PanelLeftClose className="h-4.5 w-4.5 transition-transform group-hover:scale-105" />
+                <SquarePen aria-hidden className="h-4 w-4" /> 새 대화
               </button>
             </div>
 
-            {/* 2. Primary Action Buttons */}
-            <div className="pt-3 pb-2 space-y-1.5">
-              <button
-                type="button"
-                onClick={() => handleSelectView({ type: "courses" })}
-                className="flex h-10 w-full items-center justify-center gap-2 rounded-full border border-[var(--lh-line)] bg-[var(--lh-surface)] hover:bg-[var(--lh-surface-subtle)] px-4 text-xs font-medium text-[var(--lh-ink)] shadow-xs transition cursor-pointer"
-              >
-                <Layers className="h-3.5 w-3.5 text-[var(--lh-point)]" />
-                <span>학습 로드맵 전체 보기</span>
-              </button>
-              <button
-                type="button"
-                onClick={onOpenCreateCourse}
-                className="flex h-10 w-full items-center justify-center gap-2 rounded-full bg-[var(--lh-primary)] hover:bg-[var(--lh-primary-hover)] px-4 text-xs font-medium text-white shadow-xs transition cursor-pointer"
-              >
-                <Plus className="h-4 w-4" />
-                <span>새 과목 만들기</span>
-              </button>
-            </div>
-
-            {/* 3. Scrollable Tree: Courses -> Chapters -> Lessons */}
-            <div className="flex-1 space-y-3 overflow-y-auto pr-1 py-2">
-              <div className="px-2 text-[10px] font-medium uppercase tracking-wider text-[var(--lh-ink-tertiary)]">
-                수강 중인 과목 ({activeCourses.length})
-              </div>
-
-              <div className="space-y-2">
-                {activeCourses.map((course) => {
-                  const isExpanded = !!expandedCourseIds[course.id];
-                  const isCourseActive =
-                    activeView.type === "lesson" && activeView.course.id === course.id;
-
-                  return (
-                    <div
-                      key={course.id}
-                      className="rounded-2xl border border-[var(--lh-line)] bg-[var(--lh-surface-subtle)] p-2.5 space-y-1.5 shadow-xs"
-                    >
-                      {/* Course Title Accordion Item */}
-                      <div className="relative flex items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={(e) => toggleCourse(course.id, e)}
-                          aria-expanded={isExpanded}
-                          className={`flex min-w-0 flex-1 items-center justify-between rounded-xl px-2 py-1.5 text-left transition cursor-pointer ${
-                            isCourseActive
-                              ? "bg-[var(--lh-surface)] font-medium text-[var(--lh-ink)] shadow-2xs"
-                              : "hover:bg-[var(--lh-surface)] text-[var(--lh-ink)] font-medium"
-                          }`}
-                        >
-                          <span className="flex items-center gap-2 truncate text-xs">
-                            <span className="text-[var(--lh-ink-tertiary)]">
-                              {isExpanded ? (
-                                <ChevronDown className="h-3.5 w-3.5" />
-                              ) : (
-                                <ChevronRight className="h-3.5 w-3.5" />
-                              )}
-                            </span>
-                            <span className="truncate">{course.title}</span>
-                          </span>
-                        </button>
-                        {onUpdateCourseStatus && (
-                          <button
-                            type="button"
-                            aria-label={`${course.title} 과목 관리`}
-                            title="과목 관리"
-                            onClick={() => setCourseMenuId((current) => current === course.id ? null : course.id)}
-                            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[var(--lh-ink-tertiary)] transition hover:bg-[var(--lh-surface)] hover:text-[var(--lh-ink)] cursor-pointer"
-                          >
-                            <MoreHorizontal className="h-4 w-4" />
-                          </button>
-                        )}
-                        {courseMenuId === course.id && onUpdateCourseStatus && (
-                          <div role="menu" className="absolute right-0 top-9 z-30 min-w-44 rounded-xl border border-[var(--lh-line)] bg-[var(--lh-surface)] p-1.5 text-xs shadow-lg">
+            <div className="flex-1 space-y-5 overflow-y-auto px-3 pb-4 pt-1">
+              {/* 과목 폴더 */}
+              <section aria-labelledby="sidebar-courses">
+                <div className="flex items-center justify-between px-3 pb-1">
+                  <h2 id="sidebar-courses" className="text-xs font-medium text-[var(--lh-ink-tertiary)]">과목</h2>
+                  <button type="button" onClick={() => go(onCreateCourse)} aria-label="새 과목 만들기" title="새 과목 만들기" className="flex h-7 w-7 items-center justify-center rounded-md text-[var(--lh-ink-tertiary)] transition hover:bg-[var(--lh-surface-subtle)] hover:text-[var(--lh-ink)] cursor-pointer">
+                    <Plus aria-hidden className="h-4 w-4" />
+                  </button>
+                </div>
+                {activeCourses.length === 0 ? (
+                  <p className="px-3 py-2 text-xs text-[var(--lh-ink-tertiary)]">아직 과목이 없어요.</p>
+                ) : (
+                  <ul className="space-y-0.5">
+                    {activeCourses.map((course) => {
+                      const isExpanded = Boolean(expanded[course.id]);
+                      const lessons = course.chapters.flatMap((chapter) => chapter.lessons.map((lesson) => ({ lesson, chapterTitle: chapter.title })));
+                      const FolderIcon = isExpanded ? FolderOpen : Folder;
+                      return (
+                        <li key={course.id}>
+                          <div className="group relative flex items-center" data-course-menu>
                             <button
                               type="button"
-                              role="menuitem"
-                              onClick={() => { onUpdateCourseStatus(course.id, "completed"); setCourseMenuId(null); }}
-                              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left hover:bg-[var(--lh-surface-subtle)] cursor-pointer"
+                              onClick={() => setExpanded((prev) => ({ ...prev, [course.id]: !prev[course.id] }))}
+                              aria-expanded={isExpanded}
+                              className="flex min-h-10 min-w-0 flex-1 items-center gap-2 rounded-xl px-3 text-left text-sm text-[var(--lh-ink)] transition hover:bg-[var(--lh-surface-subtle)] cursor-pointer"
                             >
-                              <Archive className="h-3.5 w-3.5" />
-                              학습 완료로 보관
+                              <FolderIcon aria-hidden className="h-4 w-4 shrink-0 text-[var(--lh-ink-secondary)]" />
+                              <span className="truncate">{course.title}</span>
+                              {isExpanded ? <ChevronDown aria-hidden className="ml-auto h-3.5 w-3.5 shrink-0 text-[var(--lh-ink-tertiary)]" /> : <ChevronRight aria-hidden className="ml-auto h-3.5 w-3.5 shrink-0 text-[var(--lh-ink-tertiary)]" />}
                             </button>
-                            <button
-                              type="button"
-                              role="menuitem"
-                              onClick={() => { onUpdateCourseStatus(course.id, "cancelled"); setCourseMenuId(null); }}
-                              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[var(--lh-danger)] hover:bg-[var(--lh-surface-subtle)] cursor-pointer"
-                            >
-                              <XCircle className="h-3.5 w-3.5" />
-                              수강 취소
-                            </button>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Expanded Chapters & Lessons */}
-                      {isExpanded && (
-                        <div className="ml-2.5 space-y-2 border-l border-[var(--lh-line)] pl-2 pt-1">
-                          {course.chapters.map((chapter, cIdx) => (
-                            <div key={chapter.id} className="space-y-1">
-                              <div className="truncate px-2 py-0.5 text-[10px] font-medium text-[var(--lh-ink-tertiary)]">
-                                CH {cIdx + 1}. {chapter.title}
+                            {onUpdateCourseStatus && (
+                              <button
+                                type="button"
+                                aria-label={`${course.title} 과목 관리`}
+                                aria-haspopup="menu"
+                                aria-expanded={courseMenuId === course.id}
+                                title="과목 관리"
+                                onClick={() => setCourseMenuId((current) => (current === course.id ? null : course.id))}
+                                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[var(--lh-ink-tertiary)] transition hover:bg-[var(--lh-surface-subtle)] hover:text-[var(--lh-ink)] cursor-pointer md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100 md:aria-expanded:opacity-100"
+                              >
+                                <MoreHorizontal aria-hidden className="h-4 w-4" />
+                              </button>
+                            )}
+                            {courseMenuId === course.id && onUpdateCourseStatus && (
+                              <div role="menu" aria-label={`${course.title} 과목 관리`} className="absolute right-0 top-10 z-30 min-w-48 rounded-xl border border-[var(--lh-line)] bg-[var(--lh-surface)] p-1.5 text-xs shadow-lg">
+                                <button type="button" role="menuitem" onClick={() => { setCourseMenuId(null); go(() => onSelectView({ type: "course-detail", course })); }} className="flex min-h-10 w-full items-center gap-2 rounded-lg px-3 text-left hover:bg-[var(--lh-surface-subtle)] cursor-pointer">
+                                  <ListTree aria-hidden className="h-3.5 w-3.5" /> 목차 보기
+                                </button>
+                                <button type="button" role="menuitem" onClick={() => { setCourseMenuId(null); go(() => onSelectView({ type: "assessment", course })); }} className="flex min-h-10 w-full items-center gap-2 rounded-lg px-3 text-left hover:bg-[var(--lh-surface-subtle)] cursor-pointer">
+                                  <ClipboardCheck aria-hidden className="h-3.5 w-3.5" /> 문제로 실력 확인
+                                </button>
+                                <button type="button" role="menuitem" onClick={() => { setCourseMenuId(null); onUpdateCourseStatus(course.id, "completed"); }} className="flex min-h-10 w-full items-center gap-2 rounded-lg px-3 text-left hover:bg-[var(--lh-surface-subtle)] cursor-pointer">
+                                  <Archive aria-hidden className="h-3.5 w-3.5" /> 보관
+                                </button>
                               </div>
-                              <div className="space-y-0.5">
-                                {chapter.lessons.map((lesson) => {
-                                  const isLessonActive =
-                                    activeView.type === "lesson" &&
-                                    activeView.lesson.id === lesson.id;
-
-                                  return (
+                            )}
+                          </div>
+                          {isExpanded && (
+                            <ul className="ml-[22px] space-y-0.5 border-l border-[var(--lh-line)] py-0.5 pl-2">
+                              {lessons.map(({ lesson, chapterTitle }) => {
+                                const isCurrent = lesson.id === activeLessonId;
+                                return (
+                                  <li key={lesson.id}>
                                     <button
-                                      key={lesson.id}
-                                      onClick={() =>
-                                        handleSelectView({
-                                          type: "lesson",
-                                          course,
-                                          lesson,
-                                          chapterTitle: chapter.title,
-                                        })
-                                      }
-                                      className={`flex w-full items-center gap-2 rounded-full px-2.5 py-1.5 text-left text-xs transition cursor-pointer ${
-                                        isLessonActive
-                                          ? "bg-[var(--lh-ink)] font-medium text-white shadow-xs"
-                                          : "text-[var(--lh-ink-secondary)] hover:bg-[var(--lh-surface-subtle)] hover:text-[var(--lh-ink)] font-medium"
+                                      type="button"
+                                      onClick={() => go(() => onSelectView({ type: "lesson", course, lesson, chapterTitle }))}
+                                      aria-current={isCurrent ? "true" : undefined}
+                                      className={`flex min-h-9 w-full items-center gap-2 rounded-lg px-2.5 text-left text-[13px] transition cursor-pointer ${
+                                        isCurrent
+                                          ? "bg-[var(--lh-primary-subtle)] font-medium text-[var(--lh-primary-text)]"
+                                          : "text-[var(--lh-ink-secondary)] hover:bg-[var(--lh-surface-subtle)] hover:text-[var(--lh-ink)]"
                                       }`}
                                     >
-                                      <FileText
-                                        className={`h-3 w-3 shrink-0 ${
-                                          isLessonActive ? "text-white" : "text-[var(--lh-ink-tertiary)]"
-                                        }`}
-                                      />
                                       <span className="truncate">{lesson.title}</span>
-                                      {lesson.isCompleted && (
-                                        <span
-                                          className={`ml-auto text-[10px] font-medium ${
-                                            isLessonActive ? "text-white" : "text-[var(--lh-ink)]"
-                                          }`}
-                                        >
-                                          ✓
-                                        </span>
-                                      )}
+                                      {lesson.isCompleted && <Check aria-label="완료" className="ml-auto h-3.5 w-3.5 shrink-0 text-[var(--lh-ink-tertiary)]" />}
+                                      {!isCurrent && lesson.id === lastLessonId && !lesson.isCompleted && <span aria-label="마지막으로 학습한 레슨" className="ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--lh-primary)]" />}
+                                      {isCurrent && !lesson.isCompleted && <span aria-hidden className="ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--lh-primary)]" />}
                                     </button>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-                {activeCourses.length === 0 && (
-                  <p className="rounded-xl border border-dashed border-[var(--lh-line)] px-3 py-4 text-center text-xs text-[var(--lh-ink-secondary)]">
-                    수강 중인 과목이 없어요.
-                  </p>
+                                  </li>
+                                );
+                              })}
+                            </ul>
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ul>
                 )}
-              </div>
+              </section>
 
+              {/* 최근 대화 */}
+              {chats.length > 0 && (
+                <section aria-labelledby="sidebar-recent">
+                  <h2 id="sidebar-recent" className="px-3 pb-1 text-xs font-medium text-[var(--lh-ink-tertiary)]">최근</h2>
+                  <ul className="space-y-0.5">
+                    {chats.map((chat) => {
+                      const isCurrent = activeView.type === "ai-chat" && chat.id === activeChatId;
+                      return (
+                        <li key={chat.id} className="group relative flex items-center">
+                          <button
+                            type="button"
+                            onClick={() => go(() => onOpenChat(chat.id))}
+                            aria-current={isCurrent ? "true" : undefined}
+                            className={`flex min-h-10 min-w-0 flex-1 items-center rounded-xl px-3 text-left text-sm transition cursor-pointer ${
+                              isCurrent
+                                ? "bg-[var(--lh-primary-subtle)] font-medium text-[var(--lh-primary-text)]"
+                                : "text-[var(--lh-ink)] hover:bg-[var(--lh-surface-subtle)]"
+                            }`}
+                          >
+                            <span className="truncate">{chat.title}</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onDeleteChat(chat.id)}
+                            aria-label={`${chat.title} 대화 삭제`}
+                            title="대화 삭제"
+                            className="absolute right-1 flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--lh-surface)] text-[var(--lh-ink-tertiary)] transition hover:text-[var(--lh-danger)] cursor-pointer md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100"
+                          >
+                            <Trash2 aria-hidden className="h-3.5 w-3.5" />
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </section>
+              )}
             </div>
-
           </div>
         )}
       </aside>

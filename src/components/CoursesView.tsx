@@ -30,6 +30,8 @@ interface CoursesViewProps {
   onOpenCreateCourse?: () => void;
   onStartAssessment: (course: Course) => void;
   onUpdateCourseStatus?: (courseId: string, status: "completed" | "cancelled" | "active") => void;
+  /** Opens this roadmap's detail sheet on arrival (e.g. from a home roadmap card). */
+  initialRoadmapId?: string;
 }
 
 const SUBJECT_FILTERS = [
@@ -62,11 +64,14 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
   onOpenCreateCourse,
   onStartAssessment,
   onUpdateCourseStatus,
+  initialRoadmapId,
 }) => {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedSubject, setSelectedSubject] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<"all" | "enrolled">("all");
-  const [selectedRoadmapForDetail, setSelectedRoadmapForDetail] = useState<LearningRoadmap | null>(null);
+  const [selectedRoadmapForDetail, setSelectedRoadmapForDetail] = useState<LearningRoadmap | null>(
+    () => LEARNING_ROADMAPS.find((roadmap) => roadmap.id === initialRoadmapId) ?? null,
+  );
   const activeCourses = courses.filter((course) => course.status !== "completed" && course.status !== "cancelled");
   const archivedCourses = courses.filter((course) => course.status === "completed" || course.status === "cancelled");
   const createdCourses = activeCourses.filter((course) => !LEARNING_ROADMAPS.some((roadmap) => roadmap.course.id === course.id));

@@ -10,11 +10,11 @@ export interface AuthVerifierAdapter {
 
 let verifier: AccessTokenVerifier | null = null;
 
-export const configureSupabaseAuth = (): void => {
-  if (isSupabaseConfigured()) verifier = verifySupabaseAccessToken;
+export const configureFirebaseAuth = (): void => {
+  if (isFirebaseConfigured()) verifier = verifyFirebaseAccessToken;
 };
 
-configureSupabaseAuth();
+configureFirebaseAuth();
 
 /** Configure a real verifier at the server composition boundary. */
 export const configureAuthVerifier = (adapter: AuthVerifierAdapter | AccessTokenVerifier | null): void => {
@@ -42,4 +42,4 @@ export const verifyAccessToken = async (token: string): Promise<VerifiedUser | n
 export const clearAuthVerifier = (): void => {
   verifier = null;
 };
-import { isSupabaseConfigured, verifySupabaseAccessToken } from "./supabaseProvider";
+import { isFirebaseConfigured, verifyFirebaseAccessToken } from "./firebaseProvider";

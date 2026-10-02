@@ -8,6 +8,10 @@ import {
 } from "../types/learning";
 import { isAssessmentSession, type AssessmentSession } from "../domain/assessment";
 import { isAiRuntimeSelection, type AiRuntimeSelection } from "../domain/aiModels";
+import type { KnowledgeGraph } from "../types/knowledgeGraph";
+import { isKnowledgeGraph, mergeKnowledgeGraphs } from "../domain/knowledgeGraph";
+import type { ChatSession } from "../types/chat";
+import { isChatSessionList, mergeChatSessions } from "../domain/chatSession";
 import {
   LEARNHUB_SCOPED_STORAGE_PREFIXES,
   LEARNHUB_STORAGE_KEYS,
@@ -54,6 +58,9 @@ export interface LearningBackupData {
   practice?: Record<string, Record<string, string>>;
   assessments?: Record<string, AssessmentSession>;
   aiPreferences?: AiRuntimeSelection;
+  knowledgeGraph?: KnowledgeGraph;
+  /** Free-conversation sessions (recent list). Optional: older snapshots do not have it. */
+  chatSessions?: ChatSession[];
   /** Quiz-attempt IDs are local deduplication state and contain no identity data. */
   quizAttempts?: string[];
 }
@@ -111,6 +118,7 @@ interface PortableEntry {
   value: string;
   category: string;
 }
+class GraphMergeLimitError extends Error {}
 
 const isRecord = (value: unknown): value is Record<string, unknown> => {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
@@ -316,6 +324,8 @@ export const isPortableLearningStorageKey = (key: string): boolean =>
   key === LEARNHUB_STORAGE_KEYS.MISTAKES ||
   key === LEARNHUB_STORAGE_KEYS.QUIZ_ATTEMPTS ||
   key === LEARNHUB_STORAGE_KEYS.AI_PREFERENCES ||
+  key === LEARNHUB_STORAGE_KEYS.KNOWLEDGE_GRAPH ||
+  key === LEARNHUB_STORAGE_KEYS.CHAT_SESSIONS ||
   isSafeScopedKey(key, `${LEARNHUB_STORAGE_KEYS.LESSONS_CACHE}_`) ||
   isSafeScopedKey(key, LEARNHUB_SCOPED_STORAGE_PREFIXES.NOTES) ||
   isSafeScopedKey(key, LEARNHUB_SCOPED_STORAGE_PREFIXES.SCRATCHPAD) ||
@@ -339,6 +349,8 @@ const categoryForKey = (key: string): string => {
   if (key === LEARNHUB_STORAGE_KEYS.MISTAKES) return "mistakes";
   if (key === LEARNHUB_STORAGE_KEYS.QUIZ_ATTEMPTS) return "quizAttempts";
   if (key === LEARNHUB_STORAGE_KEYS.AI_PREFERENCES) return "aiPreferences";
+  if (key === LEARNHUB_STORAGE_KEYS.KNOWLEDGE_GRAPH) return "knowledgeGraph";
+  if (key === LEARNHUB_STORAGE_KEYS.CHAT_SESSIONS) return "chatSessions";
   if (key.startsWith(`${LEARNHUB_STORAGE_KEYS.LESSONS_CACHE}_`)) return "lessonCache";
   if (key.startsWith(LEARNHUB_SCOPED_STORAGE_PREFIXES.NOTES)) return "notes";
   if (key.startsWith(LEARNHUB_SCOPED_STORAGE_PREFIXES.SCRATCHPAD)) return "scratchpad";
@@ -374,6 +386,8 @@ const setDataField = (data: LearningBackupData, key: string, value: unknown) => 
   if (key === LEARNHUB_STORAGE_KEYS.MISTAKES && isBoundedArray(value) && value.every(isMistake)) data.mistakes = value;
   if (key === LEARNHUB_STORAGE_KEYS.QUIZ_ATTEMPTS && isBoundedArray(value) && value.every((item) => isNonEmptyString(item, 500))) data.quizAttempts = value;
   if (key === LEARNHUB_STORAGE_KEYS.AI_PREFERENCES && isAiRuntimeSelection(value)) data.aiPreferences = value;
+  if (key === LEARNHUB_STORAGE_KEYS.KNOWLEDGE_GRAPH && isKnowledgeGraph(value)) data.knowledgeGraph = value;
+  if (key === LEARNHUB_STORAGE_KEYS.CHAT_SESSIONS && isChatSessionList(value)) data.chatSessions = value;
 };
 
 /** Read only the allowlisted LearnHub study namespace into a portable document. */
@@ -389,6 +403,8 @@ export const createLearningBackup = (storage?: Storage): LearningBackupDocument 
     LEARNHUB_STORAGE_KEYS.MISTAKES,
     LEARNHUB_STORAGE_KEYS.QUIZ_ATTEMPTS,
     LEARNHUB_STORAGE_KEYS.AI_PREFERENCES,
+    LEARNHUB_STORAGE_KEYS.KNOWLEDGE_GRAPH,
+    LEARNHUB_STORAGE_KEYS.CHAT_SESSIONS,
   ]) {
     const value = readJson(source, key);
     if (value !== null) setDataField(data, key, value);
@@ -461,7 +477,7 @@ export const validateLearningBackup = (input: unknown): BackupValidationResult =
 
   const data = input.data;
   const knownFields = new Set([
-    "courses", "skills", "progress", "reviews", "mistakes", "lessonCache", "notes", "scratchpad", "tutor", "practice", "assessments", "quizAttempts", "aiPreferences",
+    "courses", "skills", "progress", "reviews", "mistakes", "lessonCache", "notes", "scratchpad", "tutor", "practice", "assessments", "quizAttempts", "aiPreferences", "knowledgeGraph", "chatSessions",
   ]);
   Object.keys(data).forEach((key) => {
     if (!knownFields.has(key)) errors.push(`알 수 없는 백업 데이터 필드: ${key}`);
@@ -474,6 +490,8 @@ export const validateLearningBackup = (input: unknown): BackupValidationResult =
   if (data.mistakes !== undefined && (!isBoundedArray(data.mistakes) || !data.mistakes.every(isMistake))) errors.push("오답 데이터가 올바르지 않습니다.");
   if (data.quizAttempts !== undefined && (!isBoundedArray(data.quizAttempts) || !data.quizAttempts.every((item) => isNonEmptyString(item, 500)))) errors.push("퀴즈 시도 데이터가 올바르지 않습니다.");
   if (data.aiPreferences !== undefined && !isAiRuntimeSelection(data.aiPreferences)) errors.push("AI 설정 데이터가 올바르지 않습니다.");
+  if (data.knowledgeGraph !== undefined && !isKnowledgeGraph(data.knowledgeGraph)) errors.push("개념 지도 데이터가 올바르지 않습니다.");
+  if (data.chatSessions !== undefined && !isChatSessionList(data.chatSessions)) errors.push("대화 기록 데이터가 올바르지 않습니다.");
 
   const validateScopedMap = (value: unknown, prefix: string, validator: (item: unknown) => boolean, field: string) => {
     if (value === undefined) return;
@@ -509,6 +527,8 @@ const entriesFromBackup = (backup: LearningBackupDocument): PortableEntry[] => {
   if (data.mistakes !== undefined) addJson(LEARNHUB_STORAGE_KEYS.MISTAKES, data.mistakes);
   if (data.quizAttempts !== undefined) addJson(LEARNHUB_STORAGE_KEYS.QUIZ_ATTEMPTS, data.quizAttempts);
   if (data.aiPreferences !== undefined) addJson(LEARNHUB_STORAGE_KEYS.AI_PREFERENCES, data.aiPreferences);
+  if (data.knowledgeGraph !== undefined) addJson(LEARNHUB_STORAGE_KEYS.KNOWLEDGE_GRAPH, data.knowledgeGraph);
+  if (data.chatSessions !== undefined) addJson(LEARNHUB_STORAGE_KEYS.CHAT_SESSIONS, data.chatSessions);
   for (const [key, value] of Object.entries(data.lessonCache || {})) addJson(key, value);
   for (const [key, value] of Object.entries(data.notes || {})) entries.push({ key, value, category: "notes" });
   for (const [key, value] of Object.entries(data.scratchpad || {})) entries.push({ key, value, category: "scratchpad" });
@@ -568,6 +588,18 @@ const mergeByIdentity = (
   try {
     const current = JSON.parse(currentRaw);
     const imported = JSON.parse(importedRaw);
+    if (category === "knowledgeGraph") {
+      if (!isKnowledgeGraph(current)) return { value: importedRaw, replacedMalformed: true };
+      if (!isKnowledgeGraph(imported)) throw new Error("개념 지도 형식이 올바르지 않습니다.");
+      const merged = mergeKnowledgeGraphs(current, imported);
+      if (!isKnowledgeGraph(merged)) throw new GraphMergeLimitError("합친 개념 지도가 저장 한도를 넘습니다. 기존 데이터는 유지했습니다.");
+      return { value: JSON.stringify(merged), replacedMalformed: false };
+    }
+    if (category === "chatSessions") {
+      if (!isChatSessionList(current)) return { value: importedRaw, replacedMalformed: true };
+      if (!isChatSessionList(imported)) throw new Error("대화 기록 형식이 올바르지 않습니다.");
+      return { value: JSON.stringify(mergeChatSessions(current, imported)), replacedMalformed: false };
+    }
     if (Array.isArray(current) && Array.isArray(imported)) {
       const identity = (item: unknown): string | null => {
         if (!isRecord(item)) return null;
@@ -592,10 +624,11 @@ const mergeByIdentity = (
     // Progress, lesson cache, and tutor records have no safe field-level
     // merge rule here, so valid current JSON remains authoritative.
     return { value: currentRaw, replacedMalformed: false };
-  } catch {
+  } catch (error) {
     // A malformed existing JSON value cannot safely win. The imported value
     // was fully validated before writes and may replace it; report this to the
     // caller instead of silently calling it a normal merge.
+    if (error instanceof GraphMergeLimitError) throw error;
     return { value: importedRaw, replacedMalformed: true };
   }
 };
@@ -631,7 +664,9 @@ export const importLearningBackup = (
     } else if (options.strategy === "overwrite") {
       planned.push(entry);
     } else {
-      const merged = mergeByIdentity(current, entry.value, entry.category);
+      let merged: ReturnType<typeof mergeByIdentity>;
+      try { merged = mergeByIdentity(current, entry.value, entry.category); }
+      catch { return { ok: false, importedEntries: 0, skippedEntries, mergedEntries, conflicts, rolledBack: false, rollbackStatus: "not-needed", recoveryRequired: false, replacedMalformedEntries, warnings: [], error: "개념 지도를 합치지 못했습니다. 기존 기록은 그대로 유지했습니다." }; }
       planned.push({ ...entry, value: merged.value });
       mergedEntries += 1;
       if (merged.replacedMalformed) replacedMalformedEntries += 1;

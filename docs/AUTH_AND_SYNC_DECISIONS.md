@@ -1,6 +1,6 @@
 # LearnHub 인증·동기화 결정 기록
 
-LearnHub는 계정 기반 온라인 서비스다. Supabase의 사용자별 학습 snapshot을 원본으로 사용하며, 브라우저 `localStorage`는 로그인한 계정의 화면 복원을 위한 임시 캐시로만 사용한다.
+LearnHub는 계정 기반 온라인 서비스다. Firebase Authentication으로 계정을 확인하고 Firestore의 사용자별 학습 snapshot을 원본으로 사용하며, 브라우저 `localStorage`는 로그인한 계정의 화면 복원을 위한 임시 캐시로만 사용한다.
 
 ## 현재 동작
 
@@ -30,10 +30,10 @@ cloud snapshot에는 다음 사용자 데이터를 포함한다.
 
 ## 소유권·보안 경계
 
-- 브라우저는 `GET /api/public-config`가 반환하는 `supabaseUrl`과 공개 publishable key만 사용한다.
-- service role key, JWT secret, OAuth client secret은 브라우저 코드나 저장소에 넣지 않는다.
-- 서버는 bearer token을 Supabase `auth.getUser()`로 확인한 사용자 ID만 신뢰한다.
-- `learning_snapshots`는 RLS와 `user_id = auth.uid()` 조건으로 계정을 격리한다.
+- 브라우저는 `GET /api/public-config`에서 Firebase 웹 앱 초기화에 필요한 공개 설정만 받는다.
+- Firebase Admin credential, provider API key, OAuth client secret은 브라우저 코드나 저장소에 넣지 않는다.
+- 서버는 Firebase Admin SDK로 bearer ID token을 검증하고 토큰의 UID만 신뢰한다.
+- Firestore 직접 클라이언트 접근은 거부하고, 인증된 서버 API가 Admin SDK를 통해 사용자별 문서를 처리한다.
 - 로컬 캐시에는 `learnhub_cloud_data_owner_v1` 소유자 marker를 두며, 현재 인증 사용자와 다르면 데이터를 채택하지 않는다.
 
 ## 계정 기능
@@ -44,7 +44,7 @@ cloud snapshot에는 다음 사용자 데이터를 포함한다.
 - 사용자 요청에 따른 학습 기록 JSON 다운로드
 - 사용자 본인 계정과 연관 데이터 삭제
 
-계정 삭제 migration `supabase/migrations/20260915_delete_my_account.sql`은 2026-09-15 원격 LearnHub Supabase 프로젝트에 적용했다. UI는 RPC 실패를 성공처럼 처리하지 않고 오류를 표시한다.
+계정 삭제 API는 검증된 사용자 UID의 Firestore 하위 데이터와 Firebase Authentication 계정을 함께 삭제한다. UI는 서버 삭제가 실패하면 성공처럼 처리하지 않고 오류를 표시한다.
 
 ## 충돌과 장애 처리
 

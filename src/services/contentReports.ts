@@ -70,7 +70,7 @@ export async function submitContentReport(
   const description = payload.description.trim();
   if (!description) return draftReport({ ...payload, description });
 
-  // Auth is deliberately injected: this service does not assume Firebase, Supabase, or another vendor.
+  // Auth is deliberately injected so reporting stays independent from login UI details.
   let token: string | null = null;
   try {
     const getToken = options.getAccessToken || getAccessToken;

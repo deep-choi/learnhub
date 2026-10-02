@@ -1,4 +1,16 @@
 {
+  "firestore": {
+    "rules": "firestore.rules"
+  },
+  "auth": {
+    "providers": {
+      "emailPassword": true,
+      "googleSignIn": {
+        "oAuthBrandDisplayName": "LearnHub",
+        "supportEmail": "cryingonion77@gmail.com"
+      }
+    }
+  },
   "hosting": {
     "public": "dist",
     "ignore": [

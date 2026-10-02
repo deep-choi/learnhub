@@ -46,8 +46,22 @@ export interface LearningSnapshotResponse {
   revision: number;
   updatedAt: string;
 }
+export class CloudSnapshotRequestError extends Error {
+  constructor(message: string, public readonly status: number, public readonly code: string) {
+    super(message); this.name = "CloudSnapshotRequestError";
+  }
+}
+async function snapshotRequestError(response: Response, message: string): Promise<CloudSnapshotRequestError> {
+  let code = response.status === 503 ? "cloud_store_unavailable" : "snapshot_request_failed";
+  try {
+    const body: unknown = await response.json();
+    if (body && typeof body === "object" && "code" in body && typeof body.code === "string" && /^[A-Za-z0-9_]{1,80}$/u.test(body.code)) code = body.code;
+  } catch { /* preserve structured status even if the response is not JSON */ }
+  return new CloudSnapshotRequestError(message, response.status, code);
+}
 
 export class SnapshotConflictError extends Error {
+  readonly status = 409;
   readonly code = "snapshot_conflict";
   readonly current: LearningSnapshotResponse | null;
 
@@ -87,7 +101,7 @@ export const getLearningSnapshot = async (expectedUserId?: string): Promise<Lear
     if (expectedUserId) assertCurrentAuthUser(expectedUserId);
     return null;
   }
-  if (!response.ok) throw new Error("클라우드 학습 기록을 불러오지 못했습니다.");
+  if (!response.ok) throw await snapshotRequestError(response, "클라우드 학습 기록을 불러오지 못했습니다.");
   const parsed = await parseSnapshotResponse(response);
   if (expectedUserId) assertCurrentAuthUser(expectedUserId);
   return parsed;
@@ -123,7 +137,7 @@ export const putLearningSnapshot = async (
     }
     throw new SnapshotConflictError(current);
   }
-  if (!response.ok) throw new Error("클라우드 학습 기록을 저장하지 못했습니다.");
+  if (!response.ok) throw await snapshotRequestError(response, "클라우드 학습 기록을 저장하지 못했습니다.");
   const parsed = await parseSnapshotResponse(response);
   if (expectedUserId) assertCurrentAuthUser(expectedUserId);
   return parsed;

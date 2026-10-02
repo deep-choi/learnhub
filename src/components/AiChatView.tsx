@@ -1,28 +1,322 @@
 import React, { useEffect, useRef, useState } from "react";
-import { ArrowUp, Bot, Loader2, MessageCircle, Trash2 } from "lucide-react";
+import { ArrowRight, ArrowUp, Bot, BookOpen, ListChecks, Loader2, Plus, Sparkles, X } from "lucide-react";
+import type { Course } from "../types/learning";
 import { authorizedFetch } from "../services/authClient";
+import { addCuriosity } from "./graph/graphBridge";
+import type { CurriculumConceptLinks, ResumeContext } from "./graph/graphTypes";
+import { CoursePreviewCard } from "./chat/CoursePreviewCard";
+import { appendChatMessage, createChatSession, getChatSession } from "../services/chatSessionStore";
+import { getLearnerContext } from "../services/learnerContext";
+import { toTutorHistory } from "../domain/chatSession";
+import { detectLearningIntent, resolveLearningIntent } from "../domain/learningIntent";
+import type { NewChatMessage } from "../types/chat";
+import { savePendingChat, takePendingChat } from "./chat/pendingChat";
+import { restoreSetupFlow } from "./chat/restoreSetup";
+import {
+  SETUP_INTRO,
+  SETUP_LEVEL_CHECK_NOTE,
+  SETUP_REASK,
+  SETUP_SKIP_OPTION,
+  SETUP_STEPS,
+  applySetupAnswer,
+  initialSetupProgress,
+  nextSetupStep,
+  resolveCourseSetup,
+  summarizeCourseSetup,
+} from "../domain/courseSetup";
+import { fetchLevelCheckQuestion, resolveSetupAnswer } from "../services/courseSetup";
+import type { CourseSetup, SetupProgress, SetupStep, SetupStepId } from "../types/courseSetup";
 
-interface ChatMessage { role: "user" | "assistant"; text: string; }
+interface ChatMessage {
+  id: string;
+  role: "user" | "assistant";
+  text: string;
+  /** 이 답변이 나온 질문. 궁금해요 저장·과목 만들기에 씁니다. */
+  question?: string;
+  /** AI가 짚어 준 개념 이름 */
+  conceptName?: string;
+  saved?: boolean;
+  /** 있으면 이 메시지 아래에 과목 미리보기 카드를 띄웁니다. */
+  previewSubject?: string;
+  /** 미리보기 카드가 처음 쓸 설정(대화로 정한 수준·목적·하루 시간) */
+  previewSetup?: CourseSetup;
+  /** 과목 설정 질문. 빠른 답 칩을 보여 줍니다. */
+  setupQuestion?: { stepId: SetupStepId; answered?: string; question: string };
+  /** 이 답 뒤로 과목 설정 질문이 시작됐는지. 그러면 같은 일을 하는 버튼은 숨깁니다. */
+  setupStarted?: boolean;
+}
 
-const starter: ChatMessage[] = [{ role: "assistant", text: "무엇을 배우고 싶은지 알려주세요. 개념 설명, 학습 계획, 예시 문제를 함께 정리할 수 있습니다." }];
+/** 대화로 과목 설정을 묻는 중인 흐름. 한 번에 질문 하나씩 진행합니다. */
+interface SetupFlow {
+  subject: string;
+  setup: CourseSetup;
+  progress: SetupProgress;
+  step: SetupStep;
+  /** 지금 화면에 올라간 질문 문구 */
+  question: string;
+  /** 같은 질문을 이미 한 번 다시 물었는지 */
+  reasked: boolean;
+}
 
-export const AiChatView: React.FC = () => {
-  const [messages, setMessages] = useState<ChatMessage[]>(starter);
+let messageSeq = 0;
+const nextId = () => `m-${Date.now().toString(36)}-${messageSeq++}`;
+
+/** 질문에서 지도에 남길 짧은 이름을 만듭니다. */
+const toConceptName = (question: string): string => {
+  const cleaned = question.replace(/[?？!！.。]+$/g, "").replace(/\s+/g, " ").trim();
+  return cleaned.length > 24 ? `${cleaned.slice(0, 23)}…` : cleaned;
+};
+
+interface AiChatViewProps {
+  isSignedIn: boolean;
+  userName?: string;
+  /** 저장된 대화를 열 때의 대화 id. 없으면 새 대화입니다. */
+  sessionId?: string | null;
+  /** 새 대화를 "과목으로 만들기" 입력 모드로 시작합니다. */
+  startInCourseMode?: boolean;
+  /** 이어갈 학습이 있을 때만 입력창 아래에 한 줄로 보여 줍니다. */
+  resume: ResumeContext | null;
+  onResume: () => void;
+  /** 로그인한 사용자가 미리보기 카드에서 과목을 시작합니다. */
+  onStartCourse: (course: Course, links: CurriculumConceptLinks) => void;
+  /** 로그인 전 사용자가 미리보기 카드에서 시작을 눌렀을 때 */
+  onGuestStartCourse: (subject: string, data: Record<string, any>, setup: CourseSetup) => void;
+  onRequestAuth: () => void;
+  onBrowseCourses: () => void;
+  onPractice: () => void;
+  /** 새 대화가 처음 저장될 때 알려 줍니다. 화면을 다시 만들지 않고 사이드바 강조만 갱신합니다. */
+  onSessionCreated?: (sessionId: string) => void;
+}
+
+export const AiChatView: React.FC<AiChatViewProps> = ({
+  isSignedIn,
+  userName,
+  sessionId = null,
+  startInCourseMode = false,
+  resume,
+  onResume,
+  onStartCourse,
+  onGuestStartCourse,
+  onRequestAuth,
+  onBrowseCourses,
+  onPractice,
+  onSessionCreated,
+}) => {
+  // 다시 연 대화: 저장된 글을 불러오고, 답하지 않은 설정 질문이 있으면 그 단계를 되살립니다.
+  const [initial] = useState(() => {
+    const stored = sessionId ? getChatSession(sessionId)?.messages ?? [] : [];
+    return { stored, restored: restoreSetupFlow(stored, isSignedIn) };
+  });
+  const [messages, setMessages] = useState<ChatMessage[]>(() =>
+    initial.stored.map((message, index) => ({
+      id: nextId(),
+      role: message.role,
+      text: message.text,
+      question: message.question,
+      conceptName: message.conceptName,
+      previewSubject: message.learningIntent?.subject,
+      // 이 답 뒤로 설정 질문이 이어졌으면 '궁금해요/과목 만들기' 버튼은 숨깁니다.
+      setupStarted: Boolean(message.question) && Boolean(initial.stored[index + 1]?.text.startsWith(SETUP_INTRO)),
+      setupQuestion: initial.restored?.messageIndex === index ? { stepId: initial.restored.step.id, question: initial.restored.question } : undefined,
+    })),
+  );
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [courseMode, setCourseMode] = useState(startInCourseMode);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [flow, setFlow] = useState<SetupFlow | null>(() =>
+    initial.restored
+      ? { subject: initial.restored.subject, setup: initial.restored.setup, progress: initial.restored.progress, step: initial.restored.step, question: initial.restored.question, reasked: false }
+      : null,
+  );
+  const sessionRef = useRef<string | null>(sessionId);
   const endRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const started = messages.length > 0;
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+    if (started) endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [messages, loading, started]);
+
+  useEffect(() => {
+    const field = inputRef.current;
+    if (!field) return;
+    field.style.height = "auto";
+    field.style.height = `${Math.min(field.scrollHeight, 200)}px`;
+  }, [input]);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const close = (event: Event) => {
+      if (event instanceof KeyboardEvent) {
+        if (event.key !== "Escape") return;
+      } else if (menuRef.current?.contains(event.target as Node)) {
+        return;
+      }
+      setMenuOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", close);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", close);
+    };
+  }, [menuOpen]);
+
+  const persist = (message: NewChatMessage) => {
+    if (!isSignedIn) return;
+    const id = sessionRef.current;
+    if (!id) {
+      if (message.role !== "user") return;
+      const created = createChatSession(message.text);
+      if (created) {
+        sessionRef.current = created.id;
+        onSessionCreated?.(created.id);
+      }
+      return;
+    }
+    appendChatMessage(id, message);
+  };
+
+  const addMessages = (...items: ChatMessage[]) => setMessages((previous) => [...previous, ...items]);
+
+  /** 질문 하나를 대화에 올립니다. 첫 질문에는 안내 문장을 붙입니다. */
+  const askStep = (step: SetupStep, question: string, first = false) => {
+    const note = step.id === "levelCheck" ? `\n\n${SETUP_LEVEL_CHECK_NOTE}` : "";
+    const text = `${first ? `${SETUP_INTRO}\n\n` : ""}${question}${note}`;
+    addMessages({ id: nextId(), role: "assistant", text, setupQuestion: { stepId: step.id, question } });
+    persist({ role: "assistant", text });
+  };
+
+  const finishSetup = (subject: string, setup: CourseSetup) => {
+    setFlow(null);
+    const summary = summarizeCourseSetup(resolveCourseSetup(setup));
+    const intro = `좋아요. ‘${subject}’의 개념 지도를 만들어 봤어요.${summary ? ` (${summary})` : ""} 마음에 들면 이 지도로 시작해요.`;
+    addMessages({ id: nextId(), role: "assistant", text: intro, previewSubject: subject, previewSetup: setup });
+    persist({ role: "assistant", text: intro, learningIntent: { subject } });
+  };
+
+  /** 다음 질문으로 넘어가거나, 끝났으면 미리보기를 보여 줍니다. 확인 질문은 AI가 만들며, 못 만들면 그 단계를 건너뜁니다. */
+  const advanceSetup = async (subject: string, setup: CourseSetup, progress: SetupProgress) => {
+    let current = progress;
+    for (;;) {
+      const next = nextSetupStep(current, setup, isSignedIn);
+      if (!next) {
+        finishSetup(subject, setup);
+        return;
+      }
+      let question = next.question ? next.question(subject) : null;
+      if (!question) {
+        setLoading(true);
+        const experience = setup.experience === "some" || setup.experience === "experienced" ? setup.experience : "some";
+        question = await fetchLevelCheckQuestion(subject, experience);
+        setLoading(false);
+        if (!question) {
+          current = applySetupAnswer(setup, current, next.id, {}).progress;
+          continue;
+        }
+      }
+      setFlow({ subject, setup, progress: current, step: next, question, reasked: false });
+      askStep(next, question);
+      return;
+    }
+  };
+
+  /** 과목 설정 질문을 시작합니다. userText가 있으면 그 말을 먼저 사용자 메시지로 남깁니다. */
+  const beginSetup = (subject: string, userText?: string) => {
+    if (userText) {
+      addMessages({ id: nextId(), role: "user", text: userText });
+      persist({ role: "user", text: userText });
+    }
+    const first = nextSetupStep(initialSetupProgress(), {}, isSignedIn);
+    if (!first || !first.question) {
+      finishSetup(subject, {});
+      return;
+    }
+    const question = first.question(subject);
+    setFlow({ subject, setup: {}, progress: initialSetupProgress(), step: first, question, reasked: false });
+    askStep(first, question, true);
+  };
+
+  const markAnswered = (items: ChatMessage[], stepId: SetupStepId, label: string) =>
+    items.map((item) => (item.setupQuestion && !item.setupQuestion.answered && item.setupQuestion.stepId === stepId ? { ...item, setupQuestion: { ...item.setupQuestion, answered: label } } : item));
+
+  /** 답을 기록하고 다음 질문으로 넘어갑니다. */
+  const answerStep = async (value: Partial<CourseSetup>, label: string) => {
+    if (!flow) return;
+    const applied = applySetupAnswer(flow.setup, flow.progress, flow.step.id, value);
+    setMessages((previous) => [...markAnswered(previous, flow.step.id, label), { id: nextId(), role: "user", text: label }]);
+    persist({ role: "user", text: label });
+    await advanceSetup(flow.subject, applied.setup, applied.progress);
+  };
+
+  /** 남은 질문을 건너뛰고 기본값으로 바로 만듭니다. */
+  const skipRest = () => {
+    if (!flow) return;
+    const label = SETUP_SKIP_OPTION.label;
+    setMessages((previous) => [...markAnswered(previous, flow.step.id, label), { id: nextId(), role: "user", text: label }]);
+    persist({ role: "user", text: label });
+    finishSetup(flow.subject, flow.setup);
+  };
+
+  /** 질문에 직접 적어서 답했을 때: 규칙 → (로그인 사용자) AI 순으로 해석합니다. */
+  const answerWithText = async (text: string) => {
+    if (!flow) return;
+    setInput("");
+    if (/바로\s*만들/.test(text)) {
+      skipRest();
+      return;
+    }
+    setLoading(true);
+    const result = await resolveSetupAnswer(flow.step.id, text, { subject: flow.subject, signedIn: isSignedIn, question: flow.question, experience: flow.setup.experience });
+    setLoading(false);
+    const needsMatch = flow.step.id === "experience" || flow.step.id === "dailyMinutes";
+    if (!result.matched && needsMatch && !flow.reasked) {
+      setFlow({ ...flow, reasked: true });
+      addMessages({ id: nextId(), role: "user", text }, { id: nextId(), role: "assistant", text: SETUP_REASK });
+      persist({ role: "user", text });
+      persist({ role: "assistant", text: SETUP_REASK });
+      return;
+    }
+    await answerStep(result.setup, text);
+  };
 
   const send = async (question: string) => {
     const trimmed = question.trim();
     if (!trimmed || loading) return;
+
+    if (flow) {
+      await answerWithText(trimmed);
+      return;
+    }
+
+    if (courseMode) {
+      setCourseMode(false);
+      setInput("");
+      beginSetup(trimmed, trimmed);
+      return;
+    }
+
+    if (!isSignedIn) {
+      // 배우고 싶다는 말이면 로그인 없이 지도부터 보여 주고, 일반 대화는 로그인 뒤에 이어갑니다.
+      const intent = detectLearningIntent(trimmed);
+      if (intent) {
+        setInput("");
+        beginSetup(intent.subject, trimmed);
+      } else {
+        savePendingChat(trimmed);
+        onRequestAuth();
+      }
+      return;
+    }
+
     const previous = messages;
-    setMessages((items) => [...items, { role: "user", text: trimmed }]);
+    const learnerContext = getLearnerContext();
+    setMessages((items) => [...items, { id: nextId(), role: "user", text: trimmed }]);
     setInput("");
     setLoading(true);
+    persist({ role: "user", text: trimmed });
     try {
       const response = await authorizedFetch("/api/ai/tutor-chat", {
         method: "POST",
@@ -32,42 +326,230 @@ export const AiChatView: React.FC = () => {
           lessonTitle: "AI 학습 대화",
           conceptName: "사용자 질문",
           currentStepContent: "특정 레슨에 제한되지 않은 LearnHub 학습 대화입니다. 질문에 직접 답하고 필요한 경우 학습 순서를 제안합니다.",
-          history: previous.slice(-12),
+          mode: "free",
+          ...(learnerContext ? { learnerContext } : {}),
+          history: toTutorHistory(previous),
           userQuestion: trimmed,
         }),
       });
       if (response.status === 401) {
+        savePendingChat(trimmed);
         window.dispatchEvent(new CustomEvent("learnhub:request-auth"));
         throw new Error("auth_required");
       }
       if (!response.ok) throw new Error("unavailable");
       const data = await response.json();
-      setMessages((items) => [...items, { role: "assistant", text: data.reply || "답변을 준비하지 못했습니다." }]);
+      const tangentName = typeof data.tangent?.conceptName === "string" ? data.tangent.conceptName.trim() : "";
+      const reply: string = data.reply || "답변을 준비하지 못했습니다.";
+      const subject = resolveLearningIntent(trimmed, data.learningIntent)?.subject ?? "";
+      setMessages((items) => [
+        ...items,
+        { id: nextId(), role: "assistant", text: reply, question: trimmed, conceptName: tangentName || undefined, setupStarted: Boolean(subject) },
+      ]);
+      persist({ role: "assistant", text: reply, question: trimmed, conceptName: tangentName || undefined });
+      if (subject) beginSetup(subject);
     } catch (error) {
-      setMessages((items) => [...items, { role: "assistant", text: error instanceof Error && error.message === "auth_required" ? "AI 대화를 계속하려면 로그인해 주세요." : "지금은 답변을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요." }]);
-    } finally { setLoading(false); }
+      setMessages((items) => [
+        ...items,
+        { id: nextId(), role: "assistant", text: error instanceof Error && error.message === "auth_required" ? "AI 대화를 계속하려면 로그인해 주세요." : "지금은 답변을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요." },
+      ]);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  return (
-    <div className="mx-auto flex h-full min-h-[calc(100vh-104px)] w-full max-w-4xl flex-col px-5 py-8 sm:px-8">
-      <header className="flex items-start justify-between gap-4 border-b border-[var(--lh-line)] pb-6">
-        <div><p className="lh-kicker flex items-center gap-2"><MessageCircle className="h-4 w-4" /> AI conversation</p><h1 className="mt-3 text-3xl font-medium tracking-[-0.04em] sm:text-4xl">AI와 대화하기</h1><p className="mt-3 text-base leading-7 text-[var(--lh-ink-secondary)]">특정 레슨과 관계없이 궁금한 개념이나 학습 계획을 물어보세요.</p></div>
-        <button type="button" onClick={() => setMessages(starter)} className="lh-button-secondary flex min-h-11 shrink-0 items-center gap-2 px-4 text-sm" aria-label="대화 내용 지우기"><Trash2 className="h-4 w-4" /><span className="hidden sm:inline">새 대화</span></button>
-      </header>
+  // 로그인 전에 쓴 첫 메시지가 있으면 로그인 뒤에 이어서 보냅니다.
+  useEffect(() => {
+    if (!isSignedIn) return;
+    const pending = takePendingChat();
+    if (pending) void send(pending);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-      <div className="flex-1 space-y-5 overflow-y-auto py-8" aria-live="polite">
-        {messages.map((message, index) => <div key={`${message.role}-${index}`} className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}><div className={`max-w-[85%] rounded-3xl px-5 py-4 text-sm leading-7 ${message.role === "user" ? "bg-[var(--lh-primary)] text-white" : "border border-[var(--lh-line)] bg-[var(--lh-surface)] text-[var(--lh-ink)]"}`}>{message.role === "assistant" && <Bot className="mb-2 h-4 w-4" />}<p className="whitespace-pre-wrap">{message.text}</p></div></div>)}
-        {loading && <div className="flex items-center gap-2 text-sm text-[var(--lh-ink-secondary)]"><Loader2 className="h-4 w-4 animate-spin" /> 답변을 준비하는 중...</div>}
-        <div ref={endRef} />
-      </div>
+  useEffect(() => {
+    if (startInCourseMode) inputRef.current?.focus();
+  }, [startInCourseMode]);
 
-      <form onSubmit={(event) => { event.preventDefault(); void send(input); }} className="sticky bottom-0 border-t border-[var(--lh-line)] bg-[var(--lh-canvas)] py-4">
-        <div className="flex items-end gap-2 rounded-[26px] border border-[var(--lh-line-strong)] bg-[var(--lh-surface)] p-2 shadow-[var(--lh-shadow-md)] focus-within:border-[var(--lh-primary)]">
-          <textarea value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void send(input); } }} rows={1} placeholder="궁금한 내용을 입력하세요" className="min-h-12 flex-1 resize-none bg-transparent px-4 py-3 text-sm leading-6 outline-none placeholder:text-[var(--lh-ink-tertiary)]" />
-          <button type="submit" disabled={!input.trim() || loading} className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[var(--lh-primary)] text-white transition hover:bg-[var(--lh-primary-hover)] disabled:opacity-30" aria-label="질문 보내기"><ArrowUp className="h-4 w-4" /></button>
+  const greeting = isSignedIn && userName ? `${userName}님, 무엇을 배워볼까요?` : "무엇을 배워볼까요?";
+  const menuItems = [
+    { label: "과목으로 만들기", icon: Sparkles, run: () => { setCourseMode(true); inputRef.current?.focus(); } },
+    { label: "문제 풀기", icon: ListChecks, run: onPractice },
+    { label: "준비된 과정 둘러보기", icon: BookOpen, run: onBrowseCourses },
+  ];
+
+  const composer = (
+    <form
+      onSubmit={(event) => { event.preventDefault(); void send(input); }}
+      className={`mx-auto w-full max-w-[760px] ${started ? "px-4 pb-4 pt-2 sm:px-6" : "px-4 sm:px-6"}`}
+    >
+      {courseMode && (
+        <div className="mb-2 flex items-center gap-2 px-2 text-xs text-[var(--lh-primary-text)]">
+          <Sparkles aria-hidden className="h-3.5 w-3.5" />
+          <span className="font-medium">과목으로 만들기</span>
+          <button type="button" onClick={() => setCourseMode(false)} aria-label="과목으로 만들기 끄기" className="flex h-6 w-6 items-center justify-center rounded-full text-[var(--lh-ink-tertiary)] transition hover:bg-[var(--lh-surface-subtle)] hover:text-[var(--lh-ink)] cursor-pointer"><X className="h-3.5 w-3.5" /></button>
         </div>
-        <p className="mt-2 text-center text-[11px] text-[var(--lh-ink-tertiary)]">AI 답변은 틀릴 수 있습니다. 중요한 내용은 다시 확인하세요.</p>
-      </form>
+      )}
+      <div className="flex items-end gap-1 rounded-[32px] border border-[var(--lh-line-strong)] bg-[var(--lh-surface)] p-2 shadow-[var(--lh-shadow-md)] transition focus-within:border-[var(--lh-primary)]">
+        <div ref={menuRef} className="relative shrink-0">
+          <button
+            type="button"
+            onClick={() => setMenuOpen((open) => !open)}
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            aria-label="더 보기"
+            className="flex h-11 w-11 items-center justify-center rounded-full text-[var(--lh-ink-secondary)] transition hover:bg-[var(--lh-surface-subtle)] hover:text-[var(--lh-ink)] cursor-pointer"
+          >
+            <Plus aria-hidden className={`h-5 w-5 transition-transform ${menuOpen ? "rotate-45" : ""}`} />
+          </button>
+          {menuOpen && (
+            <div role="menu" aria-label="입력 도구" className={`absolute left-0 z-20 min-w-56 rounded-2xl border border-[var(--lh-line)] bg-[var(--lh-surface)] p-1.5 text-sm shadow-lg ${started ? "bottom-12" : "top-12"}`}>
+              {menuItems.map(({ label, icon: Icon, run }) => (
+                <button
+                  key={label}
+                  type="button"
+                  role="menuitem"
+                  onClick={() => { setMenuOpen(false); run(); }}
+                  className="flex min-h-11 w-full items-center gap-3 rounded-xl px-3 text-left transition hover:bg-[var(--lh-surface-subtle)] cursor-pointer"
+                >
+                  <Icon aria-hidden className="h-4 w-4 text-[var(--lh-ink-secondary)]" />
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        <label htmlFor="chat-input" className="sr-only">배우고 싶은 것을 물어보세요</label>
+        <textarea
+          id="chat-input"
+          ref={inputRef}
+          value={input}
+          onChange={(event) => setInput(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+              event.preventDefault();
+              void send(input);
+            }
+          }}
+          rows={1}
+          autoFocus={!started}
+          placeholder={flow ? "직접 적어서 답해도 돼요" : courseMode ? "어떤 과목을 만들까요?" : "배우고 싶은 것을 물어보세요"}
+          className="lh-bare-input max-h-[200px] min-h-11 flex-1 resize-none bg-transparent px-2 py-2.5 text-base leading-6 outline-none placeholder:text-[var(--lh-ink-tertiary)]"
+        />
+        <button
+          type="submit"
+          disabled={!input.trim() || loading}
+          aria-label="보내기"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[var(--lh-primary)] text-white transition hover:bg-[var(--lh-primary-hover)] disabled:opacity-30 cursor-pointer disabled:cursor-default"
+        >
+          <ArrowUp aria-hidden className="h-4.5 w-4.5" />
+        </button>
+      </div>
+    </form>
+  );
+
+  if (!started) {
+    return (
+      <div className="relative flex min-h-full flex-col items-center justify-center overflow-hidden px-0 pb-24 pt-16">
+        <div aria-hidden className="lh-start-glow pointer-events-none absolute inset-0" />
+        <div className="relative z-10 flex w-full flex-col items-center gap-8">
+          <h1 className="px-6 text-center text-3xl font-medium tracking-[-0.03em] text-[var(--lh-ink)] sm:text-4xl">{greeting}</h1>
+          {composer}
+          {resume && (
+            <button type="button" onClick={onResume} className="inline-flex max-w-[calc(100%-3rem)] items-center gap-1.5 rounded-full px-3 py-2 text-sm text-[var(--lh-ink-secondary)] transition hover:bg-[var(--lh-surface-subtle)] hover:text-[var(--lh-ink)] cursor-pointer">
+              <span className="truncate">지난번엔 ‘{resume.conceptName}’까지 했어요</span>
+              <span aria-hidden>·</span>
+              <span className="inline-flex shrink-0 items-center gap-1 font-medium text-[var(--lh-primary-text)]">이어가기 <ArrowRight aria-hidden className="h-3.5 w-3.5" /></span>
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="flex-1 overflow-y-auto" aria-live="polite">
+        <div className="mx-auto w-full max-w-[760px] space-y-6 px-4 py-8 sm:px-6">
+          {messages.map((message, index) => (
+            <div key={message.id} className={`flex flex-col gap-3 ${message.role === "user" ? "items-end" : "items-start"}`}>
+              <div className={`max-w-[88%] rounded-3xl px-5 py-3.5 text-[15px] leading-7 ${message.role === "user" ? "bg-[var(--lh-primary)] text-white" : "text-[var(--lh-ink)]"}`}>
+                {message.role === "assistant" && <Bot aria-hidden className="mb-1.5 h-4 w-4 text-[var(--lh-ink-tertiary)]" />}
+                <p className="whitespace-pre-wrap">{message.text}</p>
+                {message.setupQuestion && (
+                  <div className="mt-3 flex flex-wrap gap-2" role="group" aria-label="빠른 답">
+                    {SETUP_STEPS[message.setupQuestion.stepId].options.map((option) => {
+                      const answered = message.setupQuestion!.answered;
+                      const active = !answered && !loading && flow?.step.id === message.setupQuestion!.stepId;
+                      return (
+                        <button
+                          key={option.id}
+                          type="button"
+                          disabled={!active}
+                          aria-pressed={answered === option.label}
+                          onClick={() => void answerStep(option.value, option.label)}
+                          className={`inline-flex min-h-9 items-center rounded-full border px-4 text-sm font-medium transition ${
+                            answered === option.label
+                              ? "border-[var(--lh-primary)] bg-[var(--lh-primary)] text-white"
+                              : "border-[var(--lh-primary-border)] bg-[var(--lh-surface)] text-[var(--lh-primary-text)] hover:bg-[var(--lh-primary-subtle)] disabled:opacity-40 cursor-pointer disabled:cursor-default"
+                          }`}
+                        >
+                          {option.label}
+                        </button>
+                      );
+                    })}
+                    {!message.setupQuestion.answered && !loading && flow?.step.id === message.setupQuestion.stepId && (
+                      <button type="button" onClick={skipRest} className="inline-flex min-h-9 items-center rounded-full px-3 text-sm text-[var(--lh-ink-tertiary)] underline-offset-2 transition hover:text-[var(--lh-ink)] hover:underline cursor-pointer">{SETUP_SKIP_OPTION.label}</button>
+                    )}
+                  </div>
+                )}
+                {message.role === "assistant" && message.question && !message.setupStarted && (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      disabled={message.saved}
+                      onClick={() => {
+                        addCuriosity(null, message.conceptName || toConceptName(message.question!), message.question!);
+                        setMessages((items) => items.map((item, i) => (i === index ? { ...item, saved: true } : item)));
+                      }}
+                      className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-[var(--lh-primary-border)] bg-[var(--lh-surface)] px-3.5 text-xs font-medium text-[var(--lh-primary-text)] transition hover:bg-[var(--lh-primary-subtle)] disabled:cursor-default disabled:opacity-70 cursor-pointer"
+                    >
+                      {message.saved ? "지도에 저장했어요" : "궁금해요로 저장"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const subject = message.conceptName || toConceptName(message.question!);
+                        if (!flow) beginSetup(subject);
+                      }}
+                      className="inline-flex min-h-9 items-center gap-1.5 rounded-full bg-[var(--lh-primary)] px-3.5 text-xs font-medium text-white transition hover:bg-[var(--lh-primary-hover)] cursor-pointer"
+                    >
+                      <Sparkles aria-hidden className="h-3.5 w-3.5" /> 이걸로 과목 만들기
+                    </button>
+                  </div>
+                )}
+              </div>
+              {message.previewSubject && (
+                <CoursePreviewCard
+                  subject={message.previewSubject}
+                  setup={message.previewSetup}
+                  isSignedIn={isSignedIn}
+                  onStart={onStartCourse}
+                  onGuestStart={onGuestStartCourse}
+                  onRequestAuth={onRequestAuth}
+                />
+              )}
+            </div>
+          ))}
+          {loading && (
+            <div role="status" className="flex items-center gap-2 text-sm text-[var(--lh-ink-secondary)]">
+              <Loader2 aria-hidden className="h-4 w-4 animate-spin" /> 답변을 준비하는 중...
+            </div>
+          )}
+          <div ref={endRef} />
+        </div>
+      </div>
+      {composer}
+      <p className="pb-3 text-center text-[11px] text-[var(--lh-ink-tertiary)]">AI 답변은 틀릴 수 있어요. 중요한 내용은 다시 확인하세요.</p>
     </div>
   );
 };

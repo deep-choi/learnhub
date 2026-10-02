@@ -8,9 +8,11 @@ import {
   DEFAULT_AI_SELECTION,
   getAiModel,
   isAiRuntimeSelection,
+  type AiReasoningEffort,
   type AiRuntimeSelection,
 } from "../src/domain/aiModels";
 import { AiAdmissionController } from "./aiPolicy";
+import { generalLearningSafetyPrompt } from "./learningSafety";
 
 export const AI_TIMEOUT_MS = 20_000;
 export const AI_MAX_RESPONSE_CHARS = 160_000;
@@ -29,6 +31,12 @@ export interface AiGatewayRequest<T> {
   prompt: string;
   config: GenerateContentConfig;
   maxOutputTokens: number;
+  /**
+   * Small-output endpoints set this so reasoning ("thinking") tokens cannot eat the output budget:
+   * Gemini counts them against maxOutputTokens, and a medium effort can leave 1 token for the JSON.
+   * It only lowers the caller's chosen effort, to the nearest level the model supports.
+   */
+  maxReasoningEffort?: AiReasoningEffort;
   selection?: AiRuntimeSelection;
   validate: (payload: unknown) => string[];
 }
@@ -87,6 +95,20 @@ const readGeminiUsage = (response: GenerateContentResponse): AiUsageMetadata => 
   candidatesTokenCount: finiteOrNull(response.usageMetadata?.candidatesTokenCount),
   totalTokenCount: finiteOrNull(response.usageMetadata?.totalTokenCount),
 });
+
+const EFFORT_ORDER: readonly AiReasoningEffort[] = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
+
+/** The highest supported effort that does not exceed `cap`; the lowest supported one if all exceed it. */
+export const capReasoningEffort = (
+  effort: AiReasoningEffort,
+  cap: AiReasoningEffort | undefined,
+  supported: readonly AiReasoningEffort[],
+): AiReasoningEffort => {
+  if (!cap || EFFORT_ORDER.indexOf(effort) <= EFFORT_ORDER.indexOf(cap)) return effort;
+  const ranked = [...supported].sort((a, b) => EFFORT_ORDER.indexOf(a) - EFFORT_ORDER.indexOf(b));
+  const allowed = ranked.filter((candidate) => EFFORT_ORDER.indexOf(candidate) <= EFFORT_ORDER.indexOf(cap));
+  return allowed.length > 0 ? allowed[allowed.length - 1] : (ranked[0] ?? effort);
+};
 
 const thinkingLevel = (effort: AiRuntimeSelection["reasoningEffort"]): ThinkingLevel => {
   if (effort === "minimal" || effort === "none") return ThinkingLevel.MINIMAL;
@@ -227,8 +249,13 @@ export class AiGateway {
   }
 
   async generateJson<T>(request: AiGatewayRequest<T>): Promise<AiGatewayResult<T>> {
+    const safePrompt = `${generalLearningSafetyPrompt()}\n${request.prompt}`;
     const startedAt = Date.now();
-    const selection = request.selection || { ...DEFAULT_AI_SELECTION };
+    const requested = request.selection || { ...DEFAULT_AI_SELECTION };
+    const requestedModel = isAiRuntimeSelection(requested) ? getAiModel(requested.provider, requested.model) : null;
+    const selection = requestedModel
+      ? { ...requested, reasoningEffort: capReasoningEffort(requested.reasoningEffort, request.maxReasoningEffort, requestedModel.reasoningEfforts) }
+      : requested;
     let status: AiGatewayLoggerEvent["status"] = "unavailable";
     let usage: AiUsageMetadata | null = null;
     let admissionReason: string | undefined;
@@ -236,7 +263,7 @@ export class AiGateway {
 
     if (
       !request.prompt.trim() ||
-      request.prompt.length > AI_MAX_PROMPT_CHARS ||
+      safePrompt.length > AI_MAX_PROMPT_CHARS ||
       !Number.isFinite(request.maxOutputTokens) ||
       request.maxOutputTokens <= 0 ||
       !Number.isInteger(request.maxOutputTokens) ||
@@ -270,7 +297,7 @@ export class AiGateway {
       if (selection.provider === "gemini") {
         const response = await this.geminiClient!.models.generateContent({
           model: selection.model,
-          contents: request.prompt,
+          contents: safePrompt,
           config: {
             ...request.config,
             maxOutputTokens,
@@ -297,7 +324,7 @@ export class AiGateway {
           signal: abortController.signal,
           body: JSON.stringify({
             model: selection.model,
-            input: request.prompt,
+            input: safePrompt,
             reasoning: { effort: selection.reasoningEffort },
             max_output_tokens: maxOutputTokens,
             store: false,

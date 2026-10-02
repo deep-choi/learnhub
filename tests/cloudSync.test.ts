@@ -62,7 +62,7 @@ const installStorage = <T extends MemoryStorage>(storage: T): T => {
 };
 const setAuthUser = (userId: string) => configureAuthAdapter({
   getAccessToken: async () => `token-${userId}`,
-  getAuthStatus: () => ({ configured: true, signedIn: true, provider: "supabase", userId }),
+  getAuthStatus: () => ({ configured: true, signedIn: true, provider: "email", userId }),
 });
 const emptySnapshot = (storage: MemoryStorage) => createLearningBackup(storage);
 
@@ -220,7 +220,7 @@ test("a user switch while acquiring a token aborts before network", async () => 
   const token = new Promise<string>((resolve) => { releaseToken = resolve; });
   configureAuthAdapter({
     getAccessToken: async () => token,
-    getAuthStatus: () => ({ configured: true, signedIn: true, provider: "supabase", userId: "user-1" }),
+    getAuthStatus: () => ({ configured: true, signedIn: true, provider: "email", userId: "user-1" }),
   });
   let requests = 0;
   globalThis.fetch = (async () => {
