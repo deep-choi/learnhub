@@ -599,7 +599,7 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
             ),
           )}
           {loading && (
-            <div role="status" className="flex items-center gap-2 pl-12 text-[15px] text-[var(--lh-ink-secondary)] sm:pl-[52px]">
+            <div role="status" className="flex items-center gap-2 text-[15px] text-[var(--lh-ink-secondary)]">
               <Loader2 aria-hidden className="h-4 w-4 animate-spin" /> 답변을 준비하는 중...
             </div>
           )}

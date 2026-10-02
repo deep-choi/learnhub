@@ -859,7 +859,7 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
                   </div>
                 ),
               )}
-              {isSending && <div className="flex items-center gap-2 pl-12 text-[15px] text-[var(--lh-ink-secondary)] sm:pl-[52px]"><Loader2 className="h-4 w-4 animate-spin text-[var(--lh-primary)]" /> 학습 맥락을 확인해 답변을 만드는 중...</div>}
+              {isSending && <div className="flex items-center gap-2 text-[15px] text-[var(--lh-ink-secondary)]"><Loader2 className="h-4 w-4 animate-spin text-[var(--lh-primary)]" /> 학습 맥락을 확인해 답변을 만드는 중...</div>}
             </div>
 
           {/* 1. 문제풀이 실전 점검 모드 */}
