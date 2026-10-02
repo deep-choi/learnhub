@@ -2,10 +2,16 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Minus, Plus, Maximize2 } from "lucide-react";
 import { createSimulation, seedPositions, type SimNode, type Simulation } from "./forceLayout";
 import { domainStroke, getPalette, nodeFill, stateAlpha } from "./graphStyle";
+import { computeRadialLayout, type RadialCluster, type RadialLabelSide } from "./radialLayout";
+import { computeTreeLayout, type TreeLayoutLane } from "./treeLayout";
 import type { ConceptNode, KnowledgeGraph } from "./graphTypes";
+
+export type GraphLayoutMode = "tree" | "radial";
 
 export interface GraphCanvasProps {
   graph: KnowledgeGraph;
+  /** 전체 지도의 보기: 왼쪽→오른쪽 트리, 또는 과목별 원형 */
+  layout?: GraphLayoutMode;
   /** mini: 대화 옆 로컬 그래프(조작 최소화), full: 전체 지도 */
   variant?: "full" | "mini";
   /** 항상 라벨을 보여주고 가운데 두는 노드 */
@@ -38,8 +44,91 @@ const prefersReducedMotion = () =>
 // 옵시디언처럼 작은 점: 연결 수에 비례해 4~8px(미니는 5~8px)
 const radiusFor = (degree: number, variant: "full" | "mini") => (variant === "mini" ? 5 + Math.min(degree, 6) * 0.5 : 4 + Math.min(degree, 8) * 0.5);
 
+// 전체 지도 배치 값 (지도 좌표 단위)
+const TREE = { radius: 6, labelGap: 8, maxLabelWidth: 150 } as const;
+const TREE_LANES = { columnGap: 72, rowGap: 42, laneGap: 72, laneHeader: 8 } as const;
+const RADIAL = { centerRadius: 11, ringGap: 110, minArc: 40, clusterGap: 72, titleSpace: 0 } as const;
+
+interface MapPosition {
+  x: number;
+  y: number;
+  r: number;
+  label: string;
+  labelWidth: number;
+  labelSide: RadialLabelSide;
+  isCenter: boolean;
+}
+
+/** 트리에서 과목 자리(뿌리). 맨 왼쪽에 두고 첫 단계 개념들로 가지를 뻗습니다. */
+interface TreeHub {
+  domain: string;
+  x: number;
+  y: number;
+  labelWidth: number;
+  rootIds: string[];
+}
+
+/** 트리와 원형 배치를 캔버스가 같은 방식으로 그릴 수 있게 맞춘 결과 */
+interface MapLayout {
+  mode: GraphLayoutMode;
+  positions: Map<string, MapPosition>;
+  bounds: { minX: number; minY: number; maxX: number; maxY: number };
+  lanes: TreeLayoutLane[];
+  hubs: TreeHub[];
+  clusters: RadialCluster[];
+}
+const TREE_LABEL_SIZE = 14;
+const TREE_TITLE_SIZE = 16;
+const TREE_HUB_RADIUS = 9;
+const TREE_HUB_GAP = 140;
+const FONT_FAMILY = '"Pretendard Variable", Pretendard, system-ui, sans-serif';
+
+let measureContext: CanvasRenderingContext2D | null = null;
+const measureTreeLabel = (text: string) => {
+  if (!measureContext && typeof document !== "undefined") measureContext = document.createElement("canvas").getContext("2d");
+  if (!measureContext) return text.length * TREE_LABEL_SIZE * 0.9;
+  measureContext.font = `500 ${TREE_LABEL_SIZE}px ${FONT_FAMILY}`;
+  return measureContext.measureText(text).width;
+};
+
+const GRID_CELL = 24;
+const GRID_MAJOR_EVERY = 5;
+
+/** 지도 좌표계에 격자를 그려서, 이동·확대할 때 모눈종이도 함께 움직이게 합니다. */
+const drawGridPaper = (
+  ctx: CanvasRenderingContext2D,
+  view: { x: number; y: number; k: number },
+  w: number,
+  h: number,
+  palette: { gridMinor: string; gridMajor: string },
+) => {
+  const x0 = -view.x / view.k;
+  const y0 = -view.y / view.k;
+  const x1 = (w - view.x) / view.k;
+  const y1 = (h - view.y) / view.k;
+  const stroke = (step: number, color: string) => {
+    // 화면에서 8px보다 촘촘해지면 선이 뭉개지므로 그리지 않습니다.
+    if (step * view.k < 8) return;
+    ctx.beginPath();
+    for (let x = Math.floor(x0 / step) * step; x <= x1; x += step) {
+      ctx.moveTo(x, y0);
+      ctx.lineTo(x, y1);
+    }
+    for (let y = Math.floor(y0 / step) * step; y <= y1; y += step) {
+      ctx.moveTo(x0, y);
+      ctx.lineTo(x1, y);
+    }
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1 / view.k;
+    ctx.stroke();
+  };
+  stroke(GRID_CELL, palette.gridMinor);
+  stroke(GRID_CELL * GRID_MAJOR_EVERY, palette.gridMajor);
+};
+
 export const GraphCanvas: React.FC<GraphCanvasProps> = ({
   graph,
+  layout: layoutMode = "tree",
   variant = "full",
   focusId,
   nextIds,
@@ -72,6 +161,9 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
   });
   const rafRef = useRef<number | null>(null);
   const [, setPinTick] = useState(0);
+  const treeRef = useRef<MapLayout | null>(null);
+  /** 전체 지도는 과목별 원형 배치, 미니 지도는 기존 힘 배치를 씁니다. */
+  const treeMode = variant === "full";
   const latest = useRef({ graph, nextIds, focusId, lastPositionId, selectedId, hiddenDomains, variant, markedIds });
   latest.current = { graph, nextIds, focusId, lastPositionId, selectedId, hiddenDomains, variant, markedIds };
 
@@ -95,6 +187,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
     () => `${graph.nodes.map((node) => node.id).join("|")}#${graph.edges.map((edge) => edge.id).join("|")}`,
     [graph.nodes, graph.edges],
   );
+  const hiddenKey = treeMode ? `${layoutMode}#${[...(hiddenDomains ?? [])].sort().join("|")}` : "";
 
   const requestFrame = () => {
     if (rafRef.current != null) return;
@@ -118,7 +211,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
         y: old?.y ?? seeds[index].y,
         vx: 0,
         vy: 0,
-        r: radiusFor(degree.get(node.id) ?? 0, sizing),
+        r: treeMode ? TREE.radius : radiusFor(degree.get(node.id) ?? 0, sizing),
         fx: pinnedRef.current.has(node.id) && old ? old.x : null,
         fy: pinnedRef.current.has(node.id) && old ? old.y : null,
       });
@@ -130,12 +223,64 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
       variant === "mini" ? { linkDistance: 56, repulsion: 1200, gravity: 0.035 } : { linkDistance: 70 * spread, repulsion: 2400 * spread * spread, gravity: 0.02 / spread },
     );
     simRef.current = sim;
-    // 처음 보이는 순간부터 퍼진 배치가 되도록 미리 계산한 뒤 화면에 맞춥니다.
-    sim.settle(400);
+    if (treeMode) {
+      // 트리·원형 배치: 위치를 계산해 고정하고, 힘 시뮬레이션은 멈춰 둡니다.
+      const visibleNodes = graph.nodes.filter((node) => !hiddenDomains?.has(node.domain));
+      const layoutNodes = visibleNodes.map((node) => ({ id: node.id, domain: node.domain, label: node.name }));
+      let layout: MapLayout;
+      if (layoutMode === "radial") {
+        const radial = computeRadialLayout(layoutNodes, graph.edges, {
+          ...TREE,
+          ...RADIAL,
+          measure: measureTreeLabel,
+          targetRowWidth: Math.max(900, sizeRef.current.w - 96),
+        });
+        layout = { mode: "radial", positions: radial.positions, bounds: radial.bounds, lanes: [], hubs: [], clusters: radial.clusters };
+      } else {
+        const tree = computeTreeLayout(layoutNodes, graph.edges, { ...TREE, ...TREE_LANES, measure: measureTreeLabel });
+        const domainOf = new Map(layoutNodes.map((node) => [node.id, node.domain]));
+        const positions = new Map<string, MapPosition>();
+        const hubs: TreeHub[] = [];
+        let maxX = tree.bounds.maxX;
+        // 과목마다 맨 왼쪽에 뿌리(과목 이름)를 두고, 그 오른쪽으로 개념들을 밀어 놓습니다.
+        for (const lane of tree.lanes) {
+          const laneIds = [...tree.positions.keys()].filter((id) => domainOf.get(id) === lane.domain);
+          const rootIds = laneIds.filter((id) => tree.positions.get(id)!.column === 0);
+          // 뿌리는 그 과목 영역 전체의 세로 가운데에 둡니다.
+          const laneYs = laneIds.map((id) => tree.positions.get(id)!.y);
+          const hubY = laneYs.length ? (Math.min(...laneYs) + Math.max(...laneYs)) / 2 : lane.top;
+          const labelWidth = measureTreeLabel(lane.domain) * (TREE_TITLE_SIZE / TREE_LABEL_SIZE);
+          // 뿌리와 첫 단계 사이는 넉넉히 띄워서 가지가 부채처럼 펼쳐져 보이게 합니다.
+          const shift = TREE_HUB_RADIUS * 2 + TREE.labelGap + labelWidth + TREE_HUB_GAP;
+          hubs.push({ domain: lane.domain, x: lane.left + TREE_HUB_RADIUS, y: hubY, labelWidth, rootIds });
+          for (const id of laneIds) {
+            const position = tree.positions.get(id)!;
+            positions.set(id, { x: position.x + shift, y: position.y, r: TREE.radius, label: position.label, labelWidth: position.labelWidth, labelSide: "right", isCenter: false });
+          }
+          maxX = Math.max(maxX, lane.right + shift);
+        }
+        layout = { mode: "tree", positions, bounds: { ...tree.bounds, maxX }, lanes: tree.lanes, hubs, clusters: [] };
+      }
+      treeRef.current = layout;
+      for (const [id, position] of layout.positions) {
+        const simNode = next.get(id);
+        if (!simNode) continue;
+        simNode.x = position.x;
+        simNode.y = position.y;
+        simNode.r = position.r;
+        simNode.fx = position.x;
+        simNode.fy = position.y;
+      }
+      sim.alpha = 0;
+    } else {
+      treeRef.current = null;
+      // 처음 보이는 순간부터 퍼진 배치가 되도록 미리 계산한 뒤 화면에 맞춥니다.
+      sim.settle(400);
+    }
     fitView();
     requestFrame();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [structureKey, variant]);
+  }, [structureKey, variant, hiddenKey]);
 
   useEffect(() => {
     if (pulseId) {
@@ -154,6 +299,25 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
     const nodes = [...nodesRef.current.values()];
     const { w, h } = sizeRef.current;
     if (nodes.length === 0) return;
+    const tree = treeRef.current;
+    if (tree) {
+      // 위쪽 분야 버튼 줄을 피해 여백을 두고, 글자가 너무 작아지지 않게 최소 배율을 지킵니다.
+      // 다 안 들어가면 왼쪽 위부터 보여 주고 나머지는 끌어서 봅니다.
+      const pad = { left: 48, right: 48, top: 76, bottom: 48 };
+      const boxW = Math.max(tree.bounds.maxX - tree.bounds.minX, 40);
+      const boxH = Math.max(tree.bounds.maxY - tree.bounds.minY, 40);
+      const fit = Math.min((w - pad.left - pad.right) / boxW, (h - pad.top - pad.bottom) / boxH);
+      const k = Math.max(0.9, Math.min(fit, 1.25));
+      const fitsW = boxW * k <= w - pad.left - pad.right;
+      const fitsH = boxH * k <= h - pad.top - pad.bottom;
+      viewTouchedRef.current = false;
+      viewRef.current = {
+        k,
+        x: fitsW ? pad.left + (w - pad.left - pad.right - boxW * k) / 2 - tree.bounds.minX * k : pad.left - tree.bounds.minX * k,
+        y: fitsH ? pad.top + (h - pad.top - pad.bottom - boxH * k) / 2 - tree.bounds.minY * k : pad.top - tree.bounds.minY * k,
+      };
+      return;
+    }
     let minX = Infinity;
     let maxX = -Infinity;
     let minY = Infinity;
@@ -192,6 +356,21 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
       if (!meta || hidden?.has(meta.domain)) continue;
       const reach = node.r + 5 / viewRef.current.k;
       const dist = Math.hypot(node.x - x, node.y - y);
+      const treePosition = treeRef.current?.positions.get(node.id);
+      if (treePosition) {
+        const slack = 4 / viewRef.current.k;
+        const labelReach = node.r + TREE.labelGap + treePosition.labelWidth + slack;
+        const onLabel =
+          treePosition.labelSide === "below"
+            ? Math.abs(x - node.x) <= Math.max(node.r, treePosition.labelWidth / 2) + slack && y >= node.y - node.r - slack && y <= node.y + node.r + TREE.labelGap + TREE_LABEL_SIZE + slack
+            : (treePosition.labelSide === "right" ? x >= node.x - node.r - slack && x <= node.x + labelReach : x <= node.x + node.r + slack && x >= node.x - labelReach) &&
+              Math.abs(y - node.y) <= Math.max(node.r, TREE_LABEL_SIZE * 0.7) + slack;
+        if (onLabel && dist < bestDist) {
+          best = node.id;
+          bestDist = dist;
+        }
+        continue;
+      }
       if (dist <= reach && dist < bestDist) {
         best = node.id;
         bestDist = dist;
@@ -214,7 +393,10 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
       canvas.height = Math.round(h * dpr);
     }
     const state = latest.current;
-    const palette = getPalette();
+    const basePalette = getPalette();
+    const isPaper = state.variant === "full";
+    // 전체 지도는 흰 모눈종이 위에 그립니다. 점·글자 외곽선도 바탕색을 따라가도록 background를 바꿔 씁니다.
+    const palette = isPaper ? { ...basePalette, background: basePalette.paper } : basePalette;
     const now = performance.now();
 
     if (!reduceMotion && sim.alpha >= 0.012) sim.tick();
@@ -226,12 +408,103 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
     ctx.save();
     ctx.translate(view.x, view.y);
     ctx.scale(view.k, view.k);
+    if (isPaper) drawGridPaper(ctx, view, w, h, palette);
+    const hovered = hoverRef.current ?? state.selectedId ?? null;
+    const tree = treeRef.current;
+    if (tree) {
+      ctx.lineJoin = "round";
+      // 트리: 과목 사이에 옅은 구분선을 긋습니다.
+      tree.lanes.forEach((lane, index) => {
+        if (index === 0) return;
+        const lineY = lane.top - TREE_LANES.laneGap / 2;
+        ctx.beginPath();
+        ctx.moveTo(tree.bounds.minX - 24, lineY);
+        ctx.lineTo(tree.bounds.maxX + 24, lineY);
+        ctx.strokeStyle = palette.gridMajor;
+        ctx.lineWidth = 1 / view.k;
+        ctx.stroke();
+      });
+      // 트리: 맨 왼쪽 뿌리(과목)에서 첫 단계 개념들로 가지를 뻗습니다.
+      for (const hub of tree.hubs) {
+        const hubColor = domainStroke(hub.domain, palette.isDark);
+        const startX = hub.x + TREE_HUB_RADIUS + TREE.labelGap + hub.labelWidth + 6;
+        for (const id of hub.rootIds) {
+          const target = nodesRef.current.get(id);
+          if (!target) continue;
+          const endX = target.x - target.r - 1.4 / view.k;
+          const bend = Math.max((endX - startX) * 0.5, 16);
+          ctx.beginPath();
+          ctx.moveTo(startX, hub.y);
+          ctx.bezierCurveTo(startX + bend, hub.y, endX - bend, target.y, endX, target.y);
+          ctx.strokeStyle = hubColor;
+          ctx.globalAlpha = hovered && hovered !== id ? 0.15 : 0.5;
+          ctx.lineWidth = 1.3 / view.k;
+          ctx.stroke();
+        }
+        ctx.globalAlpha = hovered && !hub.rootIds.includes(hovered) ? 0.5 : 1;
+        ctx.beginPath();
+        ctx.arc(hub.x, hub.y, TREE_HUB_RADIUS, 0, Math.PI * 2);
+        ctx.fillStyle = hubColor;
+        ctx.fill();
+        ctx.textAlign = "left";
+        ctx.textBaseline = "middle";
+        ctx.font = `700 ${TREE_TITLE_SIZE}px ${FONT_FAMILY}`;
+        ctx.lineWidth = 5;
+        ctx.strokeStyle = palette.background;
+        ctx.strokeText(hub.domain, hub.x + TREE_HUB_RADIUS + TREE.labelGap, hub.y);
+        ctx.fillStyle = palette.label;
+        ctx.fillText(hub.domain, hub.x + TREE_HUB_RADIUS + TREE.labelGap, hub.y);
+        ctx.globalAlpha = 1;
+      }
+      // 원형: 단계 고리를 옅게 긋고, 중심에 과목을 두고, 첫 고리 개념까지 선을 뻗습니다.
+      for (const cluster of tree.clusters) {
+        ctx.setLineDash([3 / view.k, 4 / view.k]);
+        ctx.strokeStyle = palette.gridMajor;
+        ctx.lineWidth = 1 / view.k;
+        for (const ringRadius of cluster.rings) {
+          ctx.beginPath();
+          ctx.arc(cluster.cx, cluster.cy, ringRadius, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+        ctx.setLineDash([]);
+        const hubColor = domainStroke(cluster.domain, palette.isDark);
+        const hubFaded = Boolean(hovered) && !cluster.rootIds.includes(hovered!);
+        for (const id of cluster.rootIds) {
+          const target = nodesRef.current.get(id);
+          if (!target) continue;
+          const dx = target.x - cluster.cx;
+          const dy = target.y - cluster.cy;
+          const dist = Math.hypot(dx, dy) || 1;
+          ctx.beginPath();
+          ctx.moveTo(cluster.cx + (dx / dist) * RADIAL.centerRadius, cluster.cy + (dy / dist) * RADIAL.centerRadius);
+          ctx.lineTo(target.x - (dx / dist) * (target.r + 1.4 / view.k), target.y - (dy / dist) * (target.r + 1.4 / view.k));
+          ctx.strokeStyle = hubColor;
+          ctx.globalAlpha = hovered && hovered !== id ? 0.15 : 0.45;
+          ctx.lineWidth = 1.2 / view.k;
+          ctx.stroke();
+        }
+        ctx.globalAlpha = hubFaded ? 0.5 : 1;
+        ctx.beginPath();
+        ctx.arc(cluster.cx, cluster.cy, RADIAL.centerRadius, 0, Math.PI * 2);
+        ctx.fillStyle = hubColor;
+        ctx.fill();
+        ctx.textAlign = "center";
+        ctx.textBaseline = "top";
+        ctx.font = `700 ${TREE_TITLE_SIZE}px ${FONT_FAMILY}`;
+        ctx.lineWidth = 5;
+        ctx.strokeStyle = palette.background;
+        ctx.strokeText(cluster.domain, cluster.cx, cluster.cy + RADIAL.centerRadius + 6);
+        ctx.fillStyle = palette.label;
+        ctx.fillText(cluster.domain, cluster.cx, cluster.cy + RADIAL.centerRadius + 6);
+        ctx.globalAlpha = 1;
+      }
+    }
 
     const metaById = new Map<string, ConceptNode>(state.graph.nodes.map((node) => [node.id, node]));
-    const hovered = hoverRef.current ?? state.selectedId ?? null;
     const neighbors = hovered ? adjacency.get(hovered) : undefined;
     const nextSet = new Set(state.nextIds ?? []);
     const dimmed = (id: string) => Boolean(hovered) && id !== hovered && !neighbors?.has(id);
+    const isMustLabel = (id: string) => id === hovered || id === state.lastPositionId || id === state.focusId || id === state.selectedId;
     const hidden = state.hiddenDomains;
     const visible = (id: string) => {
       const meta = metaById.get(id);
@@ -244,6 +517,67 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
       const b = nodesRef.current.get(edge.to);
       if (!a || !b || !visible(edge.from) || !visible(edge.to)) continue;
       const active = hovered ? edge.from === hovered || edge.to === hovered : false;
+      if (tree) {
+        const pa = tree.positions.get(edge.from);
+        const pb = tree.positions.get(edge.to);
+        if (!pa || !pb) continue;
+        // 뼈대는 같은 과목 안의 "먼저 알면 좋아요" 연결뿐입니다. 나머지는 선택했을 때만 점선으로 보입니다.
+        const sameCluster = metaById.get(edge.from)?.domain === metaById.get(edge.to)?.domain;
+        const backbone = edge.kind === "prerequisite" && !edge.disputed && sameCluster && (tree.mode === "radial" || pb.x > pa.x);
+        if (!backbone && !active) continue;
+        if (tree.mode === "tree" && backbone) {
+          // 트리: 이름이 끝난 곳에서 출발해 다음 개념으로 부드럽게 휘어 들어갑니다.
+          const sx = pa.x + a.r + TREE.labelGap + pa.labelWidth + 6;
+          const ex = b.x - b.r - 1.4 / view.k;
+          const bend = Math.max((ex - sx) * 0.5, 16);
+          const treeHead = 6 / view.k;
+          ctx.beginPath();
+          ctx.moveTo(sx, a.y);
+          ctx.bezierCurveTo(sx + bend, a.y, ex - bend, b.y, ex, b.y);
+          ctx.lineWidth = (active ? 1.6 : 1.1) / view.k;
+          ctx.strokeStyle = active ? palette.edgeActive : palette.edge;
+          ctx.globalAlpha = hovered && !active ? 0.2 : 1;
+          ctx.setLineDash([]);
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.moveTo(ex, b.y);
+          ctx.lineTo(ex - treeHead, b.y - treeHead * 0.5);
+          ctx.lineTo(ex - treeHead, b.y + treeHead * 0.5);
+          ctx.closePath();
+          ctx.fillStyle = ctx.strokeStyle;
+          ctx.fill();
+          continue;
+        }
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const dist = Math.hypot(dx, dy);
+        const border = 1.4 / view.k;
+        if (dist <= a.r + b.r + border * 2) continue;
+        const ux = dx / dist;
+        const uy = dy / dist;
+        const head = 6 / view.k;
+        const tipX = b.x - ux * (b.r + border);
+        const tipY = b.y - uy * (b.r + border);
+        ctx.beginPath();
+        ctx.moveTo(a.x + ux * (a.r + border), a.y + uy * (a.r + border));
+        ctx.lineTo(backbone ? tipX - ux * head * 0.9 : tipX, backbone ? tipY - uy * head * 0.9 : tipY);
+        ctx.lineWidth = (active ? 1.6 : 1.1) / view.k;
+        ctx.strokeStyle = edge.disputed ? palette.danger : active ? palette.edgeActive : palette.edge;
+        ctx.globalAlpha = hovered && !active ? 0.2 : backbone ? 1 : 0.6;
+        ctx.setLineDash(backbone ? [] : [4 / view.k, 3 / view.k]);
+        ctx.stroke();
+        if (backbone) {
+          ctx.setLineDash([]);
+          ctx.beginPath();
+          ctx.moveTo(tipX, tipY);
+          ctx.lineTo(tipX - ux * head * 0.9 - uy * head * 0.45, tipY - uy * head * 0.9 + ux * head * 0.45);
+          ctx.lineTo(tipX - ux * head * 0.9 + uy * head * 0.45, tipY - uy * head * 0.9 - ux * head * 0.45);
+          ctx.closePath();
+          ctx.fillStyle = ctx.strokeStyle;
+          ctx.fill();
+        }
+        continue;
+      }
       const toNext = nextSet.size > 0 && ((edge.from === state.focusId && nextSet.has(edge.to)) || (edge.to === state.focusId && nextSet.has(edge.from)));
       // 선과 화살표는 노드 중심이 아니라 테두리(반지름 + 테두리 두께)에서 멈춥니다.
       const dx = b.x - a.x;
@@ -391,9 +725,44 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
 
     // 라벨: 평소에는 숨기고, 많이 확대했을 때·마우스를 올렸을 때·지금 위치(또는 중심) 노드에만 보여줍니다.
     // 보이는 라벨끼리는 겹치지 않게 우선순위가 낮은 쪽을 건너뜁니다.
+    if (tree) {
+      // 모든 이름을 항상 보여 줍니다. 원의 오른쪽 절반은 점 오른쪽, 왼쪽 절반은 점 왼쪽, 중심은 점 아래에 씁니다.
+      ctx.lineJoin = "round";
+      for (const node of state.graph.nodes) {
+        const simNode = nodesRef.current.get(node.id);
+        const position = tree.positions.get(node.id);
+        if (!simNode || !position || !visible(node.id)) continue;
+        const must = isMustLabel(node.id);
+        const side = position.labelSide;
+        const tx = side === "right" ? simNode.x + simNode.r + TREE.labelGap : side === "left" ? simNode.x - simNode.r - TREE.labelGap : simNode.x;
+        const ty = side === "below" ? simNode.y + simNode.r + TREE.labelGap : simNode.y;
+        ctx.textAlign = side === "right" ? "left" : side === "left" ? "right" : "center";
+        ctx.textBaseline = side === "below" ? "top" : "middle";
+        ctx.globalAlpha = dimmed(node.id) ? 0.25 : 1;
+        ctx.font = `${must ? 600 : 500} ${TREE_LABEL_SIZE}px ${FONT_FAMILY}`;
+        ctx.lineWidth = 4;
+        ctx.strokeStyle = palette.background;
+        ctx.strokeText(position.label, tx, ty);
+        ctx.fillStyle = node.state === "unseen" && !must ? palette.labelDim : palette.label;
+        ctx.fillText(position.label, tx, ty);
+        if (node.id === state.lastPositionId) {
+          const noteY = side === "below" ? ty + TREE_LABEL_SIZE + 2 : ty + TREE_LABEL_SIZE;
+          ctx.font = `600 11px ${FONT_FAMILY}`;
+          ctx.strokeText("여기까지 했어요", tx, noteY);
+          ctx.fillStyle = palette.review;
+          ctx.fillText("여기까지 했어요", tx, noteY);
+        }
+      }
+      ctx.globalAlpha = 1;
+      ctx.restore();
+      const pulsingTree = pulseRef.current && now - pulseRef.current.start < 1500;
+      if (pulsingTree || (!reduceMotion && (nextSet.size > 0 || state.lastPositionId)) || dragRef.current.mode !== "none") requestFrame();
+      return;
+    }
+
     const mini = state.variant === "mini";
     const labelAll = !mini && view.k >= 1.9;
-    const isMust = (id: string) => id === hovered || id === state.lastPositionId || id === state.focusId || id === state.selectedId;
+    const isMust = isMustLabel;
     const candidates = state.graph.nodes
       .filter((node) => visible(node.id) && nodesRef.current.has(node.id) && (labelAll || isMust(node.id)))
       .sort((a, b) => Number(isMust(b.id)) - Number(isMust(a.id)) || (degree.get(b.id) ?? 0) - (degree.get(a.id) ?? 0));
@@ -467,7 +836,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
     drag.moved = false;
     drag.viewX = viewRef.current.x;
     drag.viewY = viewRef.current.y;
-    if (hit && interactive) {
+    if (hit && interactive && !treeMode) {
       drag.mode = "node";
       drag.id = hit;
     } else {
@@ -537,7 +906,8 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
   };
 
   const handleDoubleClick = (event: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!interactive) return;
+    // 트리 배치는 자리가 정해져 있으므로 고정(핀) 기능을 쓰지 않습니다.
+    if (!interactive || treeMode) return;
     const hit = hitTest(event.clientX, event.clientY);
     if (!hit) return;
     const node = nodesRef.current.get(hit);

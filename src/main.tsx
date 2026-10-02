@@ -4,6 +4,7 @@ import App from './App.tsx';
 import './index.css';
 import { clearAuthAdapter, configureAuthAdapter } from './services/authClient';
 import { initializeFirebaseAuth, LEARNHUB_AUTH_CHANGED_EVENT } from './services/firebaseClient';
+import { fetchAiAvailability } from './services/aiAvailability';
 
 const renderApp = () => createRoot(document.getElementById('root')!).render(
   <StrictMode>
@@ -23,6 +24,10 @@ const notifyAuthChanged = (event: string, userId: string | null) => {
 
 // Render immediately even if the local API or public Firebase config is down.
 renderApp();
+
+// 어차피 필요한 AI 가용성 정보를 지금 요청해 둡니다. 배포 환경에서는 이 요청이 잠든 Cloud Functions를
+// 깨우므로, 콜드 스타트가 로그인 복원과 겹쳐 진행되고 이어지는 학습 기록 요청이 덜 기다립니다.
+void fetchAiAvailability();
 
 void initializeFirebaseAuth()
   .then((handle) => {

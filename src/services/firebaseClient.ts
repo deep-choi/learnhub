@@ -44,7 +44,18 @@ const isFirebaseConfig = (value: unknown): value is FirebaseOptions => {
     typeof config.appId === "string" && config.appId.length > 0;
 };
 
+/** vite.config.ts가 빌드에 넣는 공개 Firebase 설정. 빌드 밖(테스트 등)에서는 정의되지 않습니다. */
+declare const __LEARNHUB_FIREBASE_CONFIG__: unknown;
+
+const buildTimeFirebaseConfig = (): FirebaseOptions | null => {
+  const config = typeof __LEARNHUB_FIREBASE_CONFIG__ === "undefined" ? null : __LEARNHUB_FIREBASE_CONFIG__;
+  return isFirebaseConfig(config) ? config : null;
+};
+
 const fetchFirebaseConfig = async (fetchImpl: typeof fetch): Promise<FirebaseOptions | null> => {
+  // 빌드에 설정이 있으면 서버(콜드 스타트일 수 있음)를 기다리지 않고 바로 로그인을 복원합니다.
+  const bundled = buildTimeFirebaseConfig();
+  if (bundled) return bundled;
   let response: Response;
   try {
     response = await fetchImpl("/api/public-config", { headers: { Accept: "application/json" } });

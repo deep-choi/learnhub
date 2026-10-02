@@ -39,6 +39,7 @@ import type { CourseSetup } from "./types/courseSetup";
 import { CoursesView } from "./components/CoursesView";
 import { CourseDetailView } from "./components/CourseDetailView";
 import { SettingsModal } from "./components/notion/SettingsModal";
+import { AppSkeleton } from "./components/notion/AppSkeleton";
 import { CourseAssessmentView } from "./components/CourseAssessmentView";
 import { courseIsComplete, nextUnfinishedLesson } from "./domain/assessment";
 import { LearnHubLogo } from "./components/common/LearnHubLogo";
@@ -103,7 +104,6 @@ export default function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(() =>
     typeof window === "undefined" ? true : window.innerWidth >= 768,
   );
-  const [isZenMode, setIsZenMode] = useState(false);
 
   // Modals & Drawers
   // 대화 화면을 새로 시작할 때마다 올려서 AiChatView를 다시 만듭니다.
@@ -414,6 +414,29 @@ export default function App() {
     }
   };
 
+  const leaveCourseViews = (courseId: string) => {
+    if ((activeView.type === "course-detail" || activeView.type === "lesson" || activeView.type === "assessment") && activeView.course.id === courseId) {
+      setActiveView({ type: "ai-chat" });
+      setChatNonce((value) => value + 1);
+    }
+  };
+
+  const handleRenameCourse = (courseId: string, title: string) => {
+    if (StorageService.renameCourse(courseId, title)) reloadData();
+  };
+
+  const handleToggleCoursePin = (courseId: string, pinned: boolean) => {
+    if (StorageService.setCoursePinned(courseId, pinned)) reloadData();
+  };
+
+  const handleDeleteCourse = (courseId: string) => {
+    const course = courses.find((item) => item.id === courseId);
+    if (!window.confirm(`'${course?.title ?? "이 과목"}'을 삭제할까요? 개념 지도에 쌓인 배움 기록은 남아요.`)) return;
+    if (!StorageService.deleteCourse(courseId)) return;
+    reloadData();
+    leaveCourseViews(courseId);
+  };
+
   const handleEnrollRoadmap = (course: Course) => {
     const storedCourse = StorageService.getCourseById(course.id);
     if (!storedCourse) {
@@ -501,22 +524,22 @@ export default function App() {
     document.getElementById("learning-main")?.scrollTo({ top: 0 });
   }, [activeView.type, activeView.type === "lesson" ? activeView.lesson.id : null]);
 
+
   if (!authResolved || (sessionStatus.signedIn && !dataReady)) {
-    const failed = syncStatus === "error";
+    // 기다리는 동안은 앱 뼈대를, 복원에 실패했을 때만 안내와 재시도 버튼을 보여 줍니다.
+    if (syncStatus !== "error") return <AppSkeleton />;
     return (
       <div className="flex min-h-[100dvh] w-full items-center justify-center overflow-x-hidden bg-[var(--lh-canvas)] px-6 text-center text-[var(--lh-ink)]">
         <div className="w-full min-w-0 max-w-md space-y-4 [overflow-wrap:anywhere]">
           <LearnHubLogo size={40} />
-          <h1 className="text-xl font-medium">{failed ? "학습 기록을 연결하지 못했습니다" : "계정의 학습 공간을 불러오는 중…"}</h1>
-          <p className="text-sm leading-relaxed text-[var(--lh-ink-secondary)]">{failed ? syncError : "다른 기기에서 이어서 학습할 수 있도록 최신 기록을 확인하고 있습니다."}</p>
-          {failed && (
-            <button type="button" onClick={() => {
-              activeUserIdRef.current = null;
-              window.dispatchEvent(new CustomEvent(LEARNHUB_AUTH_CHANGED_EVENT, { detail: { event: "RETRY_SYNC", userId: getAuthStatus().userId || null } }));
-            }} className="rounded-full bg-[var(--lh-primary)] px-5 py-2.5 text-sm font-medium text-white">
-              다시 연결하기
-            </button>
-          )}
+          <h1 className="text-xl font-medium">학습 기록을 연결하지 못했습니다</h1>
+          <p className="text-sm leading-relaxed text-[var(--lh-ink-secondary)]">{syncError}</p>
+          <button type="button" onClick={() => {
+            activeUserIdRef.current = null;
+            window.dispatchEvent(new CustomEvent(LEARNHUB_AUTH_CHANGED_EVENT, { detail: { event: "RETRY_SYNC", userId: getAuthStatus().userId || null } }));
+          }} className="rounded-full bg-[var(--lh-primary)] px-5 py-2.5 text-sm font-medium text-white">
+            다시 연결하기
+          </button>
         </div>
       </div>
     );
@@ -525,28 +548,28 @@ export default function App() {
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[var(--lh-canvas)] text-[var(--lh-ink)] font-sans">
       {/* 1. Left Notion Sidebar */}
-      {!isZenMode && (
-        <Sidebar
-          courses={courses}
-          activeView={activeView}
-          onSelectView={(view) => handleSelectView(view, "sidebar")}
-          onNewChat={handleNewChat}
-          onCreateCourse={handleCreateCourse}
-          onOpenSearch={() => setIsSearchOpen(true)}
-          pendingReviewsCount={reviews.length}
-          isOpen={isSidebarOpen}
-          onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
-          userAccount={userAccount}
-          onOpenAuth={() => setIsAuthModalOpen(true)}
-          onOpenSettings={() => setIsSettingsOpen(true)}
-          onUpdateCourseStatus={handleCourseStatusChange}
-          lastLessonId={resumeContext?.position.lessonId ?? null}
-          chats={chatItems}
-          activeChatId={activeView.type === "ai-chat" ? activeView.sessionId : null}
-          onOpenChat={handleOpenChat}
-          onDeleteChat={handleDeleteChat}
-        />
-      )}
+      <Sidebar
+        courses={courses}
+        activeView={activeView}
+        onSelectView={(view) => handleSelectView(view, "sidebar")}
+        onNewChat={handleNewChat}
+        onCreateCourse={handleCreateCourse}
+        onOpenSearch={() => setIsSearchOpen(true)}
+        pendingReviewsCount={reviews.length}
+        isOpen={isSidebarOpen}
+        onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
+        userAccount={userAccount}
+        onOpenAuth={() => setIsAuthModalOpen(true)}
+        onOpenSettings={() => setIsSettingsOpen(true)}
+        onRenameCourse={handleRenameCourse}
+        onToggleCoursePin={handleToggleCoursePin}
+        onDeleteCourse={handleDeleteCourse}
+        lastLessonId={resumeContext?.position.lessonId ?? null}
+        chats={chatItems}
+        activeChatId={activeView.type === "ai-chat" ? activeView.sessionId : null}
+        onOpenChat={handleOpenChat}
+        onDeleteChat={handleDeleteChat}
+      />
 
       {/* 2. Main Workspace Canvas Area */}
       <div className="relative flex flex-1 flex-col overflow-hidden">
@@ -711,9 +734,6 @@ export default function App() {
         userAccount={userAccount}
         onOpenAuth={() => setIsAuthModalOpen(true)}
         onDataChanged={refreshDataState}
-        isZenMode={isZenMode}
-        onToggleZenMode={() => setIsZenMode(!isZenMode)}
-        onOpenTutor={handleNewChat}
         syncStatus={syncStatus}
         syncError={syncError}
         lastSyncedAt={lastSyncedAt}

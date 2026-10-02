@@ -19,6 +19,10 @@ export const domainHue = (domain: string): number => {
 
 export interface GraphPalette {
   background: string;
+  /** 전체 지도 화면의 모눈종이 바탕과 격자선 */
+  paper: string;
+  gridMinor: string;
+  gridMajor: string;
   edge: string;
   edgeActive: string;
   label: string;
@@ -39,6 +43,9 @@ export const getPalette = (): GraphPalette => {
   return isDark
     ? {
         background: "#161618",
+        paper: "#161618",
+        gridMinor: "rgba(255,255,255,0.035)",
+        gridMajor: "rgba(255,255,255,0.07)",
         edge: "rgba(160,162,175,0.30)",
         edgeActive: "rgba(222,224,235,0.85)",
         label: "#e7e9f1",
@@ -53,6 +60,9 @@ export const getPalette = (): GraphPalette => {
       }
     : {
         background: "#f3f4f8",
+        paper: "#ffffff",
+        gridMinor: "rgba(28,29,36,0.045)",
+        gridMajor: "rgba(28,29,36,0.085)",
         edge: "rgba(95,95,90,0.30)",
         edgeActive: "rgba(40,44,60,0.8)",
         label: "#1c1d24",

@@ -40,6 +40,8 @@ export interface Course {
   updatedAt: string;
   /** Keeps the course out of the active sidebar without deleting its learning data. */
   status?: "active" | "completed" | "cancelled";
+  /** 사이드바 맨 위에 고정한 시각. 없으면 고정하지 않은 과목입니다. */
+  pinnedAt?: string;
 }
 
 export interface QuizData {

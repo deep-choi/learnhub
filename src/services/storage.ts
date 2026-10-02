@@ -104,6 +104,35 @@ export class StorageService {
     return this.saveCourses(courses);
   }
 
+  static renameCourse(courseId: string, title: string): boolean {
+    const trimmed = title.trim().slice(0, 200);
+    if (!trimmed) return false;
+    const courses = this.getCourses();
+    const course = courses.find((item) => item.id === courseId);
+    if (!course) return false;
+    course.title = trimmed;
+    course.updatedAt = new Date().toISOString();
+    return this.saveCourses(courses);
+  }
+
+  static setCoursePinned(courseId: string, pinned: boolean): boolean {
+    const courses = this.getCourses();
+    const course = courses.find((item) => item.id === courseId);
+    if (!course) return false;
+    if (pinned) course.pinnedAt = new Date().toISOString();
+    else delete course.pinnedAt;
+    course.updatedAt = new Date().toISOString();
+    return this.saveCourses(courses);
+  }
+
+  /** 과목만 지웁니다. 개념 지도에 쌓인 배움 기록은 남겨 둡니다. */
+  static deleteCourse(courseId: string): boolean {
+    const courses = this.getCourses();
+    const remaining = courses.filter((item) => item.id !== courseId);
+    if (remaining.length === courses.length) return false;
+    return this.saveCourses(remaining);
+  }
+
   static getCourseById(id: string): Course | undefined {
     return this.getCourses().find((c) => c.id === id);
   }

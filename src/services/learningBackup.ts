@@ -189,6 +189,7 @@ const isCourse = (value: unknown): value is Course => {
     isNonEmptyString(value.subject, 500) &&
     isLearningType(value.learningType) &&
     (value.status === undefined || value.status === "active" || value.status === "completed" || value.status === "cancelled") &&
+    (value.pinnedAt === undefined || isString(value.pinnedAt, 64)) &&
     isString(value.learningTypeExplanation, 5_000) &&
     isString(value.summary, 10_000) &&
     isLevel(value.level) &&

@@ -1,11 +1,11 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { BookOpen, CheckCircle2, CircleHelp, Link2Off, List, Network, Sparkles, X } from "lucide-react";
+import { BookOpen, CircleHelp, GitFork, Link2Off, List, Network, Orbit, Sparkles, Undo2, X } from "lucide-react";
 import type { Course, UserSkill } from "../../types/learning";
 import type { NotionPageView } from "../notion/Sidebar";
-import { GraphCanvas } from "./GraphCanvas";
-import { disputeEdge, markKnown, markPracticalDone } from "./graphBridge";
+import { GraphCanvas, type GraphLayoutMode } from "./GraphCanvas";
+import { disputeEdge, markPracticalDone } from "./graphBridge";
 import { domainHue, STATE_LABEL } from "./graphStyle";
-import type { ConceptNode, ConceptState } from "./graphTypes";
+import type { ConceptNode } from "./graphTypes";
 import { useKnowledgeGraph } from "./useKnowledgeGraph";
 
 interface KnowledgeGraphViewProps {
@@ -16,22 +16,20 @@ interface KnowledgeGraphViewProps {
   onOpenCreateCourse: (subject?: string) => void;
 }
 
-const LEGEND: Array<{ state: ConceptState; text: string }> = [
-  { state: "unseen", text: "아직 안 배웠어요" },
-  { state: "learned", text: "배웠어요" },
-  { state: "verified", text: "확인했어요" },
-  { state: "needs_review", text: "다시 보면 좋아요" },
-  { state: "curious", text: "궁금해요" },
-];
+const LAYOUT_STORAGE_KEY = "learnhub_graph_layout_v1";
 
-// 캔버스 팔레트(graphStyle)와 같은 색을 씁니다. 분야는 점 테두리 색으로 구분됩니다.
-const legendClass: Record<ConceptState, string> = {
-  unseen: "bg-[#a3a6b3] opacity-60 dark:bg-[#6f7482]",
-  learned: "bg-[#4169e1] dark:bg-[#7b9bfc]",
-  verified: "bg-[#2647b2] ring-2 ring-inset ring-white/90 dark:bg-[#a9c0ff]",
-  needs_review: "bg-[#dc6e22] dark:bg-[#f38132]",
-  curious: "border-2 border-dashed border-[#a3a6b3] bg-transparent dark:border-[#6f7482]",
+const readLayoutMode = (): GraphLayoutMode => {
+  try {
+    return localStorage.getItem(LAYOUT_STORAGE_KEY) === "radial" ? "radial" : "tree";
+  } catch {
+    return "tree";
+  }
 };
+
+const LAYOUT_OPTIONS: Array<{ mode: GraphLayoutMode; label: string; Icon: typeof GitFork }> = [
+  { mode: "tree", label: "트리", Icon: GitFork },
+  { mode: "radial", label: "원형", Icon: Orbit },
+];
 
 export const KnowledgeGraphView: React.FC<KnowledgeGraphViewProps> = ({ courses, skills, dueReviewCount, onSelectView, onOpenCreateCourse }) => {
   const graph = useKnowledgeGraph();
@@ -39,6 +37,16 @@ export const KnowledgeGraphView: React.FC<KnowledgeGraphViewProps> = ({ courses,
   const [hiddenDomains, setHiddenDomains] = useState<Set<string>>(new Set());
   const [reflection, setReflection] = useState("");
   const [listOpen, setListOpen] = useState(false);
+  const [layoutMode, setLayoutMode] = useState<GraphLayoutMode>(readLayoutMode);
+
+  const changeLayoutMode = (mode: GraphLayoutMode) => {
+    setLayoutMode(mode);
+    try {
+      localStorage.setItem(LAYOUT_STORAGE_KEY, mode);
+    } catch {
+      // 기억하지 못해도 이번 화면에서는 바뀐 보기를 씁니다.
+    }
+  };
 
   useEffect(() => {
     if (!selectedId) return;
@@ -121,11 +129,31 @@ export const KnowledgeGraphView: React.FC<KnowledgeGraphViewProps> = ({ courses,
     );
   }
 
+  const layoutToggle = (
+      <div role="radiogroup" aria-label="지도 보기" className="inline-flex h-10 items-center rounded-full border border-[var(--lh-line)] bg-[var(--lh-surface)]/85 p-1 backdrop-blur">
+        {LAYOUT_OPTIONS.map(({ mode, label, Icon }) => (
+          <button
+            key={mode}
+            type="button"
+            role="radio"
+            aria-checked={layoutMode === mode}
+            onClick={() => changeLayoutMode(mode)}
+            className={`inline-flex h-8 min-h-0! items-center gap-1.5 rounded-full px-3 text-sm! font-medium transition cursor-pointer ${
+              layoutMode === mode ? "bg-[var(--lh-ink)] text-[var(--lh-surface)]" : "text-[var(--lh-ink-secondary)] hover:text-[var(--lh-ink)]"
+            }`}
+          >
+            <Icon aria-hidden className="h-4 w-4" /> {label}
+          </button>
+        ))}
+      </div>
+  );
+
   return (
     <div className="relative h-[100dvh] w-full overflow-hidden text-[var(--lh-ink)]">
       <GraphCanvas
         graph={graph}
         variant="full"
+        layout={layoutMode}
         selectedId={selectedId}
         hiddenDomains={hiddenDomains}
         lastPositionId={graph.lastPosition?.conceptId}
@@ -141,10 +169,11 @@ export const KnowledgeGraphView: React.FC<KnowledgeGraphViewProps> = ({ courses,
           aria-expanded={listOpen}
           aria-controls="graph-node-list"
           onClick={() => setListOpen((open) => !open)}
-          className="pointer-events-auto inline-flex min-h-9 items-center gap-2 rounded-full border border-[var(--lh-line)] bg-[var(--lh-surface)]/85 px-3.5 text-xs font-medium text-[var(--lh-ink)] backdrop-blur transition hover:bg-[var(--lh-surface)] cursor-pointer"
+          className="pointer-events-auto inline-flex h-10 min-h-0! items-center gap-2 rounded-full border border-[var(--lh-line)] bg-[var(--lh-surface)]/85 px-4 text-sm! font-medium text-[var(--lh-ink)] backdrop-blur transition hover:bg-[var(--lh-surface)] cursor-pointer"
         >
           <List aria-hidden className="h-4 w-4" /> {listOpen ? "목록 접기" : "목록"}
         </button>
+        <div className="pointer-events-auto sm:hidden">{layoutToggle}</div>
         {domains.length > 1 && (
           <div className="pointer-events-auto flex flex-wrap gap-2" role="group" aria-label="분야 보기">
             {domains.map((domain) => {
@@ -155,7 +184,7 @@ export const KnowledgeGraphView: React.FC<KnowledgeGraphViewProps> = ({ courses,
                   type="button"
                   aria-pressed={!hidden}
                   onClick={() => toggleDomain(domain)}
-                  className={`inline-flex min-h-9 items-center gap-2 rounded-full border bg-[var(--lh-surface)]/85 px-3 text-xs font-medium backdrop-blur transition cursor-pointer ${hidden ? "border-[var(--lh-line)] text-[var(--lh-ink-tertiary)]" : "border-[var(--lh-line-strong)] text-[var(--lh-ink)]"}`}
+                  className={`inline-flex h-10 min-h-0! items-center gap-2 rounded-full border bg-[var(--lh-surface)]/85 px-4 text-sm! font-medium backdrop-blur transition cursor-pointer ${hidden ? "border-[var(--lh-line)] text-[var(--lh-ink-tertiary)]" : "border-[var(--lh-line-strong)] text-[var(--lh-ink)]"}`}
                 >
                   <span aria-hidden className="h-2.5 w-2.5 rounded-full" style={{ background: `hsl(${domainHue(domain)} 62% 52%)`, opacity: hidden ? 0.35 : 1 }} />
                   {domain}
@@ -165,6 +194,9 @@ export const KnowledgeGraphView: React.FC<KnowledgeGraphViewProps> = ({ courses,
           </div>
         )}
       </div>
+
+      {/* 오른쪽 위: 보기 전환(데스크톱) */}
+      <div className="absolute right-3 top-3 z-10 hidden sm:block">{layoutToggle}</div>
 
       {listOpen && (
         <div id="graph-node-list" className="absolute bottom-16 left-3 top-16 z-10 w-[min(320px,calc(100%-1.5rem))] space-y-4 overflow-y-auto rounded-2xl border border-[var(--lh-line)] bg-[var(--lh-surface)]/95 p-3 shadow-lg backdrop-blur">
@@ -191,112 +223,104 @@ export const KnowledgeGraphView: React.FC<KnowledgeGraphViewProps> = ({ courses,
         </div>
       )}
 
-      {/* 왼쪽 아래: 범례 */}
-      <div aria-label="범례" className="pointer-events-none absolute bottom-3 left-3 z-10 flex max-w-[calc(100%-5rem)] flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-[var(--lh-line)] bg-[var(--lh-surface)]/70 px-3 py-2 backdrop-blur">
-        {LEGEND.map((item) => (
-          <span key={item.state} className="inline-flex items-center gap-1.5 text-[11px] text-[var(--lh-ink-secondary)]">
-            <span aria-hidden className={`inline-block h-2.5 w-2.5 rounded-full ${legendClass[item.state]}`} />
-            {item.text}
-          </span>
-        ))}
-      </div>
-
       {/* 오른쪽 위: 노드를 눌렀을 때만 뜨는 상세 패널 */}
       {selected && (
-        <aside aria-live="polite" aria-label={`${selected.name} 자세히`} className="absolute right-3 top-16 z-20 max-h-[calc(100%-5rem)] w-[calc(100%-1.5rem)] overflow-y-auto rounded-[24px] border border-[var(--lh-line)] bg-[var(--lh-surface)] shadow-lg sm:top-3 sm:max-h-[calc(100%-1.5rem)] sm:w-[360px]">
-          <button type="button" onClick={() => select(null)} aria-label="닫기" className="absolute right-3 top-3 z-10 flex h-9 w-9 items-center justify-center rounded-full text-[var(--lh-ink-tertiary)] transition hover:bg-[var(--lh-surface-subtle)] hover:text-[var(--lh-ink)] cursor-pointer"><X aria-hidden className="h-4 w-4" /></button>
-          <div className="space-y-4 p-5 pr-12">
-              <div className="space-y-1.5">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="inline-flex items-center gap-1.5 rounded-full bg-[var(--lh-surface-subtle)] px-2.5 py-1 text-[11px] font-medium text-[var(--lh-ink-secondary)]">
-                    <span aria-hidden className="h-2 w-2 rounded-full" style={{ background: `hsl(${domainHue(selected.domain)} 62% 52%)` }} />
-                    {selected.domain}
-                  </span>
-                  <span className="text-[11px] font-medium text-[var(--lh-ink-tertiary)]">{STATE_LABEL[selected.state]}</span>
-                </div>
-                <h2 className="text-xl font-medium leading-snug tracking-tight">{selected.name}</h2>
-                {selected.userMarkedKnown && <p className="text-xs text-[var(--lh-ink-secondary)]">이미 알고 있다고 표시했어요.</p>}
-                {selected.curiosityQuestion && (
-                  <p className="rounded-xl bg-[var(--lh-surface-subtle)] px-3 py-2 text-xs leading-5 text-[var(--lh-ink-secondary)]">
-                    궁금했던 점: {selected.curiosityQuestion}
-                  </p>
-                )}
+        <aside
+          aria-live="polite"
+          aria-label={`${selected.name} 자세히`}
+          className="absolute right-3 top-16 z-20 max-h-[calc(100%-5rem)] w-[calc(100%-1.5rem)] overflow-y-auto rounded-2xl border border-[var(--lh-line)] bg-[var(--lh-surface)] shadow-[var(--lh-shadow-md)] sm:top-16 sm:max-h-[calc(100%-5rem)] sm:w-[340px]"
+        >
+          <div className="p-5">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="flex items-center gap-1.5 text-xs text-[var(--lh-ink-tertiary)]">
+                  <span aria-hidden className="h-2 w-2 shrink-0 rounded-full" style={{ background: `hsl(${domainHue(selected.domain)} 62% 52%)` }} />
+                  <span className="truncate">{selected.domain} · {STATE_LABEL[selected.state]}</span>
+                </p>
+                <h2 className="mt-1.5 text-lg font-semibold leading-snug tracking-tight">{selected.name}</h2>
               </div>
+              <button
+                type="button"
+                onClick={() => select(null)}
+                aria-label="닫기"
+                className="-mr-2 -mt-2 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[var(--lh-ink-tertiary)] transition hover:bg-[var(--lh-surface-subtle)] hover:text-[var(--lh-ink)] cursor-pointer"
+              >
+                <X aria-hidden className="h-4 w-4" />
+              </button>
+            </div>
 
-              <div className="flex flex-wrap gap-2">
-                {lessonFor(selected) ? (
-                  <>
-                    <button type="button" onClick={() => openLesson(selected)} className="inline-flex min-h-10 items-center gap-2 rounded-full bg-[var(--lh-primary)] px-4 text-xs font-medium text-white transition hover:bg-[var(--lh-primary-hover)] cursor-pointer sm:text-sm">
-                      <BookOpen aria-hidden className="h-4 w-4" /> {selected.state === "unseen" ? "배우러 가기" : "다시 보기"}
-                    </button>
-                    <button type="button" onClick={() => openLesson(selected, true)} className="inline-flex min-h-10 items-center gap-2 rounded-full border border-[var(--lh-line-strong)] bg-[var(--lh-surface)] px-4 text-xs font-medium text-[var(--lh-ink)] transition hover:bg-[var(--lh-surface-subtle)] cursor-pointer sm:text-sm">
-                      <CircleHelp aria-hidden className="h-4 w-4" /> 문제 풀기
-                    </button>
-                  </>
-                ) : (
-                  <button type="button" onClick={() => onOpenCreateCourse(selected.name)} className="inline-flex min-h-10 items-center gap-2 rounded-full bg-[var(--lh-primary)] px-4 text-xs font-medium text-white transition hover:bg-[var(--lh-primary-hover)] cursor-pointer sm:text-sm">
-                    <Sparkles aria-hidden className="h-4 w-4" /> 이걸로 과목 만들기
+            {selected.curiosityQuestion && (
+              <p className="mt-3 text-sm leading-relaxed text-[var(--lh-ink-secondary)]">궁금했던 점: {selected.curiosityQuestion}</p>
+            )}
+
+            <div className="mt-4">
+              {lessonFor(selected) ? (
+                <div className="grid grid-cols-2 gap-2">
+                  <button type="button" onClick={() => openLesson(selected)} className="inline-flex h-11 items-center justify-center gap-1.5 rounded-xl bg-[var(--lh-primary)] px-3 text-sm! font-medium text-white transition hover:bg-[var(--lh-primary-hover)] cursor-pointer">
+                    <BookOpen aria-hidden className="h-4 w-4" /> {selected.state === "unseen" ? "배우러 가기" : "다시 보기"}
                   </button>
-                )}
-                {selected.state !== "curious" && (
-                  <button
-                    type="button"
-                    aria-pressed={Boolean(selected.userMarkedKnown)}
-                    onClick={() => markKnown(selected.id, !selected.userMarkedKnown)}
-                    className={`inline-flex min-h-10 items-center gap-2 rounded-full border px-4 text-xs font-medium transition cursor-pointer sm:text-sm ${selected.userMarkedKnown ? "border-[var(--lh-primary-border)] bg-[var(--lh-primary-subtle)] text-[var(--lh-primary-text)]" : "border-[var(--lh-line-strong)] bg-[var(--lh-surface)] text-[var(--lh-ink)] hover:bg-[var(--lh-surface-subtle)]"}`}
-                  >
-                    <CheckCircle2 aria-hidden className="h-4 w-4" /> 이미 알아요
+                  <button type="button" onClick={() => openLesson(selected, true)} className="inline-flex h-11 items-center justify-center gap-1.5 rounded-xl border border-[var(--lh-line)] bg-[var(--lh-surface)] px-3 text-sm! font-medium text-[var(--lh-ink)] transition hover:bg-[var(--lh-surface-subtle)] cursor-pointer">
+                    <CircleHelp aria-hidden className="h-4 w-4" /> 문제 풀기
                   </button>
-                )}
+                </div>
+              ) : (
+                <button type="button" onClick={() => onOpenCreateCourse(selected.name)} className="inline-flex h-11 w-full items-center justify-center gap-1.5 rounded-xl bg-[var(--lh-primary)] px-3 text-sm! font-medium text-white transition hover:bg-[var(--lh-primary-hover)] cursor-pointer">
+                  <Sparkles aria-hidden className="h-4 w-4" /> 이걸로 과목 만들기
+                </button>
+              )}
+            </div>
+
+            {selectedIsPractical && (
+              <div className="mt-4 space-y-2">
+                <label className="block text-sm font-medium" htmlFor="graph-reflection">직접 해봤나요?</label>
+                <textarea
+                  id="graph-reflection"
+                  value={reflection}
+                  onChange={(event) => setReflection(event.target.value)}
+                  rows={2}
+                  maxLength={300}
+                  placeholder="해보니 어땠는지 한두 줄로 적어 보세요 (선택)"
+                  className="w-full resize-none rounded-xl border border-[var(--lh-line)] bg-[var(--lh-surface)] p-3 text-sm! leading-relaxed outline-none focus:border-[var(--lh-primary)]"
+                />
+                <button
+                  type="button"
+                  onClick={() => markPracticalDone(selected.id, reflection)}
+                  className="inline-flex h-11 w-full items-center justify-center rounded-xl border border-[var(--lh-line)] px-3 text-sm! font-medium text-[var(--lh-ink)] transition hover:bg-[var(--lh-surface-subtle)] cursor-pointer"
+                >
+                  {selected.practicalDoneAt ? "회고 다시 저장" : "해봤어요"}
+                </button>
               </div>
-
-              {selectedIsPractical && (
-                <div className="space-y-2 rounded-2xl border border-[var(--lh-line)] bg-[var(--lh-surface-subtle)] p-3">
-                  <p className="text-xs font-medium">직접 해봤나요?</p>
-                  <label className="sr-only" htmlFor="graph-reflection">해본 뒤 느낀 점</label>
-                  <textarea
-                    id="graph-reflection"
-                    value={reflection}
-                    onChange={(event) => setReflection(event.target.value)}
-                    rows={2}
-                    maxLength={300}
-                    placeholder="해보니 어땠는지 한두 줄로 적어 보세요 (선택)"
-                    className="w-full resize-none rounded-xl border border-[var(--lh-line)] bg-[var(--lh-canvas)] p-2.5 text-xs leading-5 outline-none focus:border-[var(--lh-primary)]"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => markPracticalDone(selected.id, reflection)}
-                    className="inline-flex min-h-9 items-center gap-2 rounded-full bg-[var(--lh-primary)] px-4 text-xs font-medium text-white transition hover:bg-[var(--lh-primary-hover)] cursor-pointer"
-                  >
-                    {selected.practicalDoneAt ? "회고 다시 저장" : "해봤어요"}
-                  </button>
-                </div>
-              )}
-
-              {neighbors.length > 0 && (
-                <div className="space-y-2">
-                  <p className="text-xs font-medium text-[var(--lh-ink-secondary)]">이어진 개념</p>
-                  <ul className="space-y-1.5">
-                    {neighbors.map(({ other, edges, relation, disputed }) => (
-                      <li key={other.id} className="flex items-center justify-between gap-2 rounded-xl border border-[var(--lh-line)] px-3 py-2">
-                        <button type="button" onClick={() => select(other.id)} className="min-w-0 text-left cursor-pointer">
-                          <span className={`block truncate text-sm font-medium ${disputed ? "text-[var(--lh-ink-tertiary)] line-through" : "text-[var(--lh-ink)]"}`}>{other.name}</span>
-                          <span className="block text-[11px] text-[var(--lh-ink-tertiary)]">{disputed ? "이상하다고 표시했어요" : relation}</span>
-                        </button>
-                        <button
-                          type="button"
-                          aria-pressed={disputed}
-                          onClick={() => edges.forEach((edge) => disputeEdge(edge.id, !disputed))}
-                          className="inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1.5 text-[11px] font-medium text-[var(--lh-ink-secondary)] transition hover:bg-[var(--lh-surface-subtle)] cursor-pointer"
-                        >
-                          <Link2Off aria-hidden className="h-3.5 w-3.5" /> {disputed ? "되돌리기" : "이 연결 이상해요"}
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
+            )}
           </div>
+
+          {neighbors.length > 0 && (
+            <div className="border-t border-[var(--lh-line)] px-3 pb-3 pt-4">
+              <p className="px-2 text-xs font-medium text-[var(--lh-ink-tertiary)]">이어진 개념 {neighbors.length}</p>
+              <ul className="mt-1.5">
+                {neighbors.map(({ other, edges, relation, disputed }) => (
+                  <li key={other.id} className="group flex items-center gap-1 rounded-lg transition hover:bg-[var(--lh-surface-subtle)]">
+                    <button type="button" onClick={() => select(other.id)} className="min-w-0 flex-1 px-2 py-2 text-left cursor-pointer">
+                      <span className={`block truncate text-sm font-medium ${disputed ? "text-[var(--lh-ink-tertiary)] line-through" : "text-[var(--lh-ink)]"}`}>{other.name}</span>
+                      <span className="block truncate text-xs text-[var(--lh-ink-tertiary)]">{disputed ? "이상하다고 표시했어요" : relation}</span>
+                    </button>
+                    {/* 자주 쓰지 않는 신고 버튼은 마우스를 올렸을 때만 보여 줍니다(터치 기기에서는 항상 보임). */}
+                    <button
+                      type="button"
+                      aria-pressed={disputed}
+                      aria-label={disputed ? `${other.name} 연결 되돌리기` : `${other.name} 연결이 이상해요`}
+                      title={disputed ? "되돌리기" : "이 연결이 이상해요"}
+                      onClick={() => edges.forEach((edge) => disputeEdge(edge.id, !disputed))}
+                      className={`mr-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[var(--lh-ink-tertiary)] transition hover:bg-[var(--lh-surface-strong)] hover:text-[var(--lh-ink)] cursor-pointer focus-visible:opacity-100 ${
+                        disputed ? "" : "[@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100"
+                      }`}
+                    >
+                      {disputed ? <Undo2 aria-hidden className="h-4 w-4" /> : <Link2Off aria-hidden className="h-4 w-4" />}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </aside>
       )}
     </div>

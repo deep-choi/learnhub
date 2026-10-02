@@ -1,20 +1,20 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
-  Archive,
   BarChart3,
   Check,
   ChevronDown,
   ChevronRight,
-  ClipboardCheck,
   Folder,
   FolderOpen,
-  ListTree,
   Menu,
   MessageCircle,
   MoreHorizontal,
   Network,
   PanelLeft,
   PanelLeftClose,
+  Pencil,
+  Pin,
+  PinOff,
   Plus,
   Search,
   Settings,
@@ -59,6 +59,9 @@ interface SidebarProps {
   onOpenAuth?: () => void;
   onOpenSettings?: () => void;
   onUpdateCourseStatus?: (courseId: string, status: "completed" | "cancelled" | "active") => void;
+  onRenameCourse?: (courseId: string, title: string) => void;
+  onToggleCoursePin?: (courseId: string, pinned: boolean) => void;
+  onDeleteCourse?: (courseId: string) => void;
   /** 마지막으로 학습한 레슨(현재 위치). 레슨을 열지 않은 화면에서도 표시합니다. */
   lastLessonId?: string | null;
   chats: SidebarChatItem[];
@@ -93,14 +96,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
   userAccount,
   onOpenAuth,
   onOpenSettings,
-  onUpdateCourseStatus,
+  onRenameCourse,
+  onToggleCoursePin,
+  onDeleteCourse,
   lastLessonId,
   chats,
   activeChatId,
   onOpenChat,
   onDeleteChat,
 }) => {
-  const activeCourses = courses.filter((course) => course.status !== "completed" && course.status !== "cancelled");
+  // 고정한 과목이 맨 위(최근에 고정한 것부터), 나머지는 원래 순서를 지킵니다.
+  const activeCourses = courses
+    .filter((course) => course.status !== "completed" && course.status !== "cancelled")
+    .map((course, index) => ({ course, index }))
+    .sort((a, b) => (b.course.pinnedAt ?? "").localeCompare(a.course.pinnedAt ?? "") || a.index - b.index)
+    .map(({ course }) => course);
+  const hasCourseMenu = Boolean(onRenameCourse || onToggleCoursePin || onDeleteCourse);
   const activeLessonId = activeView.type === "lesson" ? activeView.lesson.id : null;
   const activeLessonCourseId = activeView.type === "lesson" ? activeView.course.id : null;
   const rail = railOf(activeView);
@@ -108,6 +119,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [courseMenuId, setCourseMenuId] = useState<string | null>(null);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
+
+  // Enter·Esc로 끝낸 뒤 입력창이 사라지며 생기는 blur가 다시 저장하지 않도록 한 번만 처리합니다.
+  const renameDoneRef = useRef(false);
+  const startRename = (course: Course) => {
+    renameDoneRef.current = false;
+    setRenameDraft(course.title);
+    setRenamingId(course.id);
+  };
+  const finishRename = (courseId: string, save: boolean) => {
+    if (renameDoneRef.current) return;
+    renameDoneRef.current = true;
+    if (save && renameDraft.trim()) onRenameCourse?.(courseId, renameDraft);
+    setRenamingId(null);
+  };
 
   // 지금 보고 있는 레슨의 과목 폴더는 자동으로 펼칩니다.
   useEffect(() => {
@@ -283,6 +310,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       return (
                         <li key={course.id}>
                           <div className="group relative flex items-center" data-course-menu>
+                            {renamingId === course.id ? (
+                              <input
+                                autoFocus
+                                aria-label="과목 이름"
+                                value={renameDraft}
+                                maxLength={200}
+                                onChange={(event) => setRenameDraft(event.target.value)}
+                                onFocus={(event) => event.currentTarget.select()}
+                                onKeyDown={(event) => {
+                                  if (event.key === "Enter") finishRename(course.id, true);
+                                  if (event.key === "Escape") finishRename(course.id, false);
+                                }}
+                                onBlur={() => finishRename(course.id, true)}
+                                className="min-h-10 min-w-0 flex-1 rounded-xl border border-[var(--lh-primary)] bg-[var(--lh-surface)] px-3 text-sm! text-[var(--lh-ink)] outline-none"
+                              />
+                            ) : (
                             <button
                               type="button"
                               onClick={() => setExpanded((prev) => ({ ...prev, [course.id]: !prev[course.id] }))}
@@ -291,9 +334,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             >
                               <FolderIcon aria-hidden className="h-4 w-4 shrink-0 text-[var(--lh-ink-secondary)]" />
                               <span className="truncate">{course.title}</span>
+                              {course.pinnedAt && <Pin aria-label="상단 고정됨" className="h-3.5 w-3.5 shrink-0 text-[var(--lh-ink-tertiary)]" />}
                               {isExpanded ? <ChevronDown aria-hidden className="ml-auto h-3.5 w-3.5 shrink-0 text-[var(--lh-ink-tertiary)]" /> : <ChevronRight aria-hidden className="ml-auto h-3.5 w-3.5 shrink-0 text-[var(--lh-ink-tertiary)]" />}
                             </button>
-                            {onUpdateCourseStatus && (
+                            )}
+                            {hasCourseMenu && renamingId !== course.id && (
                               <button
                                 type="button"
                                 aria-label={`${course.title} 과목 관리`}
@@ -306,17 +351,27 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                 <MoreHorizontal aria-hidden className="h-4 w-4" />
                               </button>
                             )}
-                            {courseMenuId === course.id && onUpdateCourseStatus && (
-                              <div role="menu" aria-label={`${course.title} 과목 관리`} className="absolute right-0 top-10 z-30 min-w-48 rounded-xl border border-[var(--lh-line)] bg-[var(--lh-surface)] p-1.5 text-xs shadow-lg">
-                                <button type="button" role="menuitem" onClick={() => { setCourseMenuId(null); go(() => onSelectView({ type: "course-detail", course })); }} className="flex min-h-10 w-full items-center gap-2 rounded-lg px-3 text-left hover:bg-[var(--lh-surface-subtle)] cursor-pointer">
-                                  <ListTree aria-hidden className="h-3.5 w-3.5" /> 목차 보기
-                                </button>
-                                <button type="button" role="menuitem" onClick={() => { setCourseMenuId(null); go(() => onSelectView({ type: "assessment", course })); }} className="flex min-h-10 w-full items-center gap-2 rounded-lg px-3 text-left hover:bg-[var(--lh-surface-subtle)] cursor-pointer">
-                                  <ClipboardCheck aria-hidden className="h-3.5 w-3.5" /> 문제로 실력 확인
-                                </button>
-                                <button type="button" role="menuitem" onClick={() => { setCourseMenuId(null); onUpdateCourseStatus(course.id, "completed"); }} className="flex min-h-10 w-full items-center gap-2 rounded-lg px-3 text-left hover:bg-[var(--lh-surface-subtle)] cursor-pointer">
-                                  <Archive aria-hidden className="h-3.5 w-3.5" /> 보관
-                                </button>
+                            {courseMenuId === course.id && hasCourseMenu && (
+                              <div role="menu" aria-label={`${course.title} 과목 관리`} className="absolute right-0 top-10 z-30 min-w-52 rounded-xl border border-[var(--lh-line)] bg-[var(--lh-surface)] p-1.5 shadow-lg">
+                                {onRenameCourse && (
+                                  <button type="button" role="menuitem" onClick={() => { setCourseMenuId(null); startRename(course); }} className="flex min-h-11 w-full items-center gap-2.5 rounded-lg px-3 text-left text-sm! transition hover:bg-[var(--lh-surface-subtle)] cursor-pointer text-[var(--lh-ink)]">
+                                    <Pencil aria-hidden className="h-4 w-4 text-[var(--lh-ink-secondary)]" /> 이름 변경
+                                  </button>
+                                )}
+                                {onToggleCoursePin && (
+                                  <button type="button" role="menuitem" onClick={() => { setCourseMenuId(null); onToggleCoursePin(course.id, !course.pinnedAt); }} className="flex min-h-11 w-full items-center gap-2.5 rounded-lg px-3 text-left text-sm! transition hover:bg-[var(--lh-surface-subtle)] cursor-pointer text-[var(--lh-ink)]">
+                                    {course.pinnedAt ? <PinOff aria-hidden className="h-4 w-4 text-[var(--lh-ink-secondary)]" /> : <Pin aria-hidden className="h-4 w-4 text-[var(--lh-ink-secondary)]" />}
+                                    {course.pinnedAt ? "고정 해제" : "상단 고정"}
+                                  </button>
+                                )}
+                                {onDeleteCourse && (
+                                  <>
+                                    <div aria-hidden className="mx-2 my-1 h-px bg-[var(--lh-line)]" />
+                                    <button type="button" role="menuitem" onClick={() => { setCourseMenuId(null); onDeleteCourse(course.id); }} className="flex min-h-11 w-full items-center gap-2.5 rounded-lg px-3 text-left text-sm! transition hover:bg-[var(--lh-surface-subtle)] cursor-pointer text-[var(--lh-danger)]">
+                                      <Trash2 aria-hidden className="h-4 w-4" /> 삭제
+                                    </button>
+                                  </>
+                                )}
                               </div>
                             )}
                           </div>
