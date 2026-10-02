@@ -23,8 +23,6 @@ import {
   applySetupAnswer,
   initialSetupProgress,
   nextSetupStep,
-  resolveCourseSetup,
-  summarizeCourseSetup,
 } from "../domain/courseSetup";
 import { fetchLevelCheckQuestion, resolveSetupAnswer } from "../services/courseSetup";
 import type { CourseSetup, SetupProgress, SetupStep, SetupStepId } from "../types/courseSetup";
@@ -206,8 +204,8 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
 
   const finishSetup = (subject: string, setup: CourseSetup) => {
     setFlow(null);
-    const summary = summarizeCourseSetup(resolveCourseSetup(setup));
-    const intro = `좋아요. ‘${subject}’의 개념 지도를 만들어 봤어요.${summary ? ` (${summary})` : ""} 마음에 들면 이 지도로 시작해요.`;
+    // 설정 요약은 카드 위에 보이므로 문장에는 넣지 않습니다. (예전 대화의 요약 문장은 restoreSetup이 계속 읽습니다.)
+    const intro = `좋아요. ‘${subject}’ 학습 과정을 만들어 봤어요. 마음에 들면 이 과정으로 시작해요.`;
     addMessages({ id: nextId(), role: "assistant", text: intro, previewSubject: subject, previewSetup: setup });
     persist({ role: "assistant", text: intro, learningIntent: { subject } });
   };
@@ -314,7 +312,7 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
     }
 
     if (!isSignedIn) {
-      // 배우고 싶다는 말이면 로그인 없이 지도부터 보여 주고, 일반 대화는 로그인 뒤에 이어갑니다.
+      // 배우고 싶다는 말이면 로그인 없이 과정 미리보기부터 보여 주고, 일반 대화는 로그인 뒤에 이어갑니다.
       const intent = detectLearningIntent(trimmed);
       if (intent) {
         setInput("");

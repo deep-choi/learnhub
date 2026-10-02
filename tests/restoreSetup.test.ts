@@ -63,3 +63,11 @@ ${q("experience")}`), say("처음이에요"), ask(q("goal")), say("시험 준비
   // 요약이 없으면 앞선 질문·답을 다시 읽어 만듭니다.
   assert.deepEqual(restorePreviewSetup(messages, 6), { experience: "none", level: "beginner", goal: "시험 준비", dailyMinutes: 15 });
 });
+
+test("the new intro sentence has no summary, so the setup is rebuilt from the answers while old sentences still parse", () => {
+  const intro = "좋아요. ‘집밥 요리’ 학습 과정을 만들어 봤어요. 마음에 들면 이 과정으로 시작해요.";
+  assert.equal(parseSetupSummary(intro), null);
+  const messages = [ask(`${SETUP_INTRO}\n\n${q("experience")}`), say("꽤 해봤어요"), ask(q("goal")), say("일·과제"), ask(q("dailyMinutes")), say("30분"), ask(intro)];
+  assert.deepEqual(restorePreviewSetup(messages, 6), { experience: "experienced", level: "intermediate", goal: "일·과제", dailyMinutes: 30 });
+  assert.equal(restoreSetupFlow(messages, true), null);
+});

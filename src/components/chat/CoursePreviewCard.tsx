@@ -15,7 +15,7 @@ interface CoursePreviewCardProps {
   isSignedIn: boolean;
   /** 대화로 정한 설정. 없으면 기본값(초급 · 원리 탐구 · 15분)입니다. */
   setup?: CourseSetup;
-  /** 로그인한 사용자가 "이 지도로 시작하기"를 눌렀을 때 */
+  /** 로그인한 사용자가 "이 과정으로 시작하기"를 눌렀을 때 */
   onStart: (course: Course, links: CurriculumConceptLinks) => void;
   /** 로그인 전 사용자가 눌렀을 때: 같은 결과와 설정을 로그인 뒤에도 이어 쓰도록 넘깁니다. */
   onGuestStart: (subject: string, data: Record<string, any>, setup: CourseSetup) => void;
@@ -38,7 +38,7 @@ const isSelected = (setup: CourseSetup, option: SetupOption): boolean => {
   return Object.entries(option.value).every(([key, value]) => resolved[key] === value);
 };
 
-/** 대화 안에 놓이는 과목 미리보기 카드. 개념 지도 미리보기와 설정 요약을 보여 주고, 눌러서 과목을 시작합니다. */
+/** 대화 안에 놓이는 과목 미리보기 카드. 과정 요약과 설정 요약을 보여 주고, 눌러서 과목을 시작합니다. */
 export const CoursePreviewCard: React.FC<CoursePreviewCardProps> = ({ subject, isSignedIn, setup: initialSetup, onStart, onGuestStart, onRequestAuth, initialData, onReady }) => {
   const [setup, setSetup] = useState<CourseSetup>(initialSetup ?? {});
   const [draft, setDraft] = useState<CourseSetup>(initialSetup ?? {});
@@ -70,7 +70,7 @@ export const CoursePreviewCard: React.FC<CoursePreviewCardProps> = ({ subject, i
         if (controller.signal.aborted) return;
         if (response.status === 401) {
           window.dispatchEvent(new CustomEvent("learnhub:request-auth"));
-          setState({ status: "error", message: "지도를 만들려면 로그인해 주세요.", limited: true });
+          setState({ status: "error", message: "과정을 만들려면 로그인해 주세요.", limited: true });
           return;
         }
         if (response.status === 429) {
@@ -86,7 +86,7 @@ export const CoursePreviewCard: React.FC<CoursePreviewCardProps> = ({ subject, i
         onReadyRef.current?.(data, setup);
       } catch {
         if (controller.signal.aborted) return;
-        setState({ status: "error", message: "지도를 만들지 못했어요. 잠시 후 다시 시도해 주세요.", limited: false });
+        setState({ status: "error", message: "과정을 만들지 못했어요. 잠시 후 다시 시도해 주세요.", limited: false });
       }
     };
     void run();
