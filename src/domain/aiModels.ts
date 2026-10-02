@@ -75,3 +75,33 @@ export const normalizeAiSelection = (value: unknown): AiRuntimeSelection => {
   if (isAiRuntimeSelection(value)) return { ...value };
   return { ...DEFAULT_AI_SELECTION };
 };
+
+export const REASONING_EFFORT_LABELS: Record<AiReasoningEffort, string> = {
+  none: "끄기",
+  minimal: "최소",
+  low: "낮음",
+  medium: "중간",
+  high: "높음",
+  xhigh: "매우 높음",
+  max: "최대",
+};
+
+const EFFORT_ORDER: readonly AiReasoningEffort[] = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
+
+/** 지원하는 단계 중 `effort`에 가장 가까운 것(같은 거리면 낮은 쪽). 지원 목록이 비면 그대로 돌려준다. */
+export const nearestReasoningEffort = (effort: AiReasoningEffort, supported: readonly AiReasoningEffort[]): AiReasoningEffort => {
+  if (supported.includes(effort) || supported.length === 0) return effort;
+  const target = EFFORT_ORDER.indexOf(effort);
+  return [...supported].sort((a, b) => {
+    const da = Math.abs(EFFORT_ORDER.indexOf(a) - target);
+    const db = Math.abs(EFFORT_ORDER.indexOf(b) - target);
+    return da - db || EFFORT_ORDER.indexOf(a) - EFFORT_ORDER.indexOf(b);
+  })[0];
+};
+
+/** 모델을 바꿀 때의 새 선택. 지금 추론 단계를 지원하지 않으면 가장 가까운 지원 단계로 맞춘다. 알 수 없는 모델이면 null. */
+export const selectionForModel = (current: AiRuntimeSelection, provider: AiProvider, modelId: string): AiRuntimeSelection | null => {
+  const model = getAiModel(provider, modelId);
+  if (!model) return null;
+  return { ...current, provider, model: model.id, reasoningEffort: nearestReasoningEffort(current.reasoningEffort, model.reasoningEfforts) };
+};

@@ -17,6 +17,8 @@ export interface GraphCanvasProps {
   /** 지난번에 멈춘 노드 */
   lastPositionId?: string;
   selectedId?: string | null;
+  /** 메모가 있는 노드. 노드 모서리에 작은 표시를 그립니다. */
+  markedIds?: Set<string>;
   /** 화면에서 숨길 분야 */
   hiddenDomains?: Set<string>;
   onSelect?: (id: string | null, anchor: { x: number; y: number }) => void;
@@ -44,6 +46,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
   pulseId,
   lastPositionId,
   selectedId,
+  markedIds,
   hiddenDomains,
   onSelect,
   ariaLabel,
@@ -69,8 +72,8 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
   });
   const rafRef = useRef<number | null>(null);
   const [, setPinTick] = useState(0);
-  const latest = useRef({ graph, nextIds, focusId, lastPositionId, selectedId, hiddenDomains, variant });
-  latest.current = { graph, nextIds, focusId, lastPositionId, selectedId, hiddenDomains, variant };
+  const latest = useRef({ graph, nextIds, focusId, lastPositionId, selectedId, hiddenDomains, variant, markedIds });
+  latest.current = { graph, nextIds, focusId, lastPositionId, selectedId, hiddenDomains, variant, markedIds };
 
   const reduceMotion = useMemo(prefersReducedMotion, []);
 
@@ -145,7 +148,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
   useEffect(() => {
     requestFrame();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nextIds, selectedId, hiddenDomains, lastPositionId, focusId, graph]);
+  }, [nextIds, selectedId, hiddenDomains, lastPositionId, focusId, graph, markedIds]);
 
   const fitView = () => {
     const nodes = [...nodesRef.current.values()];
@@ -341,6 +344,19 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
           ctx.fillStyle = "#ffffff";
           ctx.fill();
         }
+      }
+
+      if (state.markedIds?.has(node.id)) {
+        // 메모가 있는 노드: 오른쪽 위 모서리의 작은 표시
+        const badge = Math.max(2.4, r * 0.42);
+        ctx.globalAlpha = fade;
+        ctx.beginPath();
+        ctx.arc(sim.x + r * 0.85, sim.y - r * 0.85, badge, 0, Math.PI * 2);
+        ctx.fillStyle = palette.accent;
+        ctx.fill();
+        ctx.lineWidth = 1 / view.k;
+        ctx.strokeStyle = palette.background;
+        ctx.stroke();
       }
 
       if (pinnedRef.current.has(node.id)) {

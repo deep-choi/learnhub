@@ -12,6 +12,12 @@ import type { KnowledgeGraph } from "../types/knowledgeGraph";
 import { isKnowledgeGraph, mergeKnowledgeGraphs } from "../domain/knowledgeGraph";
 import type { ChatSession } from "../types/chat";
 import { isChatSessionList, mergeChatSessions } from "../domain/chatSession";
+import type { LearningNote } from "../types/learningNotes";
+import type { LessonProgressState } from "../types/lessonProgress";
+import { isLearningNoteList, mergeNotes } from "../domain/learningNote";
+import { isLessonProgressList, mergeLessonProgress } from "../domain/lessonProgress";
+import type { TutorPersona } from "../types/tutorPersona";
+import { isTutorPersona, newerPersona } from "../domain/tutorPersona";
 import {
   LEARNHUB_SCOPED_STORAGE_PREFIXES,
   LEARNHUB_STORAGE_KEYS,
@@ -61,6 +67,12 @@ export interface LearningBackupData {
   knowledgeGraph?: KnowledgeGraph;
   /** Free-conversation sessions (recent list). Optional: older snapshots do not have it. */
   chatSessions?: ChatSession[];
+  /** Markdown notes linked to concepts/lessons. Optional: older snapshots only have the raw `notes` map. */
+  learningNotes?: LearningNote[];
+  /** Per-lesson conversation progress (current step/phase). Optional for older snapshots. */
+  lessonProgress?: LessonProgressState[];
+  /** Tutor name/avatar/tone settings. Optional for older snapshots. */
+  tutorPersona?: TutorPersona;
   /** Quiz-attempt IDs are local deduplication state and contain no identity data. */
   quizAttempts?: string[];
 }
@@ -326,6 +338,9 @@ export const isPortableLearningStorageKey = (key: string): boolean =>
   key === LEARNHUB_STORAGE_KEYS.AI_PREFERENCES ||
   key === LEARNHUB_STORAGE_KEYS.KNOWLEDGE_GRAPH ||
   key === LEARNHUB_STORAGE_KEYS.CHAT_SESSIONS ||
+  key === LEARNHUB_STORAGE_KEYS.LEARNING_NOTES ||
+  key === LEARNHUB_STORAGE_KEYS.LESSON_PROGRESS ||
+  key === LEARNHUB_STORAGE_KEYS.TUTOR_PERSONA ||
   isSafeScopedKey(key, `${LEARNHUB_STORAGE_KEYS.LESSONS_CACHE}_`) ||
   isSafeScopedKey(key, LEARNHUB_SCOPED_STORAGE_PREFIXES.NOTES) ||
   isSafeScopedKey(key, LEARNHUB_SCOPED_STORAGE_PREFIXES.SCRATCHPAD) ||
@@ -351,6 +366,9 @@ const categoryForKey = (key: string): string => {
   if (key === LEARNHUB_STORAGE_KEYS.AI_PREFERENCES) return "aiPreferences";
   if (key === LEARNHUB_STORAGE_KEYS.KNOWLEDGE_GRAPH) return "knowledgeGraph";
   if (key === LEARNHUB_STORAGE_KEYS.CHAT_SESSIONS) return "chatSessions";
+  if (key === LEARNHUB_STORAGE_KEYS.LEARNING_NOTES) return "learningNotes";
+  if (key === LEARNHUB_STORAGE_KEYS.LESSON_PROGRESS) return "lessonProgress";
+  if (key === LEARNHUB_STORAGE_KEYS.TUTOR_PERSONA) return "tutorPersona";
   if (key.startsWith(`${LEARNHUB_STORAGE_KEYS.LESSONS_CACHE}_`)) return "lessonCache";
   if (key.startsWith(LEARNHUB_SCOPED_STORAGE_PREFIXES.NOTES)) return "notes";
   if (key.startsWith(LEARNHUB_SCOPED_STORAGE_PREFIXES.SCRATCHPAD)) return "scratchpad";
@@ -388,6 +406,9 @@ const setDataField = (data: LearningBackupData, key: string, value: unknown) => 
   if (key === LEARNHUB_STORAGE_KEYS.AI_PREFERENCES && isAiRuntimeSelection(value)) data.aiPreferences = value;
   if (key === LEARNHUB_STORAGE_KEYS.KNOWLEDGE_GRAPH && isKnowledgeGraph(value)) data.knowledgeGraph = value;
   if (key === LEARNHUB_STORAGE_KEYS.CHAT_SESSIONS && isChatSessionList(value)) data.chatSessions = value;
+  if (key === LEARNHUB_STORAGE_KEYS.LEARNING_NOTES && isLearningNoteList(value)) data.learningNotes = value;
+  if (key === LEARNHUB_STORAGE_KEYS.LESSON_PROGRESS && isLessonProgressList(value)) data.lessonProgress = value;
+  if (key === LEARNHUB_STORAGE_KEYS.TUTOR_PERSONA && isTutorPersona(value)) data.tutorPersona = value;
 };
 
 /** Read only the allowlisted LearnHub study namespace into a portable document. */
@@ -405,6 +426,9 @@ export const createLearningBackup = (storage?: Storage): LearningBackupDocument 
     LEARNHUB_STORAGE_KEYS.AI_PREFERENCES,
     LEARNHUB_STORAGE_KEYS.KNOWLEDGE_GRAPH,
     LEARNHUB_STORAGE_KEYS.CHAT_SESSIONS,
+    LEARNHUB_STORAGE_KEYS.LEARNING_NOTES,
+    LEARNHUB_STORAGE_KEYS.LESSON_PROGRESS,
+    LEARNHUB_STORAGE_KEYS.TUTOR_PERSONA,
   ]) {
     const value = readJson(source, key);
     if (value !== null) setDataField(data, key, value);
@@ -477,7 +501,7 @@ export const validateLearningBackup = (input: unknown): BackupValidationResult =
 
   const data = input.data;
   const knownFields = new Set([
-    "courses", "skills", "progress", "reviews", "mistakes", "lessonCache", "notes", "scratchpad", "tutor", "practice", "assessments", "quizAttempts", "aiPreferences", "knowledgeGraph", "chatSessions",
+    "courses", "skills", "progress", "reviews", "mistakes", "lessonCache", "notes", "scratchpad", "tutor", "practice", "assessments", "quizAttempts", "aiPreferences", "knowledgeGraph", "chatSessions", "learningNotes", "lessonProgress", "tutorPersona",
   ]);
   Object.keys(data).forEach((key) => {
     if (!knownFields.has(key)) errors.push(`알 수 없는 백업 데이터 필드: ${key}`);
@@ -492,6 +516,9 @@ export const validateLearningBackup = (input: unknown): BackupValidationResult =
   if (data.aiPreferences !== undefined && !isAiRuntimeSelection(data.aiPreferences)) errors.push("AI 설정 데이터가 올바르지 않습니다.");
   if (data.knowledgeGraph !== undefined && !isKnowledgeGraph(data.knowledgeGraph)) errors.push("개념 지도 데이터가 올바르지 않습니다.");
   if (data.chatSessions !== undefined && !isChatSessionList(data.chatSessions)) errors.push("대화 기록 데이터가 올바르지 않습니다.");
+  if (data.learningNotes !== undefined && !isLearningNoteList(data.learningNotes)) errors.push("메모 데이터가 올바르지 않습니다.");
+  if (data.lessonProgress !== undefined && !isLessonProgressList(data.lessonProgress)) errors.push("레슨 진행 데이터가 올바르지 않습니다.");
+  if (data.tutorPersona !== undefined && !isTutorPersona(data.tutorPersona)) errors.push("튜터 설정 데이터가 올바르지 않습니다.");
 
   const validateScopedMap = (value: unknown, prefix: string, validator: (item: unknown) => boolean, field: string) => {
     if (value === undefined) return;
@@ -529,6 +556,9 @@ const entriesFromBackup = (backup: LearningBackupDocument): PortableEntry[] => {
   if (data.aiPreferences !== undefined) addJson(LEARNHUB_STORAGE_KEYS.AI_PREFERENCES, data.aiPreferences);
   if (data.knowledgeGraph !== undefined) addJson(LEARNHUB_STORAGE_KEYS.KNOWLEDGE_GRAPH, data.knowledgeGraph);
   if (data.chatSessions !== undefined) addJson(LEARNHUB_STORAGE_KEYS.CHAT_SESSIONS, data.chatSessions);
+  if (data.learningNotes !== undefined) addJson(LEARNHUB_STORAGE_KEYS.LEARNING_NOTES, data.learningNotes);
+  if (data.lessonProgress !== undefined) addJson(LEARNHUB_STORAGE_KEYS.LESSON_PROGRESS, data.lessonProgress);
+  if (data.tutorPersona !== undefined) addJson(LEARNHUB_STORAGE_KEYS.TUTOR_PERSONA, data.tutorPersona);
   for (const [key, value] of Object.entries(data.lessonCache || {})) addJson(key, value);
   for (const [key, value] of Object.entries(data.notes || {})) entries.push({ key, value, category: "notes" });
   for (const [key, value] of Object.entries(data.scratchpad || {})) entries.push({ key, value, category: "scratchpad" });
@@ -594,6 +624,21 @@ const mergeByIdentity = (
       const merged = mergeKnowledgeGraphs(current, imported);
       if (!isKnowledgeGraph(merged)) throw new GraphMergeLimitError("합친 개념 지도가 저장 한도를 넘습니다. 기존 데이터는 유지했습니다.");
       return { value: JSON.stringify(merged), replacedMalformed: false };
+    }
+    if (category === "learningNotes") {
+      if (!isLearningNoteList(current)) return { value: importedRaw, replacedMalformed: true };
+      if (!isLearningNoteList(imported)) throw new Error("메모 형식이 올바르지 않습니다.");
+      return { value: JSON.stringify(mergeNotes(current, imported)), replacedMalformed: false };
+    }
+    if (category === "tutorPersona") {
+      if (!isTutorPersona(current)) return { value: importedRaw, replacedMalformed: true };
+      if (!isTutorPersona(imported)) throw new Error("튜터 설정 형식이 올바르지 않습니다.");
+      return { value: JSON.stringify(newerPersona(current, imported)), replacedMalformed: false };
+    }
+    if (category === "lessonProgress") {
+      if (!isLessonProgressList(current)) return { value: importedRaw, replacedMalformed: true };
+      if (!isLessonProgressList(imported)) throw new Error("레슨 진행 형식이 올바르지 않습니다.");
+      return { value: JSON.stringify(mergeLessonProgress(current, imported)), replacedMalformed: false };
     }
     if (category === "chatSessions") {
       if (!isChatSessionList(current)) return { value: importedRaw, replacedMalformed: true };

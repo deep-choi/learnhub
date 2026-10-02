@@ -18,6 +18,7 @@ import { coursePrompt, lessonPrompt, graphCurriculumSchema, knowledgeGraphRouter
 import { PreviewQuota, reserveFirestorePreview } from "./server/previewQuota";
 import { installUnhandledRejectionLogger } from "./server/runtimeSafety";
 import { learningSafetyPrompt } from "./server/learningSafety";
+import { personaOutputTokens, personaPrompt, sanitizePersona } from "./server/tutorPersona";
 import {
   AI_MODEL_CATALOG,
   AI_OUTPUT_TOKEN_OPTIONS,
@@ -196,10 +197,21 @@ const aiSelectionFor = (req: Request): AiRuntimeSelection => {
   return candidate;
 };
 
+/** 서버에 키가 설정된 제공자와 그 모델. 비밀 값은 없고 설정 여부만 담는다. */
+const aiAvailability = () => ({
+  providers: {
+    openai: { configured: aiGateway.isConfigured("openai") },
+    gemini: { configured: aiGateway.isConfigured("gemini") },
+  },
+  models: AI_MODEL_CATALOG.map((model) => ({ ...model, available: aiGateway.isConfigured(model.provider) })),
+  outputTokenOptions: [...AI_OUTPUT_TOKEN_OPTIONS],
+  defaultSelection: defaultAiSelection(),
+});
+
 app.get("/api/public-config", (_req, res) => {
   const firebaseConfig = getFirebasePublicConfig();
   if (!firebaseConfig) return res.status(503).json({ error: "Firebase 공개 설정이 아직 준비되지 않았습니다.", code: "PUBLIC_CONFIG_NOT_CONFIGURED" });
-  return res.json({ firebaseConfig });
+  return res.json({ firebaseConfig, ai: aiAvailability() });
 });
 
 const requireAiAccess = async (req: Request, res: Response): Promise<boolean> => {
@@ -413,11 +425,12 @@ app.post("/api/ai/generate-lesson", async (req, res) => {
 app.post("/api/ai/evaluate-quiz", async (req, res) => {
   if (!(await requireAiAccess(req, res))) return;
   const body = req.body;
-  if (!isRecord(body) || !hasOnlyKeys(body, ["conceptName", "question", "userAnswer", "expectedAnswer", "quizType"]) || ["conceptName", "question", "userAnswer", "expectedAnswer"].some((key) => boundedString(body, key, 400) === null) || !isAllowed(body.quizType, QUIZ_TYPES)) return invalidBody(res, "퀴즈 답안을 확인해 주세요.");
+  if (!isRecord(body) || !hasOnlyKeys(body, ["conceptName", "question", "userAnswer", "expectedAnswer", "quizType", "persona"]) || (body.persona !== undefined && !isRecord(body.persona)) || ["conceptName", "question", "userAnswer", "expectedAnswer"].some((key) => boundedString(body, key, 400) === null) || !isAllowed(body.quizType, QUIZ_TYPES)) return invalidBody(res, "퀴즈 답안을 확인해 주세요.");
   const normalizeChoice = (value: string) => value.normalize("NFC").replace(/[\uFF01-\uFF5E]/gu, (character) => String.fromCharCode(character.charCodeAt(0) - 0xfee0)).replace(/\u3000/gu, " ").replace(/\u2212/g, "-").replace(/\s+/gu, " ").trim();
   const comparison = body.quizType === "multiple_choice" ? (normalizeChoice(body.userAnswer as string) === normalizeChoice(body.expectedAnswer as string) ? "correct" : "incorrect") : compareAnswers(body.userAnswer as string, body.expectedAnswer as string);
   if (comparison !== "unknown") return res.json({ status: "scored", isCorrect: comparison === "correct", feedback: comparison === "correct" ? "정답입니다. 핵심 원리를 올바르게 적용했습니다." : "제출한 답을 다시 확인해 보세요. 힌트를 활용해 한 번 더 시도할 수 있습니다." });
-  const prompt = `엄밀하고 친절한 학습 채점관입니다. 개념: "${body.conceptName}" 질문: "${body.question}" 정답 기준: "${body.expectedAnswer}" 제출 답안: "${body.userAnswer}" 유형: "${body.quizType}". 확실하지 않으면 status를 unknown으로 반환하고 오답으로 단정하지 마세요. JSON만 반환하세요.`;
+  const basePrompt = `엄밀하고 친절한 학습 채점관입니다. 개념: "${body.conceptName}" 질문: "${body.question}" 정답 기준: "${body.expectedAnswer}" 제출 답안: "${body.userAnswer}" 유형: "${body.quizType}". 확실하지 않으면 status를 unknown으로 반환하고 오답으로 단정하지 마세요. JSON만 반환하세요.`;
+  const prompt = `${basePrompt}${personaPrompt(sanitizePersona(body.persona))}`;
   try {
     const result = await aiGateway.generateJson<Record<string, unknown>>({ endpoint: "evaluate-quiz", requestId: res.locals.requestId, clientKey: clientKeyFor(req, res), prompt, config: { responseMimeType: "application/json", responseSchema: evaluationSchema }, maxOutputTokens: 1500, maxReasoningEffort: "low", selection: aiSelectionFor(req), validate: (payload) => isRecord(payload) && typeof payload.isCorrect === "boolean" && typeof payload.feedback === "string" ? [] : ["invalid"] });
     const data = result.payload;
@@ -430,7 +443,7 @@ app.post("/api/ai/tutor-chat", async (req, res) => {
   if (!(await requireAiAccess(req, res))) return;
   const body = req.body;
   if (!validTutorRequest(body)) return invalidBody(res, "튜터 질문과 레슨 맥락을 확인해 주세요.");
-  return runAi(req, res, "tutor-chat", tutorPrompt(body), { responseMimeType: "application/json", responseSchema: body.mode === "free" ? freeTutorSchema : tutorSchema }, 900, payload => validateTutorResponse(payload, body.conceptName, { free: body.mode === "free" }));
+  return runAi(req, res, "tutor-chat", tutorPrompt(body), { responseMimeType: "application/json", responseSchema: body.mode === "free" ? freeTutorSchema : tutorSchema }, personaOutputTokens(sanitizePersona(body.persona)), payload => validateTutorResponse(payload, body.conceptName, { free: body.mode === "free" }));
 });
 
 app.post("/api/ai/generate-practice", async (req, res) => {

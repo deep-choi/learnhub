@@ -36,6 +36,9 @@ export const LEARNHUB_STORAGE_KEYS = {
   AI_PREFERENCES: "learnhub_ai_preferences_v1",
   KNOWLEDGE_GRAPH: "ai_learnhub_knowledge_graph_v1",
   CHAT_SESSIONS: "ai_learnhub_chat_sessions_v1",
+  LEARNING_NOTES: "ai_learnhub_learning_notes_v1",
+  LESSON_PROGRESS: "ai_learnhub_lesson_progress_v1",
+  TUTOR_PERSONA: "ai_learnhub_tutor_persona_v1",
   USER: "ai_learnhub_user_v2",
 } as const;
 
