@@ -606,6 +606,7 @@ export default function App() {
               onStartAssessment={() => openAssessment(activeView.course)}
               onBackToAssessment={activeView.assessmentReturn ? () => openAssessment(activeView.course) : undefined}
               autoStartPractice={activeView.autoPractice}
+              isSignedIn={!userAccount.isGuest}
               onOpenKnowledgeMap={() => handleSelectView({ type: "knowledge-map" }, "lesson-map")}
               onStartNextLesson={(nextCourse, nextLesson, chapterTitle) =>
                 openLesson(nextCourse, nextLesson, chapterTitle, "lesson-next", false)

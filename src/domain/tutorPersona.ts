@@ -36,7 +36,12 @@ export const PERSONA_PRESETS: readonly PersonaPresetInfo[] = [
 
 export const RESPONSE_LENGTH_LABELS: Record<TutorResponseLength, string> = { short: "짧게", medium: "보통", long: "자세히" };
 
-export const TUTOR_AVATAR_PRESET_IDS = ["owl", "fox", "cat", "leaf", "star", "bulb"] as const;
+export const TUTOR_AVATAR_PRESET_IDS = ["bird", "cat", "rabbit", "sprout", "star", "bulb"] as const;
+export type TutorAvatarPresetId = (typeof TUTOR_AVATAR_PRESET_IDS)[number];
+/** 편집 창에서 고르는 기본 이미지. 그림은 화면 쪽(TutorAvatar)이 아이콘으로 그린다. */
+export const TUTOR_AVATAR_PRESET_LABELS: Record<TutorAvatarPresetId, string> = {
+  bird: "새", cat: "고양이", rabbit: "토끼", sprout: "새싹", star: "별", bulb: "전구",
+};
 
 export const isPersonaPreset = (value: unknown): value is TutorPersonaPreset =>
   PERSONA_PRESETS.some((preset) => preset.id === value);

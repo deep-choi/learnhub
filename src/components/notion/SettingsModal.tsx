@@ -27,8 +27,9 @@ import { authorizedFetch } from "../../services/authClient";
 import {
   AI_MODEL_CATALOG,
   AI_OUTPUT_TOKEN_OPTIONS,
+  REASONING_EFFORT_LABELS,
+  nearestReasoningEffort,
   type AiProvider,
-  type AiReasoningEffort,
   type AiRuntimeSelection,
 } from "../../domain/aiModels";
 import {
@@ -53,15 +54,8 @@ interface SettingsModalProps {
 
 type SettingsTab = "theme" | "account" | "general";
 
-const REASONING_LABELS: Record<AiReasoningEffort, string> = {
-  none: "없음",
-  minimal: "최소",
-  low: "낮음",
-  medium: "보통",
-  high: "높음",
-  xhigh: "매우 높음",
-  max: "최대",
-};
+/** 입력바 모델 선택과 같은 이름을 씁니다. */
+const REASONING_LABELS = REASONING_EFFORT_LABELS;
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
   isOpen,
@@ -95,6 +89,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     window.addEventListener(THEME_CHANGED_EVENT, handleThemeChange);
     return () => window.removeEventListener(THEME_CHANGED_EVENT, handleThemeChange);
   }, []);
+
+  // 입력바에서 바꾼 모델·추론 선택이 있으면 창을 열 때 다시 읽습니다.
+  useEffect(() => {
+    if (isOpen) setAiSelection(getAiPreferences());
+  }, [isOpen]);
 
   // Close on ESC key
   useEffect(() => {
@@ -193,9 +192,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const updateAiModel = (modelId: string) => {
     const model = availableModels.find((candidate) => candidate.id === modelId);
     if (!model) return;
-    const reasoningEffort = model.reasoningEfforts.includes(aiSelection.reasoningEffort)
-      ? aiSelection.reasoningEffort
-      : model.reasoningEfforts.includes("medium") ? "medium" : model.reasoningEfforts[0];
+    // 입력바와 같은 규칙: 지금 단계를 지원하지 않으면 가장 가까운 지원 단계로 맞춥니다.
+    const reasoningEffort = nearestReasoningEffort(aiSelection.reasoningEffort, model.reasoningEfforts);
     setAiSelection((current) => ({ ...current, model: model.id, reasoningEffort }));
     setAiSettingsStatus("idle");
   };

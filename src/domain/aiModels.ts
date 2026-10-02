@@ -88,6 +88,14 @@ export const REASONING_EFFORT_LABELS: Record<AiReasoningEffort, string> = {
 
 const EFFORT_ORDER: readonly AiReasoningEffort[] = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
 
+/** 모델이 지원하는 단계를 낮은 것부터 정렬한다. 슬라이더 눈금 순서다. */
+export const sortReasoningEfforts = (efforts: readonly AiReasoningEffort[]): AiReasoningEffort[] =>
+  [...efforts].sort((a, b) => EFFORT_ORDER.indexOf(a) - EFFORT_ORDER.indexOf(b));
+
+/** "높음" 이상이면 답이 느려지고 하루 사용량을 더 쓴다는 안내를 보여 준다. */
+export const isCostlyReasoningEffort = (effort: AiReasoningEffort): boolean =>
+  EFFORT_ORDER.indexOf(effort) >= EFFORT_ORDER.indexOf("high");
+
 /** 지원하는 단계 중 `effort`에 가장 가까운 것(같은 거리면 낮은 쪽). 지원 목록이 비면 그대로 돌려준다. */
 export const nearestReasoningEffort = (effort: AiReasoningEffort, supported: readonly AiReasoningEffort[]): AiReasoningEffort => {
   if (supported.includes(effort) || supported.length === 0) return effort;

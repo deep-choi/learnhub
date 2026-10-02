@@ -6,6 +6,8 @@ import { addCuriosity } from "./graph/graphBridge";
 import type { CurriculumConceptLinks, ResumeContext } from "./graph/graphTypes";
 import { AgentMessage } from "./chat/AgentMessage";
 import { CoursePreviewCard } from "./chat/CoursePreviewCard";
+import { ModelReasoningPicker } from "./chat/ModelReasoningPicker";
+import { getTutorPersonaRequest } from "../services/tutorPersonaStore";
 import { appendChatMessage, createChatSession, getChatSession, setMessageCoursePreview } from "../services/chatSessionStore";
 import { getLearnerContext } from "../services/learnerContext";
 import { toTutorHistory } from "../domain/chatSession";
@@ -343,6 +345,7 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
           ...(learnerContext ? { learnerContext } : {}),
           history: toTutorHistory(previous),
           userQuestion: trimmed,
+          persona: getTutorPersonaRequest(),
         }),
       });
       if (response.status === 401) {
@@ -390,6 +393,70 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
     { label: "준비된 과정 둘러보기", icon: BookOpen, run: onBrowseCourses },
   ];
 
+  const plusMenu = (
+    <div ref={menuRef} className="relative shrink-0">
+      <button
+        type="button"
+        onClick={() => setMenuOpen((open) => !open)}
+        aria-haspopup="menu"
+        aria-expanded={menuOpen}
+        aria-label="더 보기"
+        className="flex h-11 w-11 items-center justify-center rounded-full text-[var(--lh-ink-secondary)] transition hover:bg-[var(--lh-surface-subtle)] hover:text-[var(--lh-ink)] cursor-pointer"
+      >
+        <Plus aria-hidden className={`h-5 w-5 transition-transform ${menuOpen ? "rotate-45" : ""}`} />
+      </button>
+      {menuOpen && (
+        <div role="menu" aria-label="입력 도구" className={`absolute left-0 z-20 min-w-56 rounded-2xl border border-[var(--lh-line)] bg-[var(--lh-surface)] p-1.5 text-sm shadow-lg ${started ? "bottom-12" : "top-12"}`}>
+          {menuItems.map(({ label, icon: Icon, run }) => (
+            <button
+              key={label}
+              type="button"
+              role="menuitem"
+              onClick={() => { setMenuOpen(false); run(); }}
+              className="flex min-h-11 w-full items-center gap-3 rounded-xl px-3 text-left transition hover:bg-[var(--lh-surface-subtle)] cursor-pointer"
+            >
+              <Icon aria-hidden className="h-4 w-4 text-[var(--lh-ink-secondary)]" />
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
+  const textField = (
+    <>
+      <label htmlFor="chat-input" className="sr-only">배우고 싶은 것을 물어보세요</label>
+      <textarea
+        id="chat-input"
+        ref={inputRef}
+        value={input}
+        onChange={(event) => setInput(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+            event.preventDefault();
+            void send(input);
+          }
+        }}
+        rows={1}
+        autoFocus={!started}
+        placeholder={flow ? "직접 적어서 답해도 돼요" : courseMode ? "어떤 과목을 만들까요?" : "배우고 싶은 것을 물어보세요"}
+        className={`lh-bare-input max-h-[200px] min-h-11 resize-none bg-transparent text-base leading-6 outline-none placeholder:text-[var(--lh-ink-tertiary)] ${isSignedIn ? "block w-full px-3 pb-1 pt-2.5" : "flex-1 px-2 py-2.5"}`}
+      />
+    </>
+  );
+
+  const sendButton = (
+    <button
+      type="submit"
+      disabled={!input.trim() || loading}
+      aria-label="보내기"
+      className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[var(--lh-primary)] text-white transition hover:bg-[var(--lh-primary-hover)] disabled:opacity-30 cursor-pointer disabled:cursor-default"
+    >
+      <ArrowUp aria-hidden className="h-4.5 w-4.5" />
+    </button>
+  );
+
   const composer = (
     <form
       onSubmit={(event) => { event.preventDefault(); void send(input); }}
@@ -402,60 +469,25 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
           <button type="button" onClick={() => setCourseMode(false)} aria-label="과목으로 만들기 끄기" className="flex h-6 w-6 items-center justify-center rounded-full text-[var(--lh-ink-tertiary)] transition hover:bg-[var(--lh-surface-subtle)] hover:text-[var(--lh-ink)] cursor-pointer"><X className="h-3.5 w-3.5" /></button>
         </div>
       )}
-      <div className="flex items-end gap-1 rounded-[32px] border border-[var(--lh-line-strong)] bg-[var(--lh-surface)] p-2 shadow-[var(--lh-shadow-md)] transition focus-within:border-[var(--lh-primary)]">
-        <div ref={menuRef} className="relative shrink-0">
-          <button
-            type="button"
-            onClick={() => setMenuOpen((open) => !open)}
-            aria-haspopup="menu"
-            aria-expanded={menuOpen}
-            aria-label="더 보기"
-            className="flex h-11 w-11 items-center justify-center rounded-full text-[var(--lh-ink-secondary)] transition hover:bg-[var(--lh-surface-subtle)] hover:text-[var(--lh-ink)] cursor-pointer"
-          >
-            <Plus aria-hidden className={`h-5 w-5 transition-transform ${menuOpen ? "rotate-45" : ""}`} />
-          </button>
-          {menuOpen && (
-            <div role="menu" aria-label="입력 도구" className={`absolute left-0 z-20 min-w-56 rounded-2xl border border-[var(--lh-line)] bg-[var(--lh-surface)] p-1.5 text-sm shadow-lg ${started ? "bottom-12" : "top-12"}`}>
-              {menuItems.map(({ label, icon: Icon, run }) => (
-                <button
-                  key={label}
-                  type="button"
-                  role="menuitem"
-                  onClick={() => { setMenuOpen(false); run(); }}
-                  className="flex min-h-11 w-full items-center gap-3 rounded-xl px-3 text-left transition hover:bg-[var(--lh-surface-subtle)] cursor-pointer"
-                >
-                  <Icon aria-hidden className="h-4 w-4 text-[var(--lh-ink-secondary)]" />
-                  {label}
-                </button>
-              ))}
+      {/* 로그인하면 글 칸 아래 줄에 도구(+), 모델·추론 선택, 보내기 버튼을 둡니다. 비로그인은 한 줄 그대로입니다. */}
+      <div className={`relative border border-[var(--lh-line-strong)] bg-[var(--lh-surface)] p-2 shadow-[var(--lh-shadow-md)] transition focus-within:border-[var(--lh-primary)] ${isSignedIn ? "flex flex-col gap-0.5 rounded-[28px]" : "flex items-end gap-1 rounded-[32px]"}`}>
+        {isSignedIn ? (
+          <>
+            {textField}
+            <div className="flex items-center gap-1">
+              {plusMenu}
+              <div className="min-w-0 flex-1" />
+              <ModelReasoningPicker direction="up" />
+              {sendButton}
             </div>
-          )}
-        </div>
-        <label htmlFor="chat-input" className="sr-only">배우고 싶은 것을 물어보세요</label>
-        <textarea
-          id="chat-input"
-          ref={inputRef}
-          value={input}
-          onChange={(event) => setInput(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
-              event.preventDefault();
-              void send(input);
-            }
-          }}
-          rows={1}
-          autoFocus={!started}
-          placeholder={flow ? "직접 적어서 답해도 돼요" : courseMode ? "어떤 과목을 만들까요?" : "배우고 싶은 것을 물어보세요"}
-          className="lh-bare-input max-h-[200px] min-h-11 flex-1 resize-none bg-transparent px-2 py-2.5 text-base leading-6 outline-none placeholder:text-[var(--lh-ink-tertiary)]"
-        />
-        <button
-          type="submit"
-          disabled={!input.trim() || loading}
-          aria-label="보내기"
-          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[var(--lh-primary)] text-white transition hover:bg-[var(--lh-primary-hover)] disabled:opacity-30 cursor-pointer disabled:cursor-default"
-        >
-          <ArrowUp aria-hidden className="h-4.5 w-4.5" />
-        </button>
+          </>
+        ) : (
+          <>
+            {plusMenu}
+            {textField}
+            {sendButton}
+          </>
+        )}
       </div>
     </form>
   );

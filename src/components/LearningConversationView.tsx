@@ -11,6 +11,8 @@ import { createFallbackLessonContent } from "../domain/lessonFallback";
 import { courseIsComplete } from "../domain/assessment";
 import { RichLessonRenderer } from "./notion/RichLessonRenderer";
 import { AgentMessage } from "./chat/AgentMessage";
+import { ModelReasoningPicker } from "./chat/ModelReasoningPicker";
+import { getTutorPersonaRequest } from "../services/tutorPersonaStore";
 import { PaneWorkspace } from "./workspace/PaneWorkspace";
 import type { PaneContext } from "./workspace/types";
 import { ResumeBanner } from "./graph/ResumeBanner";
@@ -45,6 +47,8 @@ interface LearningConversationViewProps {
   /** 지도에서 "문제 풀기"로 들어왔을 때 곧바로 문제를 띄웁니다. */
   autoStartPractice?: boolean;
   onOpenKnowledgeMap?: () => void;
+  /** 로그인했을 때만 입력바에 모델·추론 선택을 보여 줍니다. */
+  isSignedIn?: boolean;
 }
 
 interface ConversationMessage {
@@ -156,6 +160,7 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
   onBackToAssessment,
   autoStartPractice = false,
   onOpenKnowledgeMap,
+  isSignedIn = false,
 }) => {
   const historyKey = useMemo(() => getHistoryKey(course.id, lessonMeta.id), [course.id, lessonMeta.id]);
   const [content, setContent] = useState<LessonContent | null>(null);
@@ -404,6 +409,7 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
           history: boundedHistory(messages),
           userQuestion: trimmed,
           ...(depth ? { depth } : {}),
+          persona: getTutorPersonaRequest(),
         }),
       });
       if (response.status === 401) {
@@ -495,6 +501,7 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
           userAnswer: practiceAnswer.trim(),
           expectedAnswer: practiceQuestion.answer,
           quizType: practiceQuestion.quizType,
+          persona: getTutorPersonaRequest(),
         }),
       });
       if (response.status === 401) {
@@ -579,7 +586,13 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           currentConceptName: lessonMeta.conceptName,
-          steps: current.map((step) => ({ kind: step.kind, conceptName: nameIn(step.conceptId), becauseOfConceptName: nameIn(step.becauseOfConceptId) })),
+          // 이름을 모르는 칸은 빼고 보냅니다. 빈 문자열은 서버 검증에서 요청 전체가 거절됩니다.
+          steps: current.map((step) => {
+            const conceptName = nameIn(step.conceptId);
+            const becauseOfConceptName = nameIn(step.becauseOfConceptId);
+            return { kind: step.kind, ...(conceptName ? { conceptName } : {}), ...(becauseOfConceptName ? { becauseOfConceptName } : {}) };
+          }),
+          persona: getTutorPersonaRequest(),
         }),
         signal: controller.signal,
       });
@@ -1020,7 +1033,8 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
           >
             {/* 본문이 입력바 아래로 자연스럽게 사라지도록 위쪽 투명 → 아래 불투명 페이드를 깝니다. */}
             <div aria-hidden className="pointer-events-none absolute inset-x-0 -top-14 h-14 bg-gradient-to-t from-[var(--lh-chat-bg)] to-transparent" />
-            <div className="flex items-end gap-1 rounded-[32px] border border-[var(--lh-line-strong)] bg-[var(--lh-surface)] p-2 shadow-[var(--lh-shadow-md)] transition focus-within:border-[var(--lh-primary)]">
+            {/* 로그인하면 글 칸 아래 줄에 모델·추론 선택과 보내기 버튼을 둡니다. */}
+            <div className={`relative border border-[var(--lh-line-strong)] bg-[var(--lh-surface)] p-2 shadow-[var(--lh-shadow-md)] transition focus-within:border-[var(--lh-primary)] ${isSignedIn ? "flex flex-col gap-0.5 rounded-[28px]" : "flex items-end gap-1 rounded-[32px]"}`}>
               <label htmlFor="lesson-chat-input" className="sr-only">궁금한 내용을 물어보세요</label>
               <textarea
                 id="lesson-chat-input"
@@ -1034,16 +1048,19 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
                 }}
                 rows={1}
                 placeholder={awaitingReflection ? "해본 뒤 느낀 점을 한 줄로 적어 주세요" : "읽다가 궁금한 점을 바로 물어보세요"}
-                className="lh-bare-input max-h-[160px] min-h-11 flex-1 resize-none bg-transparent px-4 py-2.5 text-base leading-6 text-[var(--lh-ink)] outline-none placeholder:text-[var(--lh-ink-tertiary)]"
+                className={`lh-bare-input max-h-[160px] min-h-11 resize-none bg-transparent text-base leading-6 text-[var(--lh-ink)] outline-none placeholder:text-[var(--lh-ink-tertiary)] ${isSignedIn ? "block w-full px-3 pb-1 pt-2.5" : "flex-1 px-4 py-2.5"}`}
               />
-              <button
-                type="submit"
-                disabled={!input.trim() || isSending}
-                aria-label="보내기"
-                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[var(--lh-primary)] text-white transition hover:bg-[var(--lh-primary-hover)] disabled:cursor-default disabled:opacity-30 cursor-pointer"
-              >
-                <ArrowUp aria-hidden className="h-4.5 w-4.5" />
-              </button>
+              <div className={isSignedIn ? "flex items-center justify-end gap-1" : "contents"}>
+                {isSignedIn && <ModelReasoningPicker direction="up" />}
+                <button
+                  type="submit"
+                  disabled={!input.trim() || isSending}
+                  aria-label="보내기"
+                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[var(--lh-primary)] text-white transition hover:bg-[var(--lh-primary-hover)] disabled:cursor-default disabled:opacity-30 cursor-pointer"
+                >
+                  <ArrowUp aria-hidden className="h-4.5 w-4.5" />
+                </button>
+              </div>
             </div>
           </form>
         </section>
