@@ -1,8 +1,9 @@
-import type { ChatSession, NewChatMessage } from "../types/chat";
+import type { ChatCoursePreview, ChatSession, NewChatMessage } from "../types/chat";
 import {
   clampChatText,
   enforceChatLimits,
   isChatSessionList,
+  normalizeCoursePreview,
   normalizeNewMessage,
   titleFromFirstMessage,
 } from "../domain/chatSession";
@@ -71,6 +72,28 @@ export function appendChatMessage(id: string, message: NewChatMessage): ChatSess
   sessions[index] = updated;
   if (!write(sessions)) return null;
   return getChatSession(id) ?? updated;
+}
+
+/**
+ * 이미 저장된 메시지의 과목 미리보기를 바꾸거나(`null`이면 지운다) 붙인다. `messageIndex`는 `session.messages` 안의 위치다.
+ * 형식이 틀리거나 40,000자를 넘으면 아무것도 바꾸지 않고 null을 돌려준다. 세션당 3건 상한은 저장할 때 맞춘다.
+ * 다른 기기와 병합될 때 이 변경이 이기도록 updatedAt을 갱신한다.
+ */
+export function setMessageCoursePreview(id: string, messageIndex: number, preview: ChatCoursePreview | null): ChatSession | null {
+  const sessions = read();
+  const index = sessions.findIndex((session) => session.id === id);
+  if (index < 0 || !Number.isInteger(messageIndex)) return null;
+  const session = sessions[index];
+  const target = session.messages[messageIndex];
+  if (!target) return null;
+  const normalized = preview === null ? null : normalizeCoursePreview(preview);
+  if (preview !== null && !normalized) return null;
+  const { coursePreview: _previous, ...withoutPreview } = target;
+  const messages = [...session.messages];
+  messages[messageIndex] = normalized ? { ...withoutPreview, coursePreview: normalized } : withoutPreview;
+  sessions[index] = { ...session, updatedAt: new Date().toISOString(), messages };
+  if (!write(sessions)) return null;
+  return getChatSession(id) ?? sessions[index];
 }
 
 export function renameChatSession(id: string, title: string): boolean {

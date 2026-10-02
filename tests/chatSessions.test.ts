@@ -7,8 +7,9 @@ import {
   getChatSession,
   listChatSessions,
   renameChatSession,
+  setMessageCoursePreview,
 } from "../src/services/chatSessionStore";
-import { CHAT_LIMITS, mergeChatSessions, titleFromFirstMessage, toTutorHistory } from "../src/domain/chatSession";
+import { CHAT_LIMITS, chatSessionChars, mergeChatSessions, titleFromFirstMessage, toTutorHistory } from "../src/domain/chatSession";
 import { detectLearningIntent, resolveLearningIntent } from "../src/domain/learningIntent";
 import { buildLearnerContext } from "../src/domain/learnerContext";
 import { buildSidebarCourses, lessonConversationKey } from "../src/services/sidebarData";
@@ -250,4 +251,91 @@ test("toTutorHistory: 최근 12개, 한 줄 900자 이내", () => {
   const history = toTutorHistory(Array.from({ length: 20 }, (_, i) => ({ role: i % 2 ? "assistant" as const : "user" as const, text: `${i}${"가".repeat(2000)}` })));
   assert.equal(history.length, 12);
   assert.ok(history.every((item) => item.text.length <= 900));
+});
+
+const preview = (subject: string, extra: Record<string, unknown> = {}) => ({
+  subject,
+  setup: { level: "intermediate" as const, experience: "experienced" as const, levelEvidence: "채비는 어종에 맞춥니다.", goal: "취미·교양", dailyMinutes: 15 },
+  data: { preview: true, curriculum: { courseTitle: subject, chapters: [] }, ...extra },
+});
+
+test("coursePreview: 저장·정규화, 크기 초과·형식 오류는 필드만 버리고 메시지는 유지", () => {
+  const chat = createChatSession("낚시 배우고 싶어")!;
+  const ok = appendChatMessage(chat.id, { role: "assistant", text: "지도를 만들어 볼까요?", coursePreview: preview("낚시") })!;
+  assert.deepEqual(ok.messages[1].coursePreview, preview("낚시"));
+  assert.equal(JSON.parse(storage.getItem(LEARNHUB_STORAGE_KEYS.CHAT_SESSIONS)!)[0].messages[1].coursePreview.setup.levelEvidence, "채비는 어종에 맞춥니다.");
+
+  const big = appendChatMessage(chat.id, { role: "assistant", text: "너무 큰 미리보기", coursePreview: preview("낚시", { blob: "가".repeat(CHAT_LIMITS.maxPreviewChars) }) })!;
+  assert.equal(big.messages.at(-1)?.text, "너무 큰 미리보기");
+  assert.equal(big.messages.at(-1)?.coursePreview, undefined);
+  const edge = appendChatMessage(chat.id, { role: "assistant", text: "경계", coursePreview: { subject: "낚시", data: { s: "a".repeat(CHAT_LIMITS.maxPreviewChars - 8) } } })!;
+  assert.ok(edge.messages.at(-1)?.coursePreview, "JSON 40,000자 이하는 허용");
+
+  for (const bad of [{ subject: "", data: {} }, { subject: "낚시", data: [] }, { subject: "낚시", data: {}, extra: 1 }, { subject: "낚시", setup: { level: "expert" }, data: {} }, { subject: "낚시", setup: { nickname: "a" }, data: {} }]) {
+    const result = appendChatMessage(chat.id, { role: "assistant", text: "나쁜 미리보기", coursePreview: bad as never })!;
+    assert.equal(result.messages.at(-1)?.coursePreview, undefined);
+  }
+});
+
+test("coursePreview: 세션당 가장 최근 3건만 유지하고 오래된 것은 필드만 지운다", () => {
+  const chat = createChatSession("질문")!;
+  for (let i = 0; i < 5; i += 1) appendChatMessage(chat.id, { role: "assistant", text: `답 ${i}`, coursePreview: preview(`주제 ${i}`) });
+  const stored = getChatSession(chat.id)!;
+  assert.equal(stored.messages.length, 6, "메시지는 모두 남는다");
+  assert.deepEqual(stored.messages.filter((m) => m.coursePreview).map((m) => m.coursePreview!.subject), ["주제 2", "주제 3", "주제 4"]);
+  assert.equal(stored.messages[1].text, "답 0");
+});
+
+test("setMessageCoursePreview: 저장된 메시지의 미리보기를 갱신·삭제한다", () => {
+  const chat = createChatSession("질문")!;
+  appendChatMessage(chat.id, { role: "assistant", text: "카드", coursePreview: preview("낚시") });
+  const updated = setMessageCoursePreview(chat.id, 1, { ...preview("낚시"), setup: { level: "beginner", experience: "none" } })!;
+  assert.deepEqual(updated.messages[1].coursePreview?.setup, { level: "beginner", experience: "none" });
+  assert.ok(Date.parse(updated.updatedAt) >= Date.parse(chat.updatedAt));
+  assert.equal(setMessageCoursePreview(chat.id, 0, preview("첫 메시지"))?.messages[0].coursePreview?.subject, "첫 메시지");
+  assert.equal(setMessageCoursePreview(chat.id, 9, preview("x")), null, "없는 메시지");
+  assert.equal(setMessageCoursePreview("없는-id", 0, preview("x")), null);
+  assert.equal(setMessageCoursePreview(chat.id, 1, { subject: "낚시", data: { blob: "가".repeat(CHAT_LIMITS.maxPreviewChars) } }), null, "너무 크면 바꾸지 않음");
+  assert.equal(getChatSession(chat.id)?.messages[1].coursePreview?.setup?.level, "beginner");
+  assert.equal(setMessageCoursePreview(chat.id, 1, null)?.messages[1].coursePreview, undefined);
+  assert.equal(getChatSession(chat.id)?.messages[1].text, "카드");
+});
+
+test("coursePreview: 전체 글자 수에 포함되고, 백업·병합에서 보존되며 옛 스냅샷은 그대로 유효하다", () => {
+  const chat = createChatSession("질문")!;
+  const withPreview = appendChatMessage(chat.id, { role: "assistant", text: "카드", coursePreview: preview("낚시") })!;
+  const without = { ...withPreview, messages: withPreview.messages.map(({ coursePreview: _p, ...rest }) => rest) };
+  assert.ok(chatSessionChars(withPreview) > chatSessionChars(without) + 50, "미리보기 JSON이 글자 수에 포함");
+
+  // 미리보기가 큰 세션이 많으면 오래된 세션부터 밀려난다.
+  const heavy = Array.from({ length: 12 }, (_, i) => ({ id: `h${i}`, title: `h${i}`, createdAt: new Date(Date.UTC(2026, 9, 1, 0, i)).toISOString(), updatedAt: new Date(Date.UTC(2026, 9, 1, 0, i)).toISOString(),
+    messages: Array.from({ length: 3 }, () => ({ role: "assistant" as const, text: "카드", createdAt: "2026-10-01T00:00:00.000Z", coursePreview: { subject: "a", data: { s: "a".repeat(39_000) } } })) }));
+  const kept = mergeChatSessions([], heavy);
+  assert.ok(kept.length < heavy.length && kept[0].id === "h11");
+  assert.ok(kept.reduce((sum, item) => sum + chatSessionChars(item), 0) <= CHAT_LIMITS.maxTotalChars);
+
+  const backup = createLearningBackup(storage as unknown as Storage);
+  assert.equal(validateLearningBackup(backup).ok, true);
+  assert.deepEqual(backup.data.chatSessions?.[0].messages[1].coursePreview, preview("낚시"));
+  const four = structuredClone(backup);
+  four.data.chatSessions![0].messages = Array.from({ length: 4 }, () => ({ role: "assistant" as const, text: "x", createdAt: "2026-10-01T00:00:00.000Z", coursePreview: preview("a") }));
+  assert.equal(validateLearningBackup(four).ok, false, "한 세션에 4건은 거부");
+  const oversize = structuredClone(backup);
+  oversize.data.chatSessions![0].messages[1].coursePreview = { subject: "a", data: { s: "a".repeat(CHAT_LIMITS.maxPreviewChars) } };
+  assert.equal(validateLearningBackup(oversize).ok, false);
+
+  const other = new MemoryStorage();
+  const remote = { ...withPreview, id: "remote", updatedAt: "2026-10-03T00:00:00.000Z", messages: [{ role: "user" as const, text: "다른 기기", createdAt: "2026-10-03T00:00:00.000Z" }, { role: "assistant" as const, text: "카드", createdAt: "2026-10-03T00:00:00.000Z", coursePreview: preview("요리") }] };
+  other.setItem(LEARNHUB_STORAGE_KEYS.CHAT_SESSIONS, JSON.stringify([remote]));
+  const result = importLearningBackup(backup, { strategy: "merge", storage: other as unknown as Storage });
+  assert.equal(result.ok, true);
+  const merged = JSON.parse(other.getItem(LEARNHUB_STORAGE_KEYS.CHAT_SESSIONS)!) as ChatSession[];
+  assert.deepEqual(merged.map((item) => item.id).sort(), [chat.id, "remote"].sort());
+  assert.equal(merged.find((item) => item.id === "remote")?.messages[1].coursePreview?.subject, "요리");
+  assert.equal(merged.find((item) => item.id === chat.id)?.messages[1].coursePreview?.subject, "낚시");
+
+  // preview 필드가 없는 기존 저장값·스냅샷도 그대로 읽힌다.
+  storage.setItem(LEARNHUB_STORAGE_KEYS.CHAT_SESSIONS, JSON.stringify([session("legacy", "2026-10-01T00:00:00.000Z")]));
+  assert.equal(getChatSession("legacy")?.messages.length, 1);
+  assert.equal(validateLearningBackup(createLearningBackup(storage as unknown as Storage)).ok, true);
 });

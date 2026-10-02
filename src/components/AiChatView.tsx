@@ -1,17 +1,19 @@
 import React, { useEffect, useRef, useState } from "react";
-import { ArrowRight, ArrowUp, Bot, BookOpen, ListChecks, Loader2, Plus, Sparkles, X } from "lucide-react";
+import { ArrowRight, ArrowUp, BookOpen, ListChecks, Loader2, Plus, Sparkles, X } from "lucide-react";
 import type { Course } from "../types/learning";
 import { authorizedFetch } from "../services/authClient";
 import { addCuriosity } from "./graph/graphBridge";
 import type { CurriculumConceptLinks, ResumeContext } from "./graph/graphTypes";
+import { AgentMessage } from "./chat/AgentMessage";
 import { CoursePreviewCard } from "./chat/CoursePreviewCard";
-import { appendChatMessage, createChatSession, getChatSession } from "../services/chatSessionStore";
+import { appendChatMessage, createChatSession, getChatSession, setMessageCoursePreview } from "../services/chatSessionStore";
 import { getLearnerContext } from "../services/learnerContext";
 import { toTutorHistory } from "../domain/chatSession";
 import { detectLearningIntent, resolveLearningIntent } from "../domain/learningIntent";
 import type { NewChatMessage } from "../types/chat";
 import { savePendingChat, takePendingChat } from "./chat/pendingChat";
-import { restoreSetupFlow } from "./chat/restoreSetup";
+import { restorePreviewSetup, restoreSetupFlow } from "./chat/restoreSetup";
+import { findPreviewMessageIndex, toChatCoursePreview } from "./chat/previewPersist";
 import {
   SETUP_INTRO,
   SETUP_LEVEL_CHECK_NOTE,
@@ -40,6 +42,8 @@ interface ChatMessage {
   previewSubject?: string;
   /** 미리보기 카드가 처음 쓸 설정(대화로 정한 수준·목적·하루 시간) */
   previewSetup?: CourseSetup;
+  /** 저장해 둔 미리보기 결과. 있으면 다시 만들지 않고 그대로 그립니다. */
+  previewData?: Record<string, any>;
   /** 과목 설정 질문. 빠른 답 칩을 보여 줍니다. */
   setupQuestion?: { stepId: SetupStepId; answered?: string; question: string };
   /** 이 답 뒤로 과목 설정 질문이 시작됐는지. 그러면 같은 일을 하는 버튼은 숨깁니다. */
@@ -114,7 +118,10 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
       text: message.text,
       question: message.question,
       conceptName: message.conceptName,
-      previewSubject: message.learningIntent?.subject,
+      previewSubject: message.coursePreview?.subject ?? message.learningIntent?.subject,
+      // 저장된 설정(확인 질문으로 정해진 수준 포함)을 먼저 쓰고, 없는 예전 대화는 안내 문장과 질문·답에서 되살립니다.
+      previewSetup: message.coursePreview?.setup ?? (message.learningIntent ? restorePreviewSetup(initial.stored, index) : undefined),
+      previewData: message.coursePreview?.data,
       // 이 답 뒤로 설정 질문이 이어졌으면 '궁금해요/과목 만들기' 버튼은 숨깁니다.
       setupStarted: Boolean(message.question) && Boolean(initial.stored[index + 1]?.text.startsWith(SETUP_INTRO)),
       setupQuestion: initial.restored?.messageIndex === index ? { stepId: initial.restored.step.id, question: initial.restored.question } : undefined,
@@ -177,6 +184,14 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
       return;
     }
     appendChatMessage(id, message);
+  };
+
+  /** 새로 받은 미리보기 결과를 그 안내 메시지에 붙여 저장합니다. 다시 열 때 AI를 다시 부르지 않기 위해서입니다. */
+  const savePreview = (text: string, subject: string, data: Record<string, any>, setup: CourseSetup) => {
+    const id = sessionRef.current;
+    if (!isSignedIn || !id) return;
+    const index = findPreviewMessageIndex(getChatSession(id)?.messages ?? [], text, subject);
+    if (index >= 0) setMessageCoursePreview(id, index, toChatCoursePreview(subject, data, setup));
   };
 
   const addMessages = (...items: ChatMessage[]) => setMessages((previous) => [...previous, ...items]);
@@ -380,7 +395,7 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
   const composer = (
     <form
       onSubmit={(event) => { event.preventDefault(); void send(input); }}
-      className={`mx-auto w-full max-w-[760px] ${started ? "px-4 pb-4 pt-2 sm:px-6" : "px-4 sm:px-6"}`}
+      className={`mx-auto w-full max-w-[720px] ${started ? "px-4 pb-4 pt-2 sm:px-6" : "px-4 sm:px-6"}`}
     >
       {courseMode && (
         <div className="mb-2 flex items-center gap-2 px-2 text-xs text-[var(--lh-primary-text)]">
@@ -469,14 +484,37 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex-1 overflow-y-auto" aria-live="polite">
-        <div className="mx-auto w-full max-w-[760px] space-y-6 px-4 py-8 sm:px-6">
-          {messages.map((message, index) => (
-            <div key={message.id} className={`flex flex-col gap-3 ${message.role === "user" ? "items-end" : "items-start"}`}>
-              <div className={`max-w-[88%] rounded-3xl px-5 py-3.5 text-[15px] leading-7 ${message.role === "user" ? "bg-[var(--lh-primary)] text-white" : "text-[var(--lh-ink)]"}`}>
-                {message.role === "assistant" && <Bot aria-hidden className="mb-1.5 h-4 w-4 text-[var(--lh-ink-tertiary)]" />}
+        <div className="mx-auto w-full max-w-[720px] space-y-7 px-4 py-8 sm:px-6">
+          {messages.map((message, index) =>
+            message.role === "user" ? (
+              <div key={message.id} className="flex justify-end">
+                <div className="max-w-[88%] rounded-3xl bg-[var(--lh-primary)] px-5 py-3.5 text-base leading-7 text-white sm:max-w-[80%]">
+                  <p className="whitespace-pre-wrap">{message.text}</p>
+                </div>
+              </div>
+            ) : (
+              <AgentMessage
+                key={message.id}
+                showProfile={messages[index - 1]?.role !== "assistant"}
+                className={messages[index - 1]?.role === "assistant" ? "-mt-3" : ""}
+                card={
+                  message.previewSubject ? (
+                    <CoursePreviewCard
+                      subject={message.previewSubject}
+                      setup={message.previewSetup}
+                      initialData={message.previewData}
+                      onReady={(data, setup) => savePreview(message.text, message.previewSubject!, data, setup)}
+                      isSignedIn={isSignedIn}
+                      onStart={onStartCourse}
+                      onGuestStart={onGuestStartCourse}
+                      onRequestAuth={onRequestAuth}
+                    />
+                  ) : undefined
+                }
+              >
                 <p className="whitespace-pre-wrap">{message.text}</p>
                 {message.setupQuestion && (
-                  <div className="mt-3 flex flex-wrap gap-2" role="group" aria-label="빠른 답">
+                  <div className="mt-3.5 flex flex-wrap gap-2" role="group" aria-label="빠른 답">
                     {SETUP_STEPS[message.setupQuestion.stepId].options.map((option) => {
                       const answered = message.setupQuestion!.answered;
                       const active = !answered && !loading && flow?.step.id === message.setupQuestion!.stepId;
@@ -487,7 +525,7 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
                           disabled={!active}
                           aria-pressed={answered === option.label}
                           onClick={() => void answerStep(option.value, option.label)}
-                          className={`inline-flex min-h-9 items-center rounded-full border px-4 text-sm font-medium transition ${
+                          className={`inline-flex min-h-10 items-center rounded-full border px-4 text-[15px] font-medium transition ${
                             answered === option.label
                               ? "border-[var(--lh-primary)] bg-[var(--lh-primary)] text-white"
                               : "border-[var(--lh-primary-border)] bg-[var(--lh-surface)] text-[var(--lh-primary-text)] hover:bg-[var(--lh-primary-subtle)] disabled:opacity-40 cursor-pointer disabled:cursor-default"
@@ -498,12 +536,12 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
                       );
                     })}
                     {!message.setupQuestion.answered && !loading && flow?.step.id === message.setupQuestion.stepId && (
-                      <button type="button" onClick={skipRest} className="inline-flex min-h-9 items-center rounded-full px-3 text-sm text-[var(--lh-ink-tertiary)] underline-offset-2 transition hover:text-[var(--lh-ink)] hover:underline cursor-pointer">{SETUP_SKIP_OPTION.label}</button>
+                      <button type="button" onClick={skipRest} className="inline-flex min-h-10 items-center rounded-full px-3 text-[15px] text-[var(--lh-ink-tertiary)] underline-offset-2 transition hover:text-[var(--lh-ink)] hover:underline cursor-pointer">{SETUP_SKIP_OPTION.label}</button>
                     )}
                   </div>
                 )}
-                {message.role === "assistant" && message.question && !message.setupStarted && (
-                  <div className="mt-3 flex flex-wrap gap-2">
+                {message.question && !message.setupStarted && (
+                  <div className="mt-3.5 flex flex-wrap gap-2">
                     <button
                       type="button"
                       disabled={message.saved}
@@ -511,7 +549,7 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
                         addCuriosity(null, message.conceptName || toConceptName(message.question!), message.question!);
                         setMessages((items) => items.map((item, i) => (i === index ? { ...item, saved: true } : item)));
                       }}
-                      className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-[var(--lh-primary-border)] bg-[var(--lh-surface)] px-3.5 text-xs font-medium text-[var(--lh-primary-text)] transition hover:bg-[var(--lh-primary-subtle)] disabled:cursor-default disabled:opacity-70 cursor-pointer"
+                      className="inline-flex min-h-10 items-center gap-1.5 rounded-full border border-[var(--lh-primary-border)] bg-[var(--lh-surface)] px-4 text-sm font-medium text-[var(--lh-primary-text)] transition hover:bg-[var(--lh-primary-subtle)] disabled:cursor-default disabled:opacity-70 cursor-pointer"
                     >
                       {message.saved ? "지도에 저장했어요" : "궁금해요로 저장"}
                     </button>
@@ -521,27 +559,17 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
                         const subject = message.conceptName || toConceptName(message.question!);
                         if (!flow) beginSetup(subject);
                       }}
-                      className="inline-flex min-h-9 items-center gap-1.5 rounded-full bg-[var(--lh-primary)] px-3.5 text-xs font-medium text-white transition hover:bg-[var(--lh-primary-hover)] cursor-pointer"
+                      className="inline-flex min-h-10 items-center gap-1.5 rounded-full bg-[var(--lh-primary)] px-4 text-sm font-medium text-white transition hover:bg-[var(--lh-primary-hover)] cursor-pointer"
                     >
-                      <Sparkles aria-hidden className="h-3.5 w-3.5" /> 이걸로 과목 만들기
+                      <Sparkles aria-hidden className="h-4 w-4" /> 이걸로 과목 만들기
                     </button>
                   </div>
                 )}
-              </div>
-              {message.previewSubject && (
-                <CoursePreviewCard
-                  subject={message.previewSubject}
-                  setup={message.previewSetup}
-                  isSignedIn={isSignedIn}
-                  onStart={onStartCourse}
-                  onGuestStart={onGuestStartCourse}
-                  onRequestAuth={onRequestAuth}
-                />
-              )}
-            </div>
-          ))}
+              </AgentMessage>
+            ),
+          )}
           {loading && (
-            <div role="status" className="flex items-center gap-2 text-sm text-[var(--lh-ink-secondary)]">
+            <div role="status" className="flex items-center gap-2 pl-12 text-[15px] text-[var(--lh-ink-secondary)] sm:pl-[52px]">
               <Loader2 aria-hidden className="h-4 w-4 animate-spin" /> 답변을 준비하는 중...
             </div>
           )}
@@ -549,7 +577,7 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
         </div>
       </div>
       {composer}
-      <p className="pb-3 text-center text-[11px] text-[var(--lh-ink-tertiary)]">AI 답변은 틀릴 수 있어요. 중요한 내용은 다시 확인하세요.</p>
+      <p className="pb-3 text-center text-xs text-[var(--lh-ink-tertiary)]">AI 답변은 틀릴 수 있어요. 중요한 내용은 다시 확인하세요.</p>
     </div>
   );
 };

@@ -1,4 +1,5 @@
-import type { ChatSession, ChatSessionMessage, LearningIntent, NewChatMessage } from "../types/chat";
+import type { ChatCoursePreview, ChatSession, ChatSessionMessage, LearningIntent, NewChatMessage } from "../types/chat";
+import { sanitizeCourseSetup } from "./courseSetup";
 
 /** 저장 상한. 백업(8MB)과 클라우드 스냅샷 한도 안에 충분히 들어가도록 잡았다. */
 export const CHAT_LIMITS = {
@@ -6,8 +7,12 @@ export const CHAT_LIMITS = {
   maxMessagesPerSession: 60,
   maxTextLength: 4_000,
   maxTitleLength: 30,
-  /** 모든 세션의 글자 수 합. 넘으면 오래된 세션부터 버린다. */
-  maxTotalChars: 600_000,
+  /** 모든 세션의 글자 수 합(과목 미리보기 JSON 포함). 넘으면 오래된 세션부터 버린다. */
+  maxTotalChars: 1_200_000,
+  /** 미리보기 `data` 한 건의 JSON 글자 수. 넘으면 미리보기만 버리고 메시지는 남긴다. */
+  maxPreviewChars: 40_000,
+  /** 한 세션에서 coursePreview를 유지하는 메시지 수. 오래된 것은 필드만 제거한다. */
+  maxPreviewsPerSession: 3,
   /** tutor-chat 요청이 받는 history 한 줄의 최대 길이 */
   historyTextLength: 900,
   historyMessages: 12,
@@ -34,6 +39,26 @@ export function isLearningIntent(value: unknown): value is LearningIntent {
   return isRecord(value) && Object.keys(value).every((key) => key === "subject") && nonEmpty(value.subject, 160);
 }
 
+const previewJsonLength = (data: unknown): number => {
+  try { return JSON.stringify(data)?.length ?? Number.POSITIVE_INFINITY; } catch { return Number.POSITIVE_INFINITY; }
+};
+
+export function isChatCoursePreview(value: unknown): value is ChatCoursePreview {
+  if (!isRecord(value) || Object.keys(value).some((key) => !["subject", "setup", "data"].includes(key))) return false;
+  if (!nonEmpty(value.subject, 160) || !isRecord(value.data) || previewJsonLength(value.data) > CHAT_LIMITS.maxPreviewChars) return false;
+  if (value.setup === undefined) return true;
+  if (!isRecord(value.setup)) return false;
+  const clean = sanitizeCourseSetup(value.setup) as Record<string, unknown>;
+  return Object.keys(value.setup).every((key) => clean[key] !== undefined);
+}
+
+/** 저장 전 정규화. 형식이 틀리거나 너무 크면 null이라 호출한 쪽이 필드만 버린다. */
+export function normalizeCoursePreview(value: unknown): ChatCoursePreview | null {
+  if (!isChatCoursePreview(value)) return null;
+  const setup = value.setup === undefined ? undefined : sanitizeCourseSetup(value.setup);
+  return { subject: value.subject.trim(), ...(setup && Object.keys(setup).length > 0 ? { setup } : {}), data: value.data };
+}
+
 export function isChatMessage(value: unknown): value is ChatSessionMessage {
   return isRecord(value) &&
     (value.role === "user" || value.role === "assistant") &&
@@ -41,7 +66,8 @@ export function isChatMessage(value: unknown): value is ChatSessionMessage {
     date(value.createdAt) &&
     (value.question === undefined || str(value.question, 400)) &&
     (value.conceptName === undefined || str(value.conceptName, 400)) &&
-    (value.learningIntent === undefined || isLearningIntent(value.learningIntent));
+    (value.learningIntent === undefined || isLearningIntent(value.learningIntent)) &&
+    (value.coursePreview === undefined || isChatCoursePreview(value.coursePreview));
 }
 
 export function isChatSession(value: unknown): value is ChatSession {
@@ -52,11 +78,24 @@ export function isChatSession(value: unknown): value is ChatSession {
     date(value.updatedAt) &&
     Array.isArray(value.messages) &&
     value.messages.length <= CHAT_LIMITS.maxMessagesPerSession &&
-    value.messages.every(isChatMessage);
+    value.messages.every(isChatMessage) &&
+    value.messages.filter((message) => message.coursePreview !== undefined).length <= CHAT_LIMITS.maxPreviewsPerSession;
 }
 
 export const chatSessionChars = (session: ChatSession): number =>
-  session.title.length + session.messages.reduce((sum, message) => sum + message.text.length, 0);
+  session.title.length + session.messages.reduce((sum, message) => sum + message.text.length + (message.coursePreview ? previewJsonLength(message.coursePreview) : 0), 0);
+
+/** coursePreview가 있는 메시지는 가장 최근 N건만 남기고, 오래된 것은 필드만 지운다(메시지는 유지). */
+export function limitCoursePreviews(session: ChatSession): ChatSession {
+  const indexes = session.messages.flatMap((message, index) => (message.coursePreview ? [index] : []));
+  if (indexes.length <= CHAT_LIMITS.maxPreviewsPerSession) return session;
+  const drop = new Set(indexes.slice(0, indexes.length - CHAT_LIMITS.maxPreviewsPerSession));
+  return { ...session, messages: session.messages.map((message, index) => {
+    if (!drop.has(index)) return message;
+    const { coursePreview: _removed, ...rest } = message;
+    return rest;
+  }) };
+}
 
 /** 목록 전체가 상한 안에 있고 id가 겹치지 않는지 확인한다. */
 export function isChatSessionList(value: unknown): value is ChatSession[] {
@@ -68,9 +107,9 @@ export function isChatSessionList(value: unknown): value is ChatSession[] {
 /** 상한을 맞춘다: 세션당 메시지 수, 세션 수, 전체 글자 수 순서이며 오래된 것부터 버린다. */
 export function enforceChatLimits(sessions: ChatSession[]): ChatSession[] {
   const sorted = [...sessions]
-    .map((session) => session.messages.length > CHAT_LIMITS.maxMessagesPerSession
+    .map((session) => limitCoursePreviews(session.messages.length > CHAT_LIMITS.maxMessagesPerSession
       ? { ...session, messages: session.messages.slice(-CHAT_LIMITS.maxMessagesPerSession) }
-      : session)
+      : session))
     .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
     .slice(0, CHAT_LIMITS.maxSessions);
   let total = 0;
@@ -102,6 +141,8 @@ export function normalizeNewMessage(message: NewChatMessage, now: string): ChatS
   if (message.question) result.question = message.question.slice(0, 400);
   if (message.conceptName) result.conceptName = message.conceptName.slice(0, 400);
   if (message.learningIntent && isLearningIntent(message.learningIntent)) result.learningIntent = { subject: message.learningIntent.subject.trim() };
+  const preview = message.coursePreview === undefined ? null : normalizeCoursePreview(message.coursePreview);
+  if (preview) result.coursePreview = preview;
   return result;
 }
 

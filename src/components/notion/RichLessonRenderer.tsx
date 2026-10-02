@@ -55,7 +55,7 @@ export const RichLessonRenderer: React.FC<RichLessonRendererProps> = ({ content,
     blocks.push(
       <List
         key={`list-${blocks.length}`}
-        className={`${currentList.type === "ul" ? "list-disc" : "list-decimal"} my-2 ml-5 space-y-1 text-[15px] sm:text-base leading-[1.8] text-[var(--lh-ink)]`}
+        className={`${currentList.type === "ul" ? "list-disc" : "list-decimal"} my-2 ml-5 space-y-1 text-base leading-[1.75] text-[var(--lh-ink)]`}
       >
         {currentList.items.map((item, i) => <li key={i}>{item}</li>)}
       </List>
@@ -107,7 +107,7 @@ export const RichLessonRenderer: React.FC<RichLessonRendererProps> = ({ content,
         pendingMath = null;
         const remainder = line.slice(closeIndex + closing.length).trim();
         if (remainder) {
-          blocks.push(<p key={`${i}-remainder`} className="my-2.5 text-[15px] sm:text-base leading-[1.85] text-[var(--lh-ink)] break-keep">{renderInlineContent(remainder)}</p>);
+          blocks.push(<p key={`${i}-remainder`} className="my-3.5 text-base leading-[1.75] text-[var(--lh-ink)] break-keep">{renderInlineContent(remainder)}</p>);
         }
       } else {
         pendingMath.lines.push(line);
@@ -177,7 +177,7 @@ export const RichLessonRenderer: React.FC<RichLessonRendererProps> = ({ content,
     }
 
     flushList();
-    blocks.push(<p key={i} className="my-2.5 text-[15px] sm:text-base leading-[1.85] text-[var(--lh-ink)] break-keep">{renderInlineContent(line)}</p>);
+    blocks.push(<p key={i} className="my-3.5 text-base leading-[1.75] text-[var(--lh-ink)] break-keep">{renderInlineContent(line)}</p>);
   }
 
   if (codeFence) pushCodeBlock();

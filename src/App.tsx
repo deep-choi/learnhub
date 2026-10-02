@@ -557,7 +557,7 @@ export default function App() {
       {/* 2. Main Workspace Canvas Area */}
       <div className="relative flex flex-1 flex-col overflow-hidden">
         {/* Scrollable Viewport */}
-        <main id="learning-main" className="flex-1 overflow-y-auto bg-[var(--lh-canvas)]">
+        <main id="learning-main" className={`flex-1 overflow-y-auto ${activeView.type === "ai-chat" || activeView.type === "lesson" ? "bg-[var(--lh-chat-bg)]" : "bg-[var(--lh-canvas)]"}`}>
           {activeView.type === "courses" && (
             <CoursesView
               key={activeView.roadmapId || "all"}

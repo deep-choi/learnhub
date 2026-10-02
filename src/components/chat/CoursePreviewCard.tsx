@@ -1,12 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowRight, Loader2, Pencil } from "lucide-react";
+import { ArrowRight, ChevronDown, Loader2, Pencil } from "lucide-react";
 import type { Course } from "../../types/learning";
 import { authorizedFetch } from "../../services/authClient";
 import { validateCurriculumPayload } from "../../domain/contentValidation";
-import { GraphCanvas } from "../graph/GraphCanvas";
-import { buildCourseFromPayload, previewGraph, unwrapCurriculum } from "../graph/courseFromPayload";
+import { buildCourseFromPayload, unwrapCurriculum } from "../graph/courseFromPayload";
 import { existingConceptNames } from "../graph/graphBridge";
 import type { CurriculumConceptLinks } from "../graph/graphTypes";
+import { isUsablePreviewData } from "./previewPersist";
 import { SETUP_STEPS, courseRequestFromSetup, resolveCourseSetup, summarizeCourseSetup } from "../../domain/courseSetup";
 import type { CourseSetup, SetupOption, SetupStepId } from "../../types/courseSetup";
 
@@ -20,6 +20,10 @@ interface CoursePreviewCardProps {
   /** 로그인 전 사용자가 눌렀을 때: 같은 결과와 설정을 로그인 뒤에도 이어 쓰도록 넘깁니다. */
   onGuestStart: (subject: string, data: Record<string, any>, setup: CourseSetup) => void;
   onRequestAuth: () => void;
+  /** 저장해 둔 미리보기 결과. 있으면 AI를 부르지 않고 이 값으로 바로 그리며, 설정을 '수정'할 때만 다시 만듭니다. */
+  initialData?: Record<string, any>;
+  /** 새로 만든 미리보기를 받은 직후(처음, 수정 뒤)에 최종 설정과 함께 알립니다. 대화에 저장하는 데 씁니다. */
+  onReady?: (data: Record<string, any>, setup: CourseSetup) => void;
 }
 
 type State =
@@ -35,16 +39,25 @@ const isSelected = (setup: CourseSetup, option: SetupOption): boolean => {
 };
 
 /** 대화 안에 놓이는 과목 미리보기 카드. 개념 지도 미리보기와 설정 요약을 보여 주고, 눌러서 과목을 시작합니다. */
-export const CoursePreviewCard: React.FC<CoursePreviewCardProps> = ({ subject, isSignedIn, setup: initialSetup, onStart, onGuestStart, onRequestAuth }) => {
+export const CoursePreviewCard: React.FC<CoursePreviewCardProps> = ({ subject, isSignedIn, setup: initialSetup, onStart, onGuestStart, onRequestAuth, initialData, onReady }) => {
   const [setup, setSetup] = useState<CourseSetup>(initialSetup ?? {});
   const [draft, setDraft] = useState<CourseSetup>(initialSetup ?? {});
   const [editing, setEditing] = useState(false);
-  const [state, setState] = useState<State>({ status: "loading" });
+  const usableInitial = useMemo(() => isUsablePreviewData(initialData), []); // eslint-disable-line react-hooks/exhaustive-deps
+  const [state, setState] = useState<State>(() => (usableInitial && initialData ? { status: "ready", data: initialData } : { status: "loading" }));
+  const onReadyRef = useRef(onReady);
+  onReadyRef.current = onReady;
   const [attempt, setAttempt] = useState(0);
+  const [expanded, setExpanded] = useState(false);
   const startedRef = useRef(false);
   const resolved = resolveCourseSetup(setup);
+  const settingsKey = JSON.stringify(resolved);
+  // 저장된 결과를 그리는 동안은 같은 설정으로 다시 요청하지 않습니다. 설정이 바뀌면 새로 만듭니다.
+  const loadedKeyRef = useRef<string | null>(usableInitial ? settingsKey : null);
 
   useEffect(() => {
+    if (loadedKeyRef.current === settingsKey) return;
+    loadedKeyRef.current = null;
     const controller = new AbortController();
     setState({ status: "loading" });
     const run = async () => {
@@ -70,6 +83,7 @@ export const CoursePreviewCard: React.FC<CoursePreviewCardProps> = ({ subject, i
         if (!curriculum || validateCurriculumPayload(curriculum).length > 0) throw new Error("preview_invalid");
         if (controller.signal.aborted) return;
         setState({ status: "ready", data });
+        onReadyRef.current?.(data, setup);
       } catch {
         if (controller.signal.aborted) return;
         setState({ status: "error", message: "지도를 만들지 못했어요. 잠시 후 다시 시도해 주세요.", limited: false });
@@ -78,14 +92,14 @@ export const CoursePreviewCard: React.FC<CoursePreviewCardProps> = ({ subject, i
     void run();
     return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [subject, isSignedIn, attempt, JSON.stringify(resolved)]);
+  }, [subject, isSignedIn, attempt, settingsKey]);
 
   const built = useMemo(
     () => (state.status === "ready" ? buildCourseFromPayload(state.data, subject, resolved) : null),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [state, subject, JSON.stringify(resolved)],
+    [state, subject, settingsKey],
   );
-  const graph = useMemo(() => (built ? previewGraph(built.course, built.links) : null), [built]);
+  const lessonCount = built ? built.course.chapters.reduce((sum, chapter) => sum + chapter.lessons.length, 0) : 0;
 
   const handleStart = () => {
     if (state.status !== "ready" || !built || startedRef.current) return;
@@ -152,7 +166,7 @@ export const CoursePreviewCard: React.FC<CoursePreviewCardProps> = ({ subject, i
       {state.status === "loading" && (
         <div role="status" className="flex flex-col items-center gap-3 px-5 py-12 text-sm text-[var(--lh-ink-secondary)]">
           <Loader2 aria-hidden className="h-5 w-5 animate-spin text-[var(--lh-primary)]" />
-          <span>‘{subject}’에 필요한 개념들을 이어 보고 있어요…</span>
+          <span>‘{subject}’ 과정을 구성하고 있어요…</span>
         </div>
       )}
       {state.status === "error" && (
@@ -165,17 +179,44 @@ export const CoursePreviewCard: React.FC<CoursePreviewCardProps> = ({ subject, i
           )}
         </div>
       )}
-      {built && graph && (
-        <div className="relative">
-          <GraphCanvas
-            graph={graph}
-            variant="full"
-            ariaLabel={`‘${built.course.title}’ 개념 지도. 개념 ${graph.nodes.length}개.`}
-            className="h-[72vh] min-h-[420px] w-full"
-          />
-          <button type="button" onClick={handleStart} className="absolute bottom-4 right-4 inline-flex min-h-11 items-center justify-center gap-2 rounded-full bg-[var(--lh-primary)] px-6 text-sm font-medium text-white shadow-lg transition hover:bg-[var(--lh-primary-hover)] cursor-pointer">
-            이 지도로 시작하기 <ArrowRight aria-hidden className="h-4 w-4" />
-          </button>
+      {built && (
+        <div className="space-y-4 px-4 py-4 sm:px-5">
+          <div className="space-y-1.5">
+            <h3 className="text-lg font-medium leading-snug tracking-tight text-[var(--lh-ink)]">{built.course.title}</h3>
+            {built.course.summary && <p className="text-base leading-[1.75] text-[var(--lh-ink-secondary)]">{built.course.summary}</p>}
+            <p className="text-sm text-[var(--lh-ink-tertiary)]">{built.course.chapters.length}단계 · 레슨 {lessonCount}개 · 하루 {resolved.dailyMinutes}분</p>
+          </div>
+
+          {expanded && (
+            <ol id="course-steps" className="space-y-3">
+              {built.course.chapters.map((chapter, index) => (
+                <li key={chapter.id} className="rounded-2xl border border-[var(--lh-line)] p-4">
+                  <p className="flex items-center gap-2.5 text-base font-medium text-[var(--lh-ink)]">
+                    <span aria-hidden className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--lh-primary)] text-xs font-medium text-white">{index + 1}</span>
+                    {chapter.title}
+                  </p>
+                  <ul className="mt-2 list-disc space-y-1 pl-10 text-[15px] leading-6 text-[var(--lh-ink-secondary)]">
+                    {chapter.lessons.map((lesson) => <li key={lesson.id}>{lesson.title}</li>)}
+                  </ul>
+                </li>
+              ))}
+            </ol>
+          )}
+
+          <div className="flex flex-wrap items-center justify-end gap-2 border-t border-[var(--lh-line)] pt-3">
+            <button
+              type="button"
+              onClick={() => setExpanded((open) => !open)}
+              aria-expanded={expanded}
+              aria-controls="course-steps"
+              className="inline-flex min-h-11 items-center gap-1.5 rounded-full border border-[var(--lh-line-strong)] bg-[var(--lh-surface)] px-5 text-[15px] font-medium text-[var(--lh-ink)] transition hover:bg-[var(--lh-surface-subtle)] cursor-pointer"
+            >
+              {expanded ? "접기" : "단계 살펴보기"} <ChevronDown aria-hidden className={`h-4 w-4 transition ${expanded ? "rotate-180" : ""}`} />
+            </button>
+            <button type="button" onClick={handleStart} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-full bg-[var(--lh-primary)] px-6 text-[15px] font-medium text-white transition hover:bg-[var(--lh-primary-hover)] cursor-pointer">
+              이 과정으로 시작하기 <ArrowRight aria-hidden className="h-4 w-4" />
+            </button>
+          </div>
         </div>
       )}
     </section>

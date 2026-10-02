@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowRight,
   ArrowUp,
-  Bot,
   CheckCircle2,
   ChevronDown,
   CircleHelp,
@@ -18,6 +17,7 @@ import { validateLessonPayload } from "../domain/contentValidation";
 import { createFallbackLessonContent } from "../domain/lessonFallback";
 import { courseIsComplete } from "../domain/assessment";
 import { RichLessonRenderer } from "./notion/RichLessonRenderer";
+import { AgentMessage } from "./chat/AgentMessage";
 import { LessonCompletionModal } from "./notion/LessonCompletionModal";
 import { MiniGraphPanel } from "./graph/MiniGraphPanel";
 import { NextStepBlock } from "./graph/NextStepBlock";
@@ -648,7 +648,7 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
           </div>
         </aside>
 
-        <section className="flex min-h-[calc(100dvh-2rem)] w-full min-w-0 max-w-[900px] flex-col lg:order-1 lg:flex-1">
+        <section className="flex min-h-[calc(100dvh-2rem)] w-full min-w-0 max-w-[720px] flex-col lg:order-1 lg:flex-1">
           <div className="flex-1">
           {resume && (
             <div className="mb-5">
@@ -663,49 +663,46 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
             </div>
           )}
           <div className="space-y-5" aria-live="polite">
-            {messages.map((message, index) => (
-              <div key={`${message.sender}-${index}`} className={`flex w-full ${message.sender === "user" ? "justify-end" : "justify-start"}`}>
-                {message.sender === "tutor" ? (
-                  <div className="flex w-full gap-3">
-                    <span className="mt-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--lh-primary-subtle)] text-[var(--lh-primary-text)]"><Bot className="h-4 w-4" /></span>
-                    <div className="min-w-0 max-w-[820px] flex-1 text-[var(--lh-ink)]">
-                      <RichLessonRenderer content={message.text} />
-                      {message.tangent && (
-                        <div className="mt-4 rounded-2xl border border-[var(--lh-line)] bg-[var(--lh-surface-subtle)] p-4">
-                          <p className="text-sm leading-6 text-[var(--lh-ink)]">
-                            좋은 곁가지 질문이에요. ‘{message.tangent.conceptName}’{josa(message.tangent.conceptName, "은/는")} 지도에 <strong className="font-medium">궁금해요</strong>로 남겨 두고 나중에 이어서 볼 수 있어요.
-                          </p>
-                          <button
-                            type="button"
-                            onClick={() => saveTangent(index)}
-                            disabled={message.tangent.saved}
-                            className="mt-3 inline-flex min-h-9 items-center gap-2 rounded-full border border-[var(--lh-primary-border)] bg-[var(--lh-surface)] px-4 text-xs font-medium text-[var(--lh-primary-text)] transition hover:bg-[var(--lh-primary-subtle)] disabled:cursor-default disabled:opacity-70 cursor-pointer"
-                          >
-                            {message.tangent.saved ? "지도에 저장했어요" : "나중에 볼래요"}
-                          </button>
-                        </div>
-                      )}
-                      {index === messages.length - 1 && !isSending && !dismissedPrompts.has(index) && !practiceOpen && index > 0 && PRACTICE_OFFER.test(message.text) && (
-                        <div className="mt-4 flex flex-wrap gap-2">
-                          <button type="button" onClick={() => { setDismissedPrompts((previous) => new Set(previous).add(index)); void generatePractice(); }} className="rounded-full bg-[var(--lh-primary)] px-4 py-1.5 text-xs font-medium text-white transition hover:bg-[var(--lh-primary-hover)] cursor-pointer">좋아요, 풀어볼게요</button>
-                          <button type="button" onClick={() => setDismissedPrompts((previous) => new Set(previous).add(index))} className="rounded-full border border-[var(--lh-line-strong)] bg-[var(--lh-surface)] px-4 py-1.5 text-xs font-medium text-[var(--lh-ink-secondary)] transition hover:bg-[var(--lh-surface-subtle)] cursor-pointer">괜찮아요, 넘길게요</button>
-                        </div>
-                      )}
-                      {message.chips && message.chips.length > 0 && (
-                        <div className="mt-4 flex flex-wrap gap-2">
-                          {message.chips.map((chip) => <button type="button" key={chip} onClick={() => void sendQuestion(chip)} disabled={isSending} className="rounded-full border border-[var(--lh-primary-border)] bg-[var(--lh-primary-subtle)] px-3 py-1.5 text-xs font-medium text-[var(--lh-primary-text)] transition hover:bg-[var(--lh-primary)] hover:text-white disabled:opacity-40">{chip}</button>)}
-                        </div>
-                      )}
+            {messages.map((message, index) =>
+              message.sender === "tutor" ? (
+                <AgentMessage key={`${message.sender}-${index}`} showProfile={messages[index - 1]?.sender !== "tutor"} className={messages[index - 1]?.sender === "tutor" ? "-mt-2" : ""}>
+                  <RichLessonRenderer content={message.text} />
+                  {message.tangent && (
+                    <div className="mt-4 rounded-2xl border border-[var(--lh-line)] bg-[var(--lh-surface-subtle)] p-4">
+                      <p className="text-[15px] leading-6 text-[var(--lh-ink)]">
+                        좋은 곁가지 질문이에요. ‘{message.tangent.conceptName}’{josa(message.tangent.conceptName, "은/는")} 지도에 <strong className="font-medium">궁금해요</strong>로 남겨 두고 나중에 이어서 볼 수 있어요.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => saveTangent(index)}
+                        disabled={message.tangent.saved}
+                        className="mt-3 inline-flex min-h-10 items-center gap-2 rounded-full border border-[var(--lh-primary-border)] bg-[var(--lh-surface)] px-4 text-sm font-medium text-[var(--lh-primary-text)] transition hover:bg-[var(--lh-primary-subtle)] disabled:cursor-default disabled:opacity-70 cursor-pointer"
+                      >
+                        {message.tangent.saved ? "지도에 저장했어요" : "나중에 볼래요"}
+                      </button>
                     </div>
+                  )}
+                  {index === messages.length - 1 && !isSending && !dismissedPrompts.has(index) && !practiceOpen && index > 0 && PRACTICE_OFFER.test(message.text) && (
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <button type="button" onClick={() => { setDismissedPrompts((previous) => new Set(previous).add(index)); void generatePractice(); }} className="min-h-10 rounded-full bg-[var(--lh-primary)] px-4 text-sm font-medium text-white transition hover:bg-[var(--lh-primary-hover)] cursor-pointer">좋아요, 풀어볼게요</button>
+                      <button type="button" onClick={() => setDismissedPrompts((previous) => new Set(previous).add(index))} className="min-h-10 rounded-full border border-[var(--lh-line-strong)] bg-[var(--lh-surface)] px-4 text-sm font-medium text-[var(--lh-ink-secondary)] transition hover:bg-[var(--lh-surface-subtle)] cursor-pointer">괜찮아요, 넘길게요</button>
+                    </div>
+                  )}
+                  {message.chips && message.chips.length > 0 && (
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      {message.chips.map((chip) => <button type="button" key={chip} onClick={() => void sendQuestion(chip)} disabled={isSending} className="min-h-9 rounded-full border border-[var(--lh-primary-border)] bg-[var(--lh-primary-subtle)] px-3.5 text-sm font-medium text-[var(--lh-primary-text)] transition hover:bg-[var(--lh-primary)] hover:text-white disabled:opacity-40 cursor-pointer">{chip}</button>)}
+                    </div>
+                  )}
+                </AgentMessage>
+              ) : (
+                <div key={`${message.sender}-${index}`} className="flex w-full justify-end">
+                  <div className="max-w-[88%] rounded-3xl bg-[var(--lh-primary-subtle)] px-5 py-3.5 text-[var(--lh-primary-text)] sm:max-w-[80%]">
+                    <p className="whitespace-pre-wrap text-base leading-7">{message.text}</p>
                   </div>
-                ) : (
-                  <div className="max-w-[78%] rounded-2xl bg-[var(--lh-primary-subtle)] px-4 py-3 text-[var(--lh-primary-text)] sm:max-w-[70%]">
-                    <p className="whitespace-pre-wrap text-sm leading-7">{message.text}</p>
-                  </div>
-                )}
-              </div>
-            ))}
-            {isSending && <div className="flex items-center gap-2 text-sm text-[var(--lh-ink-secondary)]"><Loader2 className="h-4 w-4 animate-spin text-[var(--lh-primary)]" /> 학습 맥락을 확인해 답변을 만드는 중...</div>}
+                </div>
+              ),
+            )}
+            {isSending && <div className="flex items-center gap-2 pl-12 text-[15px] text-[var(--lh-ink-secondary)] sm:pl-[52px]"><Loader2 className="h-4 w-4 animate-spin text-[var(--lh-primary)]" /> 학습 맥락을 확인해 답변을 만드는 중...</div>}
           </div>
 
           {/* 1. 문제풀이 실전 점검 모드 */}
@@ -902,10 +899,10 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
               event.preventDefault();
               void sendQuestion(input);
             }}
-            className="sticky bottom-0 z-10 -mx-5 mt-14 bg-[var(--lh-canvas)] px-5 pb-4 pt-1 sm:-mx-0 sm:px-0"
+            className="sticky bottom-0 z-10 -mx-5 mt-14 bg-[var(--lh-chat-bg)] px-5 pb-4 pt-1 sm:-mx-0 sm:px-0"
           >
             {/* 본문이 입력바 아래로 자연스럽게 사라지도록 위쪽 투명 → 아래 불투명 페이드를 깝니다. */}
-            <div aria-hidden className="pointer-events-none absolute inset-x-0 -top-14 h-14 bg-gradient-to-t from-[var(--lh-canvas)] to-transparent" />
+            <div aria-hidden className="pointer-events-none absolute inset-x-0 -top-14 h-14 bg-gradient-to-t from-[var(--lh-chat-bg)] to-transparent" />
             <div className="mb-2 flex flex-wrap items-center gap-1.5 px-1" role="group" aria-label="설명 깊이와 문제">
               {DEPTH_OPTIONS.map((option, optionIndex) => {
                 const Icon = optionIndex === 0 ? Lightbulb : optionIndex === 1 ? CircleHelp : RotateCcw;
@@ -915,7 +912,7 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
                     key={option.depth}
                     onClick={() => void sendQuestion(option.question, option.depth)}
                     disabled={isSending}
-                    className="inline-flex min-h-8 items-center gap-1.5 rounded-full border border-[var(--lh-line)] bg-[var(--lh-surface)]/90 px-3 text-xs font-medium text-[var(--lh-ink-secondary)] backdrop-blur transition hover:border-[var(--lh-primary-border)] hover:bg-[var(--lh-primary-subtle)] hover:text-[var(--lh-primary-text)] disabled:opacity-40 cursor-pointer"
+                    className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-[var(--lh-line)] bg-[var(--lh-surface)]/90 px-3.5 text-sm font-medium text-[var(--lh-ink-secondary)] backdrop-blur transition hover:border-[var(--lh-primary-border)] hover:bg-[var(--lh-primary-subtle)] hover:text-[var(--lh-primary-text)] disabled:opacity-40 cursor-pointer"
                   >
                     <Icon aria-hidden className="h-3.5 w-3.5 text-[var(--lh-point)]" />
                     {option.label}
@@ -926,7 +923,7 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
                 type="button"
                 onClick={() => void generatePractice()}
                 disabled={isPracticeLoading}
-                className="inline-flex min-h-8 items-center gap-1.5 rounded-full border border-[var(--lh-line)] bg-[var(--lh-surface)]/90 px-3 text-xs font-medium text-[var(--lh-ink-secondary)] backdrop-blur transition hover:border-[var(--lh-primary-border)] hover:bg-[var(--lh-primary-subtle)] hover:text-[var(--lh-primary-text)] disabled:opacity-40 cursor-pointer"
+                className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-[var(--lh-line)] bg-[var(--lh-surface)]/90 px-3.5 text-sm font-medium text-[var(--lh-ink-secondary)] backdrop-blur transition hover:border-[var(--lh-primary-border)] hover:bg-[var(--lh-primary-subtle)] hover:text-[var(--lh-primary-text)] disabled:opacity-40 cursor-pointer"
               >
                 <CircleHelp aria-hidden className="h-3.5 w-3.5 text-[var(--lh-point)]" />
                 문제 풀기

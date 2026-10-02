@@ -1,3 +1,5 @@
+import type { CourseSetup } from "./courseSetup";
+
 /** 레슨에 묶이지 않은 자유 대화(최근 목록)의 저장 타입. */
 export interface ChatSessionMessage {
   role: "user" | "assistant";
@@ -9,6 +11,19 @@ export interface ChatSessionMessage {
   conceptName?: string;
   /** 이 답변에서 감지된 학습 의도. 새로고침 뒤 과목 미리보기 카드를 다시 띄울 때 씁니다. */
   learningIntent?: LearningIntent;
+  /** 이 메시지에 붙은 과목 미리보기 카드의 결과. 대화를 다시 열 때 AI를 다시 부르지 않고 이 값으로 그립니다. */
+  coursePreview?: ChatCoursePreview;
+}
+
+/**
+ * preview-course/analyze-subject 응답 전체와, 그 응답을 만들 때 쓴 최종 설정
+ * (확인 질문 답 `levelEvidence`와 그로 정해진 `level` 포함).
+ * `data`는 JSON으로 약 40,000자 이하이고, 세션당 가장 최근 3건만 남습니다.
+ */
+export interface ChatCoursePreview {
+  subject: string;
+  setup?: CourseSetup;
+  data: Record<string, unknown>;
 }
 
 /** `createdAt`은 저장소가 채웁니다. */
