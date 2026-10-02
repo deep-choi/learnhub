@@ -6,7 +6,7 @@ import type {
   TutorResponseLength,
 } from "../types/tutorPersona";
 
-export const PERSONA_LIMITS = { nameLength: 20, personalityLength: 300, imageDataUrlLength: 80_000 } as const;
+export const PERSONA_LIMITS = { nameLength: 20, roleLength: 20, toneLength: 40, personalityLength: 300, imageDataUrlLength: 80_000 } as const;
 
 export const DEFAULT_TUTOR_NAME = "LearnHub 튜터";
 /** 저장된 적 없는 기본 설정의 시각. 어느 기기에서 저장한 설정이든 이보다 늦다. */
@@ -91,7 +91,20 @@ export function normalizePersonaName(value: unknown): string | null {
   return name.length >= 1 && [...name].length <= PERSONA_LIMITS.nameLength && isAllowedPersonaText(name) ? name : null;
 }
 
-/** 성격 설명: 비어 있으면 undefined(없음), 300자 초과·부적절하면 null. */
+/** 한 줄 짧은 글(역할·말투): 비어 있으면 undefined(없음), 글자 수 초과·부적절하면 null. */
+function normalizeShortText(value: unknown, max: number): string | undefined | null {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "string") return null;
+  const text = clean(value);
+  if (text === "") return undefined;
+  return [...text].length <= max && isAllowedPersonaText(text) ? text : null;
+}
+/** 역할(예: '수학 선생님'): 20자 이하. */
+export const normalizePersonaRole = (value: unknown): string | undefined | null => normalizeShortText(value, PERSONA_LIMITS.roleLength);
+/** 말투(예: '친절하고 차분하게'): 자유 입력 40자 이하. */
+export const normalizePersonaTone = (value: unknown): string | undefined | null => normalizeShortText(value, PERSONA_LIMITS.toneLength);
+
+/** 성격과 행동 방식: 비어 있으면 undefined(없음), 300자 초과·부적절하면 null. */
 export function normalizePersonaPersonality(value: unknown): string | undefined | null {
   if (value === undefined || value === null) return undefined;
   if (typeof value !== "string") return null;
@@ -104,9 +117,11 @@ export function normalizePersonaPersonality(value: unknown): string | undefined 
 export function isTutorPersona(value: unknown): value is TutorPersona {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const persona = value as Record<string, unknown>;
-  if (!Object.keys(persona).every((key) => ["name", "avatar", "preset", "customPersonality", "responseLength", "updatedAt"].includes(key))) return false;
+  if (!Object.keys(persona).every((key) => ["name", "avatar", "role", "tone", "preset", "customPersonality", "responseLength", "updatedAt"].includes(key))) return false;
   return normalizePersonaName(persona.name) === persona.name &&
     (persona.avatar === undefined || isTutorAvatar(persona.avatar)) &&
+    (persona.role === undefined || (typeof persona.role === "string" && persona.role !== "" && normalizePersonaRole(persona.role) === persona.role)) &&
+    (persona.tone === undefined || (typeof persona.tone === "string" && persona.tone !== "" && normalizePersonaTone(persona.tone) === persona.tone)) &&
     isPersonaPreset(persona.preset) &&
     (persona.customPersonality === undefined || (typeof persona.customPersonality === "string" && persona.customPersonality !== "" && normalizePersonaPersonality(persona.customPersonality) === persona.customPersonality)) &&
     isResponseLength(persona.responseLength) &&
@@ -114,8 +129,8 @@ export function isTutorPersona(value: unknown): value is TutorPersona {
 }
 
 /** 서버로 보낼 값(이미지 제외). */
-export function toPersonaRequest(persona: Pick<TutorPersona, "name" | "preset" | "customPersonality" | "responseLength">): TutorPersonaRequest {
-  return { name: persona.name, preset: persona.preset, ...(persona.customPersonality ? { customPersonality: persona.customPersonality } : {}), responseLength: persona.responseLength };
+export function toPersonaRequest(persona: Pick<TutorPersona, "name" | "role" | "tone" | "preset" | "customPersonality" | "responseLength">): TutorPersonaRequest {
+  return { name: persona.name, ...(persona.role ? { role: persona.role } : {}), ...(persona.tone ? { tone: persona.tone } : {}), preset: persona.preset, ...(persona.customPersonality ? { customPersonality: persona.customPersonality } : {}), responseLength: persona.responseLength };
 }
 
 /** 두 기기의 설정 중 더 늦게 저장한 쪽을 쓴다. */

@@ -3,6 +3,7 @@ import { getApps, initializeApp } from "firebase-admin/app";
 import { getAuth as getAdminAuth } from "firebase-admin/auth";
 import { getFirestore, type DocumentReference, type Firestore } from "firebase-admin/firestore";
 import { withCloudStoreErrors } from "./cloudErrors";
+import { aiUsageLimitsEnabled } from "./aiUsageLimits";
 
 export interface FirebasePublicConfig {
   apiKey: string;
@@ -250,7 +251,7 @@ export const reserveFirebaseAiUsage = async (userId: string, requestedTokens: nu
     const policy = policySnapshot.exists ? policyFromSnapshot(policySnapshot, envPolicy) : envPolicy;
     const requests = Number(snapshot.get("requests") || 0);
     const reservedOutputTokens = Number(snapshot.get("reservedOutputTokens") || 0);
-    if (requests + 1 > policy.requestLimit || reservedOutputTokens + requestedTokens > policy.outputTokenLimit) {
+    if (aiUsageLimitsEnabled() && (requests + 1 > policy.requestLimit || reservedOutputTokens + requestedTokens > policy.outputTokenLimit)) {
       throw new FirebaseAiQuotaExceededError();
     }
     const usage = {

@@ -6,8 +6,9 @@ import { Type } from "@google/genai";
 import dotenv from "dotenv";
 import { compareAnswers } from "./src/utils/answerComparison";
 import { validateCurriculumPayload, validateLessonPayload } from "./src/domain/contentValidation";
-import { AiGateway, AiGatewayError } from "./server/aiGateway";
+import { AiGateway, AiGatewayError, reservedAiOutputTokens } from "./server/aiGateway";
 import { AiAdmissionController, isAllowedLoopbackRequest } from "./server/aiPolicy";
+import { aiUsageLimitsEnabled } from "./server/aiUsageLimits";
 import { configureFirebaseAuth, isAuthConfigured, verifyAccessToken } from "./server/auth";
 import { configureFirebaseCloudStore, createContentReport, getLearningSnapshot, putLearningSnapshot } from "./server/cloudStore";
 import { deleteFirebaseAccountData, FirebaseAiQuotaExceededError, getFirebaseAiUsage, getFirebasePublicConfig, reserveFirebaseAiUsage } from "./server/firebaseProvider";
@@ -19,10 +20,8 @@ import { PreviewQuota, reserveFirestorePreview } from "./server/previewQuota";
 import { installUnhandledRejectionLogger } from "./server/runtimeSafety";
 import { learningSafetyPrompt } from "./server/learningSafety";
 import { personaOutputTokens, personaPrompt, sanitizePersona } from "./server/tutorPersona";
-import { defaultAiSelectionFor, publicAiAvailability } from "./server/aiAvailability";
+import { configuredSelectionOrDefault, defaultAiSelectionFor, publicAiAvailability } from "./server/aiAvailability";
 import {
-  AI_MODEL_CATALOG,
-  AI_OUTPUT_TOKEN_OPTIONS,
   isAiRuntimeSelection,
   type AiRuntimeSelection,
 } from "./src/domain/aiModels";
@@ -133,6 +132,7 @@ const positiveEnvInteger = (name: string, fallback: number): number => {
   return value;
 };
 const aiPolicy = new AiAdmissionController({
+  usageLimitsEnabled: aiUsageLimitsEnabled(),
   maxConcurrent: positiveEnvInteger("AI_MAX_CONCURRENT", 4),
   maxRequestsPerClientPerMinute: positiveEnvInteger("AI_REQUESTS_PER_USER_PER_MINUTE", 12),
   dailyRequestBudget: positiveEnvInteger("AI_GLOBAL_REQUESTS_PER_DAY", 10_000),
@@ -143,15 +143,17 @@ const aiPolicy = new AiAdmissionController({
 const aiGateway = new AiGateway({
   geminiApiKey: process.env.GEMINI_API_KEY,
   openAiApiKey: process.env.OPENAI_API_KEY,
+  anthropicApiKey: process.env.ANTHROPIC_API_KEY,
   policy: aiPolicy,
 });
 // Accept forwarding headers only when the operator configures trusted proxy hops.
 const previewProxyHops = Number(process.env.PREVIEW_TRUSTED_PROXY_HOPS || 0);
 if (!Number.isInteger(previewProxyHops) || previewProxyHops < 0 || previewProxyHops > 5) throw new Error("PREVIEW_TRUSTED_PROXY_HOPS 설정을 확인해 주세요.");
 app.set("trust proxy", previewProxyHops);
-const previewGateway = new AiGateway({ geminiApiKey: process.env.GEMINI_API_KEY, openAiApiKey: process.env.OPENAI_API_KEY,
-  policy: new AiAdmissionController({ maxConcurrent: 2, dailyRequestBudget: 100, perClientDailyRequestBudget: 3, dailyOutputTokenBudget: 260000, perClientDailyOutputTokenBudget: 7800 }) });
+const previewGateway = new AiGateway({ geminiApiKey: process.env.GEMINI_API_KEY, openAiApiKey: process.env.OPENAI_API_KEY, anthropicApiKey: process.env.ANTHROPIC_API_KEY,
+  policy: new AiAdmissionController({ usageLimitsEnabled: aiUsageLimitsEnabled(), maxConcurrent: 2, dailyRequestBudget: 100, perClientDailyRequestBudget: 3, dailyOutputTokenBudget: 260000, perClientDailyOutputTokenBudget: 7800 }) });
 const previewQuota = new PreviewQuota({
+  usageLimitsEnabled: aiUsageLimitsEnabled(),
   perIp: positiveEnvInteger("PREVIEW_REQUESTS_PER_IP_PER_DAY", 3), globalLimit: positiveEnvInteger("PREVIEW_GLOBAL_REQUESTS_PER_DAY", 100),
   ...(process.env.NODE_ENV === "production" ? { durableReserve: reserveFirestorePreview } : {}),
 });
@@ -190,7 +192,8 @@ const aiSelectionFor = (req: Request): AiRuntimeSelection => {
     maxOutputTokens: Number(maxOutputTokens),
   };
   if (!isAiRuntimeSelection(candidate)) throw new AiGatewayError("AI_INVALID_REQUEST", 400);
-  return candidate;
+  // 키가 없는 제공자("준비 중")를 고른 채로 보내면 기본 모델로 답한다.
+  return configuredSelectionOrDefault(candidate, (configured) => aiGateway.isConfigured(configured));
 };
 
 /** 서버에 키가 설정된 제공자와 그 모델. 비밀 값은 없고 설정 여부만 담는다. */
@@ -261,17 +264,13 @@ app.get("/api/ai/config", async (req, res) => {
       return res.status(503).json({ error: "AI 사용량을 확인할 수 없습니다.", code: "AI_QUOTA_UNAVAILABLE" });
     }
   }
+  const ai = aiAvailability();
   return res.json({
-    providers: {
-      openai: { configured: aiGateway.isConfigured("openai") },
-      gemini: { configured: aiGateway.isConfigured("gemini") },
-    },
-    models: AI_MODEL_CATALOG.map((model) => ({
-      ...model,
-      available: aiGateway.isConfigured(model.provider),
-    })),
-    outputTokenOptions: [...AI_OUTPUT_TOKEN_OPTIONS],
+    providers: ai.providers,
+    models: ai.models,
+    outputTokenOptions: ai.outputTokenOptions,
     limits: {
+      enabled: quota.limits.enabled,
       requestsPerMinute: quota.limits.requestsPerMinute,
       requestsPerDay: durableUsage?.requestLimit ?? quota.limits.requestsPerDay,
       reservedOutputTokensPerDay: durableUsage?.outputTokenLimit ?? quota.limits.reservedOutputTokensPerDay,
@@ -297,6 +296,8 @@ const sendAiError = (res: Response, error: unknown) => {
       AI_INVALID_REQUEST: "AI 요청 형식을 확인해 주세요.",
       AI_UNAVAILABLE: "AI 기능을 잠시 사용할 수 없습니다.",
     };
+    if (error.detail === "refusal") return res.status(error.httpStatus).json({ error: "AI가 이 요청에는 답하지 않았어요. 질문을 조금 바꿔서 다시 시도해 주세요.", code: error.code });
+    if (error.detail === "truncated") return res.status(error.httpStatus).json({ error: "답변이 완성되기 전에 끊겼어요. 다시 요청해 주세요.", code: error.code });
     return res.status(error.httpStatus).json({ error: messages[error.code] || messages.AI_UNAVAILABLE, code: error.code });
   }
   return res.status(503).json({ error: "AI 기능을 잠시 사용할 수 없습니다.", code: "AI_UNAVAILABLE" });
@@ -306,7 +307,7 @@ type JsonConfig = Parameters<AiGateway["generateJson"]>[0]["config"];
 const runAi = async <T>(req: Request, res: Response, endpoint: string, prompt: string, config: JsonConfig, maxOutputTokens: number, validate: (payload: unknown) => string[]) => {
   try {
     const selection = aiSelectionFor(req);
-    const reservedOutputTokens = Math.min(maxOutputTokens, selection.maxOutputTokens);
+    const reservedOutputTokens = reservedAiOutputTokens(selection, maxOutputTokens);
     if (typeof res.locals.userId === "string") await reserveFirebaseAiUsage(res.locals.userId, reservedOutputTokens);
     const safePrompt = `${learningSafetyPrompt(typeof req.body?.targetAudience === "string" ? req.body.targetAudience : undefined)}\n${prompt}`;
     const result = await aiGateway.generateJson<T>({ endpoint, requestId: res.locals.requestId, clientKey: clientKeyFor(req, res), prompt: safePrompt, config, maxOutputTokens, selection, validate });
@@ -420,7 +421,7 @@ app.post("/api/ai/evaluate-quiz", async (req, res) => {
   const basePrompt = `엄밀하고 친절한 학습 채점관입니다. 개념: "${body.conceptName}" 질문: "${body.question}" 정답 기준: "${body.expectedAnswer}" 제출 답안: "${body.userAnswer}" 유형: "${body.quizType}". 확실하지 않으면 status를 unknown으로 반환하고 오답으로 단정하지 마세요. JSON만 반환하세요.`;
   const prompt = `${basePrompt}${personaPrompt(sanitizePersona(body.persona))}`;
   try {
-    const result = await aiGateway.generateJson<Record<string, unknown>>({ endpoint: "evaluate-quiz", requestId: res.locals.requestId, clientKey: clientKeyFor(req, res), prompt, config: { responseMimeType: "application/json", responseSchema: evaluationSchema }, maxOutputTokens: 1500, maxReasoningEffort: "low", selection: aiSelectionFor(req), validate: (payload) => isRecord(payload) && typeof payload.isCorrect === "boolean" && typeof payload.feedback === "string" ? [] : ["invalid"] });
+    const result = await aiGateway.generateJson<Record<string, unknown>>({ endpoint: "evaluate-quiz", requestId: res.locals.requestId, clientKey: clientKeyFor(req, res), prompt, config: { responseMimeType: "application/json", responseSchema: evaluationSchema }, maxOutputTokens: 4096, maxReasoningEffort: "low", selection: aiSelectionFor(req), validate: (payload) => isRecord(payload) && typeof payload.isCorrect === "boolean" && typeof payload.feedback === "string" ? [] : ["invalid"] });
     const data = result.payload;
     if (data.status === "unknown") return res.json({ status: "unknown", isCorrect: null, feedback: "답안을 확실히 판정하기 어려워 오답으로 기록하지 않았습니다. 다른 표현으로 다시 제출해 보세요.", hint: typeof data.hint === "string" ? data.hint : undefined });
     return res.json({ ...data, status: "scored" });
@@ -440,7 +441,7 @@ app.post("/api/ai/generate-practice", async (req, res) => {
   const fields = ["courseTitle", "chapterTitle", "lessonTitle", "learningType", "level", "conceptId", "conceptName", "lessonContext"];
   if (!isRecord(body) || !hasOnlyKeys(body, fields) || ["courseTitle", "chapterTitle", "lessonTitle", "level", "conceptId", "conceptName"].some((key) => boundedString(body, key, 400) === null) || boundedString(body, "lessonContext", 8_000) === null || !isAllowed(body.learningType, LEARNING_TYPES)) return invalidBody(res, "문제 생성 설정을 확인해 주세요.");
   const prompt = `학습 주제와 수준에 맞춰 안내하는 개인 튜터입니다. 과목: "${body.courseTitle}" 챕터: "${body.chapterTitle}" 레슨: "${body.lessonTitle}" 학습 유형: "${body.learningType}" 수준: "${body.level}" 개념: "${body.conceptName}" (${body.conceptId}). 현재 학습 내용: "${body.lessonContext}". 문제 지문은 이 주제를 처음 배우는 학습자도 이해할 수 있는 짧고 쉬운 한국어로 작성하되, 대학·대학원 개념의 정확한 조건은 빠뜨리지 마세요. 방금 배운 내용을 확인하는 문제를 딱 1개 생성하세요. 학습자가 직접 생각해야 하므로 정답이나 풀이를 질문에 넣지 마세요. 객관식이면 서로 겹치지 않는 선택지 3~4개와 선택지 중 하나인 정답을 만들고, 단답형이면 짧은 답을 허용하세요. 힌트는 정답을 바로 말하지 않는 단계별 힌트 2개를 만드세요. 지정된 JSON만 반환하세요.`;
-  return runAi(req, res, "generate-practice", prompt, { responseMimeType: "application/json", responseSchema: practiceSchema }, 1100, validatePracticePayload);
+  return runAi(req, res, "generate-practice", prompt, { responseMimeType: "application/json", responseSchema: practiceSchema }, 8192, validatePracticePayload);
 });
 
 app.post("/api/ai/generate-review", async (req, res) => {
@@ -448,7 +449,7 @@ app.post("/api/ai/generate-review", async (req, res) => {
   const body = req.body;
   if (!isRecord(body) || !hasOnlyKeys(body, ["weakConcepts"]) || !Array.isArray(body.weakConcepts) || body.weakConcepts.length < 1 || body.weakConcepts.length > 20 || body.weakConcepts.some((item) => !isRecord(item) || boundedString(item, "conceptName", 200) === null || boundedString(item, "courseTitle", 200) === null || typeof item.understanding !== "number" || !Number.isFinite(item.understanding) || item.understanding < 0 || item.understanding > 100)) return invalidBody(res, "복습 대상 개념을 확인해 주세요.");
   const prompt = `전 연령 학습자를 위한 복습 기획자입니다. 취약 개념:\n${JSON.stringify(body.weakConcepts)}\n3~5개의 짧은 복습 퀴즈를 생성하고 JSON만 반환하세요.`;
-  return runAi(req, res, "generate-review", prompt, { responseMimeType: "application/json", responseSchema: reviewSchema }, 1800, validateReviewPayload);
+  return runAi(req, res, "generate-review", prompt, { responseMimeType: "application/json", responseSchema: reviewSchema }, 8192, validateReviewPayload);
 });
 
 app.get("/api/learning-snapshot", async (req, res) => {

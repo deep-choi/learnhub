@@ -49,6 +49,7 @@ export const AgentMessage: React.FC<AgentMessageProps> = ({ showProfile, childre
             >
               {persona.name}
             </button>
+            {persona.role && <span className="ml-2 text-xs font-normal text-[var(--lh-ink-tertiary)]">{persona.role}</span>}
           </p>
         </div>
       )}

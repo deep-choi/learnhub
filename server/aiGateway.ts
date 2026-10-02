@@ -12,6 +12,14 @@ import {
   type AiRuntimeSelection,
 } from "../src/domain/aiModels";
 import { AiAdmissionController } from "./aiPolicy";
+import {
+  AnthropicProviderError,
+  claudeRequestPlan,
+  createAnthropicClient,
+  generateClaudeJson,
+  type AnthropicClientLike,
+  type ClaudeFailureKind,
+} from "./anthropicProvider";
 import { generalLearningSafetyPrompt } from "./learningSafety";
 
 export const AI_TIMEOUT_MS = 20_000;
@@ -75,6 +83,8 @@ export class AiGatewayError extends Error {
     public readonly code: "AI_NOT_CONFIGURED" | "AI_UNAVAILABLE" | "AI_ADMISSION_REJECTED" | "AI_INVALID_OUTPUT" | "AI_INVALID_REQUEST",
     public readonly httpStatus: 400 | 429 | 502 | 503,
     public readonly admissionReason?: string,
+    /** Extra detail for the user-facing message, e.g. a model refusal reported as AI_INVALID_OUTPUT. */
+    public readonly detail?: "refusal" | "truncated",
   ) {
     super(code);
     this.name = "AiGatewayError";
@@ -108,6 +118,19 @@ export const capReasoningEffort = (
   const ranked = [...supported].sort((a, b) => EFFORT_ORDER.indexOf(a) - EFFORT_ORDER.indexOf(b));
   const allowed = ranked.filter((candidate) => EFFORT_ORDER.indexOf(candidate) <= EFFORT_ORDER.indexOf(cap));
   return allowed.length > 0 ? allowed[allowed.length - 1] : (ranked[0] ?? effort);
+};
+
+/** Shared by durable account quotas and the gateway's process-local admission limits. */
+export const reservedAiOutputTokens = (
+  selection: AiRuntimeSelection,
+  outputLimit: number,
+  effortCap?: AiReasoningEffort,
+): number => {
+  const outputTokens = Math.min(outputLimit, selection.maxOutputTokens);
+  if (selection.provider !== "anthropic") return outputTokens;
+  const model = getAiModel(selection.provider, selection.model);
+  const effort = capReasoningEffort(selection.reasoningEffort, effortCap, model?.reasoningEfforts ?? []);
+  return claudeRequestPlan(selection.model, effort, outputTokens).maxTokens;
 };
 
 const thinkingLevel = (effort: AiRuntimeSelection["reasoningEffort"]): ThinkingLevel => {
@@ -202,10 +225,20 @@ const outputShape = (value: unknown): Record<string, unknown> => {
   };
 };
 
+/** Claude SDK failures mapped onto the gateway's existing codes. */
+const CLAUDE_FAILURES: Record<ClaudeFailureKind, { code: AiGatewayError["code"]; httpStatus: AiGatewayError["httpStatus"]; status: AiGatewayLoggerEvent["status"]; admissionReason?: string }> = {
+  rate_limited: { code: "AI_ADMISSION_REJECTED", httpStatus: 429, status: "admission_rejected", admissionReason: "provider_rate_limited" },
+  auth: { code: "AI_NOT_CONFIGURED", httpStatus: 503, status: "unavailable" },
+  bad_request: { code: "AI_INVALID_REQUEST", httpStatus: 400, status: "invalid_input" },
+  unavailable: { code: "AI_UNAVAILABLE", httpStatus: 503, status: "unavailable" },
+};
+
 export class AiGateway {
   private readonly geminiClient: AiModelsClient | null;
   private readonly openAiApiKey: string | null;
   private readonly openAiFetch: typeof fetch;
+  private readonly anthropicApiKey: string | null;
+  private anthropicClient: AnthropicClientLike | null;
   private readonly policy: AiAdmissionController;
   private readonly logger: (event: AiGatewayLoggerEvent) => void;
 
@@ -216,6 +249,9 @@ export class AiGateway {
     openAiApiKey?: string;
     client?: AiModelsClient | null;
     openAiFetch?: typeof fetch;
+    anthropicApiKey?: string;
+    /** Tests inject a mock; otherwise the SDK client is created on first use, only when the key exists. */
+    anthropicClient?: AnthropicClientLike | null;
     policy?: AiAdmissionController;
     logger?: (event: AiGatewayLoggerEvent) => void;
   } = {}) {
@@ -234,6 +270,8 @@ export class AiGateway {
       : options.client;
     this.openAiApiKey = options.openAiApiKey?.trim() || null;
     this.openAiFetch = options.openAiFetch || fetch;
+    this.anthropicApiKey = options.anthropicApiKey?.trim() || null;
+    this.anthropicClient = options.anthropicClient ?? null;
     this.policy = options.policy ?? new AiAdmissionController();
     this.logger = options.logger ?? ((event) => console.info(JSON.stringify(event)));
   }
@@ -241,7 +279,13 @@ export class AiGateway {
   isConfigured(provider?: AiRuntimeSelection["provider"]): boolean {
     if (provider === "openai") return this.openAiApiKey !== null;
     if (provider === "gemini") return this.geminiClient !== null;
-    return this.openAiApiKey !== null || this.geminiClient !== null;
+    if (provider === "anthropic") return this.anthropicApiKey !== null || this.anthropicClient !== null;
+    return this.openAiApiKey !== null || this.geminiClient !== null || this.anthropicApiKey !== null || this.anthropicClient !== null;
+  }
+
+  private claudeClient(): AnthropicClientLike {
+    this.anthropicClient ??= createAnthropicClient(this.anthropicApiKey!, AI_TIMEOUT_MS);
+    return this.anthropicClient;
   }
 
   getQuotaSnapshot(clientKey: string) {
@@ -282,7 +326,9 @@ export class AiGateway {
     }
 
     const maxOutputTokens = Math.min(Math.floor(request.maxOutputTokens), selection.maxOutputTokens);
-    const admission = this.policy.tryAcquire(request.clientKey, maxOutputTokens);
+    // Claude Haiku's thinking budget is sent on top of the output limit, so reserve it too.
+    const reservedOutputTokens = reservedAiOutputTokens(selection, maxOutputTokens);
+    const admission = this.policy.tryAcquire(request.clientKey, reservedOutputTokens);
     if (!admission.lease) {
       status = "admission_rejected";
       admissionReason = admission.reason;
@@ -294,6 +340,8 @@ export class AiGateway {
     const timeout = setTimeout(() => abortController.abort(), AI_TIMEOUT_MS);
     try {
       let text = "";
+      let finishReason: string | undefined;
+      let thinkingTokenCount: number | null = null;
       if (selection.provider === "gemini") {
         const response = await this.geminiClient!.models.generateContent({
           model: selection.model,
@@ -311,7 +359,30 @@ export class AiGateway {
           },
         });
         usage = readGeminiUsage(response);
+        finishReason = response.candidates?.[0]?.finishReason;
+        thinkingTokenCount = finiteOrNull(response.usageMetadata?.thoughtsTokenCount);
         text = response.text || "";
+      } else if (selection.provider === "anthropic") {
+        const result = await generateClaudeJson(this.claudeClient(), {
+          model: selection.model,
+          reasoningEffort: selection.reasoningEffort,
+          system: generalLearningSafetyPrompt(),
+          prompt: request.prompt,
+          responseSchema: request.config.responseSchema,
+          maxOutputTokens,
+        }, { signal: abortController.signal, timeoutMs: AI_TIMEOUT_MS });
+        const { inputTokens, outputTokens } = result.usage;
+        usage = {
+          promptTokenCount: inputTokens,
+          candidatesTokenCount: outputTokens,
+          totalTokenCount: inputTokens !== null && outputTokens !== null ? inputTokens + outputTokens : null,
+        };
+        if (result.kind === "refusal") {
+          console.error(JSON.stringify({ event: "ai_output_rejected", endpoint: request.endpoint, requestId: request.requestId, reason: "refusal", provider: "anthropic", category: result.category }));
+          status = "invalid_output";
+          throw new AiGatewayError("AI_INVALID_OUTPUT", 502, undefined, "refusal");
+        }
+        text = result.text;
       } else {
         const schema = request.config.responseSchema ? toJsonSchema(request.config.responseSchema) : null;
         const response = await this.openAiFetch("https://api.openai.com/v1/responses", {
@@ -342,14 +413,15 @@ export class AiGateway {
       }
 
       if (text.length === 0 || text.length > AI_MAX_RESPONSE_CHARS) {
+        console.error(JSON.stringify({ event: "ai_output_rejected", endpoint: request.endpoint, requestId: request.requestId, reason: "response_size", responseChars: text.length, maxOutputTokens, finishReason, thinkingTokenCount }));
         status = "invalid_output";
-        throw new AiGatewayError("AI_INVALID_OUTPUT", 502);
+        throw new AiGatewayError("AI_INVALID_OUTPUT", 502, undefined, finishReason === "MAX_TOKENS" ? "truncated" : undefined);
       }
       const payload = parseJsonText(text);
       if (payload === null) {
-        console.error(JSON.stringify({ event: "ai_output_rejected", endpoint: request.endpoint, requestId: request.requestId, reason: "json_parse", responseChars: text.length }));
+        console.error(JSON.stringify({ event: "ai_output_rejected", endpoint: request.endpoint, requestId: request.requestId, reason: "json_parse", responseChars: text.length, maxOutputTokens, finishReason, thinkingTokenCount }));
         status = "invalid_output";
-        throw new AiGatewayError("AI_INVALID_OUTPUT", 502);
+        throw new AiGatewayError("AI_INVALID_OUTPUT", 502, undefined, finishReason === "MAX_TOKENS" ? "truncated" : undefined);
       }
       const validationErrors = request.validate(payload);
       if (validationErrors.length > 0) {
@@ -361,6 +433,12 @@ export class AiGateway {
       return { payload: payload as T, usage: usage || emptyUsage(), selection };
     } catch (error) {
       if (error instanceof AiGatewayError) throw error;
+      if (error instanceof AnthropicProviderError) {
+        const failure = CLAUDE_FAILURES[error.kind];
+        status = failure.status;
+        admissionReason = failure.admissionReason;
+        throw new AiGatewayError(failure.code, failure.httpStatus, failure.admissionReason);
+      }
       status = "unavailable";
       throw new AiGatewayError("AI_UNAVAILABLE", 503);
     } finally {

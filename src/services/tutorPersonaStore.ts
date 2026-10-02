@@ -7,6 +7,8 @@ import {
   isTutorPersona,
   normalizePersonaName,
   normalizePersonaPersonality,
+  normalizePersonaRole,
+  normalizePersonaTone,
   toPersonaRequest,
 } from "../domain/tutorPersona";
 import { LEARNHUB_DATA_CHANGED_EVENT, LEARNHUB_STORAGE_KEYS, notifyLearningDataChanged } from "./storage";
@@ -25,12 +27,16 @@ export function getTutorPersona(): TutorPersona {
 }
 
 /**
- * 튜터 설정을 저장한다. 이름은 1~20자, 성격 설명은 300자 이하이며 부적절한 내용은 거절한다.
+ * 튜터 설정을 저장한다. 이름·역할은 20자, 말투는 40자, 성격과 행동 방식은 300자 이하이며 부적절한 내용은 거절한다.
  * 이미지는 WebP/PNG data URL 80,000자 이하만 받는다. 실패하면 이유를 돌려주고 기존 설정은 그대로다.
  */
 export function saveTutorPersona(input: TutorPersonaInput): SaveTutorPersonaResult {
   const name = normalizePersonaName(input.name);
   if (name === null) return { ok: false, reason: "invalid_name" };
+  const role = normalizePersonaRole(input.role);
+  if (role === null) return { ok: false, reason: "invalid_role" };
+  const tone = normalizePersonaTone(input.tone);
+  if (tone === null) return { ok: false, reason: "invalid_tone" };
   const customPersonality = normalizePersonaPersonality(input.customPersonality);
   if (customPersonality === null) return { ok: false, reason: "invalid_personality" };
   if (!isPersonaPreset(input.preset) || !isResponseLength(input.responseLength)) return { ok: false, reason: "invalid_preset" };
@@ -38,6 +44,8 @@ export function saveTutorPersona(input: TutorPersonaInput): SaveTutorPersonaResu
   const persona: TutorPersona = {
     name,
     ...(input.avatar ? { avatar: input.avatar } : {}),
+    ...(role ? { role } : {}),
+    ...(tone ? { tone } : {}),
     preset: input.preset,
     ...(customPersonality ? { customPersonality } : {}),
     responseLength: input.responseLength,

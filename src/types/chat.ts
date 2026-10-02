@@ -1,4 +1,13 @@
-import type { CourseSetup } from "./courseSetup";
+import type { CourseSetup, SetupProgress, SetupStepId } from "./courseSetup";
+
+/** Actual diagnostic state, independent of the AI's phrasing. */
+export interface ChatSetupState {
+  subject: string;
+  setup: CourseSetup;
+  progress: SetupProgress;
+  stepId?: SetupStepId;
+  question?: string;
+}
 
 /** 레슨에 묶이지 않은 자유 대화(최근 목록)의 저장 타입. */
 export interface ChatSessionMessage {
@@ -13,6 +22,7 @@ export interface ChatSessionMessage {
   learningIntent?: LearningIntent;
   /** 이 메시지에 붙은 과목 미리보기 카드의 결과. 대화를 다시 열 때 AI를 다시 부르지 않고 이 값으로 그립니다. */
   coursePreview?: ChatCoursePreview;
+  setupState?: ChatSetupState;
 }
 
 /**

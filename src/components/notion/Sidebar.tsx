@@ -175,6 +175,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
             >
               <LearnHubLogo size={28} />
             </button>
+            {/* 접힌 사이드바의 펼치기 버튼은 접기 버튼과 비슷한 높이(로고 바로 아래)에 둡니다. */}
+            {!isOpen && (
+              <button type="button" onClick={onToggleSidebar} aria-label="사이드바 펼치기" title="사이드바 펼치기 (Ctrl+\)" className={`${RAIL_BUTTON} ${RAIL_IDLE} hidden md:flex`}>
+                <PanelLeft aria-hidden className="h-5 w-5" />
+              </button>
+            )}
             <nav aria-label="주요 화면" className="mt-2 flex flex-col items-center gap-1.5">
               <button
                 type="button"
@@ -215,11 +221,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
 
           <div className="flex flex-col items-center gap-1.5">
-            {!isOpen && (
-              <button type="button" onClick={onToggleSidebar} aria-label="패널 열기" title="패널 열기 (⌘\)" className={`${RAIL_BUTTON} ${RAIL_IDLE} hidden md:flex`}>
-                <PanelLeft aria-hidden className="h-5 w-5" />
-              </button>
-            )}
             <button type="button" onClick={() => onOpenSettings?.()} aria-label="설정" title="설정" className={`${RAIL_BUTTON} ${RAIL_IDLE}`}>
               <Settings aria-hidden className="h-5 w-5" />
             </button>
@@ -246,7 +247,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 <button type="button" onClick={onOpenSearch} aria-label="검색" title="검색 (⌘K)" className="flex h-9 w-9 items-center justify-center rounded-lg text-[var(--lh-ink-secondary)] transition hover:bg-[var(--lh-surface-subtle)] hover:text-[var(--lh-ink)] cursor-pointer">
                   <Search aria-hidden className="h-4 w-4" />
                 </button>
-                <button type="button" onClick={onToggleSidebar} aria-label="패널 접기" title="패널 접기 (⌘\)" className="flex h-9 w-9 items-center justify-center rounded-lg text-[var(--lh-ink-secondary)] transition hover:bg-[var(--lh-surface-subtle)] hover:text-[var(--lh-ink)] cursor-pointer">
+                <button type="button" onClick={onToggleSidebar} aria-label="사이드바 접기" title="사이드바 접기 (Ctrl+\)" className="flex h-9 w-9 items-center justify-center rounded-lg text-[var(--lh-ink-secondary)] transition hover:bg-[var(--lh-surface-subtle)] hover:text-[var(--lh-ink)] cursor-pointer">
                   <PanelLeftClose aria-hidden className="h-4 w-4" />
                 </button>
               </div>
@@ -320,7 +321,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             )}
                           </div>
                           {isExpanded && (
-                            <ul className="ml-[22px] space-y-0.5 border-l border-[var(--lh-line)] py-0.5 pl-2">
+                            <ul className="ml-[22px] space-y-0.5 py-0.5">
                               {lessons.map(({ lesson, chapterTitle }) => {
                                 const isCurrent = lesson.id === activeLessonId;
                                 return (
@@ -329,7 +330,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                       type="button"
                                       onClick={() => go(() => onSelectView({ type: "lesson", course, lesson, chapterTitle }))}
                                       aria-current={isCurrent ? "true" : undefined}
-                                      className={`flex min-h-9 w-full items-center gap-2 rounded-lg px-2.5 text-left text-[13px] transition cursor-pointer ${
+                                      className={`flex min-h-9 w-full items-center gap-2 rounded-lg px-3 text-left text-[13px] transition cursor-pointer ${
                                         isCurrent
                                           ? "bg-[var(--lh-primary-subtle)] font-medium text-[var(--lh-primary-text)]"
                                           : "text-[var(--lh-ink-secondary)] hover:bg-[var(--lh-surface-subtle)] hover:text-[var(--lh-ink)]"

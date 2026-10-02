@@ -10,11 +10,11 @@ import type {
 } from "../types/courseSetup";
 
 export const DEFAULT_COURSE_SETUP = { level: "beginner" as CourseLevel, goal: "원리 탐구", dailyMinutes: 15 };
-export const SETUP_LIMITS = { goalLength: 80, evidenceLength: 200, minMinutes: 5, maxMinutes: 240 } as const;
+export const SETUP_LIMITS = { goalLength: 80, evidenceLength: 2400, maxLevelChecks: 4, minMinutes: 5, maxMinutes: 240 } as const;
 
-export const SETUP_INTRO = "시작하기 전에 몇 가지만 여쭤볼게요.";
+export const SETUP_INTRO = "어떤 내용을 배울 수 있는지 살펴보고, 짧은 질문으로 지금 이해하고 있는 부분과 시작점을 함께 찾아볼게요.";
 export const SETUP_REASK = "잘 이해하지 못했어요. 아래에서 골라 주시거나 조금 다르게 써 주세요.";
-export const SETUP_LEVEL_CHECK_NOTE = "정답을 맞히는 게 아니에요. 수준을 가늠하는 데만 써요.";
+export const SETUP_LEVEL_CHECK_NOTE = "알고 있는 만큼 편하게 답해 주세요. 이 답으로 설명의 깊이와 배울 시작점을 정할게요.";
 
 /** "바로 만들어 주세요" 칩. 누르면 남은 질문을 건너뛰고 빈 항목은 기본값을 쓴다. */
 export const SETUP_SKIP_OPTION = { id: "skip", label: "바로 만들어 주세요" } as const;
@@ -36,7 +36,7 @@ export const LEVEL_CHECK_OPTIONS: SetupOption[] = [{ id: "unsure", label: "잘 �
 
 /** 질문 단계 정의. 순서는 `nextSetupStep`이 정한다. */
 export const SETUP_STEPS: Record<SetupStepId, SetupStep> = {
-  experience: { id: "experience", field: "experience", question: (subject) => `‘${subject}’에 대해 어느 정도 경험이 있으세요?`, options: EXPERIENCE_OPTIONS, allowFreeText: true, requiresLogin: false },
+  experience: { id: "experience", field: "experience", question: (subject) => `${subject}에 대해 어느 정도 경험이 있으세요?`, options: EXPERIENCE_OPTIONS, allowFreeText: true, requiresLogin: false },
   levelCheck: { id: "levelCheck", field: "levelEvidence", question: null, options: LEVEL_CHECK_OPTIONS, allowFreeText: true, requiresLogin: true },
   goal: { id: "goal", field: "goal", question: () => "어디에 쓰고 싶으세요?", options: GOAL_OPTIONS, allowFreeText: true, requiresLogin: false },
   dailyMinutes: { id: "dailyMinutes", field: "dailyMinutes", question: () => "하루에 얼마나 공부할 수 있으세요?", options: MINUTES_OPTIONS, allowFreeText: true, requiresLogin: false },
@@ -45,26 +45,32 @@ export const SETUP_STEPS: Record<SetupStepId, SetupStep> = {
 export const initialSetupProgress = (): SetupProgress => ({ answered: [], skipped: false });
 
 /**
- * 다음에 물을 단계. 한 번에 하나씩, 최대 3개(확인 질문 포함 4개)이며 건너뛰었거나 끝났으면 null.
- * 확인 질문은 "조금/꽤 해봤어요"를 고른 로그인 사용자에게만 한다.
+ * 로그인 사용자는 실제 이해를 먼저 확인한다. 비로그인 미리보기에는 경험 선택만 받는다.
  */
-export function nextSetupStep(progress: SetupProgress, setup: CourseSetup, signedIn: boolean): SetupStep | null {
+export function nextSetupStep(progress: SetupProgress, _setup: CourseSetup, signedIn: boolean): SetupStep | null {
   if (progress.skipped) return null;
   const done = new Set(progress.answered);
+  if (signedIn) {
+    if (!done.has("levelCheck") && (progress.levelCheckCount ?? 0) < SETUP_LIMITS.maxLevelChecks) return SETUP_STEPS.levelCheck;
+    return null;
+  }
   if (!done.has("experience")) return SETUP_STEPS.experience;
-  if (!done.has("levelCheck") && signedIn && (setup.experience === "some" || setup.experience === "experienced")) return SETUP_STEPS.levelCheck;
-  if (!done.has("goal")) return SETUP_STEPS.goal;
-  if (!done.has("dailyMinutes")) return SETUP_STEPS.dailyMinutes;
   return null;
 }
 
 export function applySetupAnswer(setup: CourseSetup, progress: SetupProgress, stepId: SetupStepId, value: Partial<CourseSetup>): { setup: CourseSetup; progress: SetupProgress } {
   return {
     setup: sanitizeCourseSetup({ ...setup, ...value }),
-    progress: { ...progress, answered: progress.answered.includes(stepId) ? progress.answered : [...progress.answered, stepId] },
+    progress: { ...progress, answered: progress.answered.includes(stepId) ? progress.answered : [...progress.answered, stepId], ...(stepId === "levelCheck" ? { levelCheckCount: (progress.levelCheckCount ?? 0) + 1 } : {}) },
   };
 }
 export const skipRemainingSetup = (progress: SetupProgress): SetupProgress => ({ ...progress, skipped: true });
+
+/** Retain the question as well as the answer so a later curriculum can interpret the evidence. */
+export function appendLevelEvidence(previous: string | undefined, question: string, answer: string, feedback?: string): string {
+  return [previous, `확인 질문: ${question.slice(0, 300)}`, `학습자 답변: ${answer.slice(0, 400)}`, feedback ? `답변에 대한 판단: ${feedback.slice(0, 400)}` : undefined]
+    .filter(Boolean).join("\n").slice(-SETUP_LIMITS.evidenceLength);
+}
 
 /** 빈 항목에 기본값(초급 · 원리 탐구 · 15분)을 채운다. */
 export function resolveCourseSetup(setup: CourseSetup = {}): ResolvedCourseSetup {
@@ -96,8 +102,8 @@ export function summarizeCourseSetup(setup: CourseSetup): string {
   const clean = sanitizeCourseSetup(setup);
   const parts: string[] = [];
   const experience = EXPERIENCE_OPTIONS.find((option) => option.value.experience === clean.experience);
-  if (experience?.short) parts.push(experience.short);
-  else if (clean.level) parts.push({ beginner: "초급", intermediate: "중급", advanced: "고급" }[clean.level]);
+  if (clean.level) parts.push({ beginner: "초급", intermediate: "중급", advanced: "고급" }[clean.level]);
+  if (experience?.short) parts.push(`경험: ${experience.short}`);
   if (clean.goal) parts.push(GOAL_OPTIONS.find((option) => option.value.goal === clean.goal)?.short ?? clean.goal);
   if (clean.dailyMinutes) parts.push(`하루 ${clean.dailyMinutes}분`);
   return parts.join(" · ");

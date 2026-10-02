@@ -2,11 +2,13 @@ import React, { useEffect, useRef, useState } from "react";
 import { ArrowRight, ArrowUp, BookOpen, ListChecks, Loader2, Plus, Sparkles, X } from "lucide-react";
 import type { Course } from "../types/learning";
 import { authorizedFetch } from "../services/authClient";
+import { aiResponseErrorMessage, readAiResponseError } from "../services/aiResponseError";
 import { addCuriosity } from "./graph/graphBridge";
 import type { CurriculumConceptLinks, ResumeContext } from "./graph/graphTypes";
 import { AgentMessage } from "./chat/AgentMessage";
 import { CoursePreviewCard } from "./chat/CoursePreviewCard";
 import { ModelReasoningPicker } from "./chat/ModelReasoningPicker";
+import { RichLessonRenderer } from "./notion/RichLessonRenderer";
 import { getTutorPersonaRequest } from "../services/tutorPersonaStore";
 import { appendChatMessage, createChatSession, getChatSession, setMessageCoursePreview } from "../services/chatSessionStore";
 import { getLearnerContext } from "../services/learnerContext";
@@ -18,6 +20,7 @@ import { restorePreviewSetup, restoreSetupFlow } from "./chat/restoreSetup";
 import { findPreviewMessageIndex, toChatCoursePreview } from "./chat/previewPersist";
 import {
   SETUP_INTRO,
+  SETUP_LIMITS,
   SETUP_LEVEL_CHECK_NOTE,
   SETUP_REASK,
   SETUP_SKIP_OPTION,
@@ -28,6 +31,7 @@ import {
 } from "../domain/courseSetup";
 import { fetchLevelCheckQuestion, resolveSetupAnswer } from "../services/courseSetup";
 import type { CourseSetup, SetupProgress, SetupStep, SetupStepId } from "../types/courseSetup";
+import type { ChatSetupState } from "../types/chat";
 
 interface ChatMessage {
   id: string;
@@ -197,73 +201,91 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
   const addMessages = (...items: ChatMessage[]) => setMessages((previous) => [...previous, ...items]);
 
   /** 질문 하나를 대화에 올립니다. 첫 질문에는 안내 문장을 붙입니다. */
-  const askStep = (step: SetupStep, question: string, first = false) => {
+  const askStep = (step: SetupStep, question: string, first = false, state?: Omit<ChatSetupState, "stepId" | "question">) => {
     const note = step.id === "levelCheck" ? `\n\n${SETUP_LEVEL_CHECK_NOTE}` : "";
     const text = `${first ? `${SETUP_INTRO}\n\n` : ""}${question}${note}`;
     addMessages({ id: nextId(), role: "assistant", text, setupQuestion: { stepId: step.id, question } });
-    persist({ role: "assistant", text });
+    persist({ role: "assistant", text, ...(state ? { setupState: { ...state, stepId: step.id, question } } : {}) });
   };
 
-  const finishSetup = (subject: string, setup: CourseSetup) => {
+  const finishSetup = (subject: string, setup: CourseSetup, progress: SetupProgress = initialSetupProgress()) => {
     setFlow(null);
     // 설정 요약은 카드 위에 보이므로 문장에는 넣지 않습니다. (예전 대화의 요약 문장은 restoreSetup이 계속 읽습니다.)
-    const intro = `좋아요. ‘${subject}’ 학습 과정을 만들어 봤어요. 마음에 들면 이 과정으로 시작해요.`;
+    const intro = `‘${subject}’에서 배울 시작점을 바탕으로 학습 과정을 구성할게요. 아래 과정에서 이어서 배울 수 있어요.`;
     addMessages({ id: nextId(), role: "assistant", text: intro, previewSubject: subject, previewSetup: setup });
-    persist({ role: "assistant", text: intro, learningIntent: { subject } });
+    persist({ role: "assistant", text: intro, learningIntent: { subject }, setupState: { subject, setup, progress } });
   };
 
   /** 다음 질문으로 넘어가거나, 끝났으면 미리보기를 보여 줍니다. 확인 질문은 AI가 만들며, 못 만들면 그 단계를 건너뜁니다. */
-  const advanceSetup = async (subject: string, setup: CourseSetup, progress: SetupProgress) => {
+  const advanceSetup = async (subject: string, setup: CourseSetup, progress: SetupProgress, first = false) => {
     let current = progress;
     for (;;) {
       const next = nextSetupStep(current, setup, isSignedIn);
       if (!next) {
-        finishSetup(subject, setup);
+        finishSetup(subject, setup, current);
         return;
       }
       let question = next.question ? next.question(subject) : null;
       if (!question) {
         setLoading(true);
-        const experience = setup.experience === "some" || setup.experience === "experienced" ? setup.experience : "some";
-        question = await fetchLevelCheckQuestion(subject, experience);
+        question = await fetchLevelCheckQuestion(subject, setup.experience, setup.levelEvidence);
         setLoading(false);
         if (!question) {
-          current = applySetupAnswer(setup, current, next.id, {}).progress;
-          continue;
+          const notice = "수준 확인 질문을 준비하지 못했어요. 우선 기초부터 시작하고, 배우면서 이해한 내용을 확인하겠습니다.";
+          addMessages({ id: nextId(), role: "assistant", text: notice });
+          persist({ role: "assistant", text: notice });
+          finishSetup(subject, { ...setup, level: "beginner" }, current);
+          return;
         }
       }
       setFlow({ subject, setup, progress: current, step: next, question, reasked: false });
-      askStep(next, question);
+      askStep(next, question, first, { subject, setup, progress: current });
       return;
     }
   };
 
   /** 과목 설정 질문을 시작합니다. userText가 있으면 그 말을 먼저 사용자 메시지로 남깁니다. */
-  const beginSetup = (subject: string, userText?: string) => {
+  const beginSetup = async (subject: string, userText?: string) => {
+    const topic = resolveLearningIntent(subject)?.subject ?? subject.trim();
     if (userText) {
       addMessages({ id: nextId(), role: "user", text: userText });
       persist({ role: "user", text: userText });
     }
-    const first = nextSetupStep(initialSetupProgress(), {}, isSignedIn);
-    if (!first || !first.question) {
-      finishSetup(subject, {});
-      return;
+    setLoading(true);
+    try {
+      await advanceSetup(topic, {}, initialSetupProgress(), true);
+    } finally {
+      setLoading(false);
     }
-    const question = first.question(subject);
-    setFlow({ subject, setup: {}, progress: initialSetupProgress(), step: first, question, reasked: false });
-    askStep(first, question, true);
   };
 
   const markAnswered = (items: ChatMessage[], stepId: SetupStepId, label: string) =>
     items.map((item) => (item.setupQuestion && !item.setupQuestion.answered && item.setupQuestion.stepId === stepId ? { ...item, setupQuestion: { ...item.setupQuestion, answered: label } } : item));
 
   /** 답을 기록하고 다음 질문으로 넘어갑니다. */
-  const answerStep = async (value: Partial<CourseSetup>, label: string) => {
+  const answerStep = async (value: Partial<CourseSetup>, label: string, feedback?: string, nextQuestion?: string) => {
     if (!flow) return;
-    const applied = applySetupAnswer(flow.setup, flow.progress, flow.step.id, value);
-    setMessages((previous) => [...markAnswered(previous, flow.step.id, label), { id: nextId(), role: "user", text: label }]);
-    persist({ role: "user", text: label });
-    await advanceSetup(flow.subject, applied.setup, applied.progress);
+    setLoading(true);
+    try {
+      const evidence = flow.step.id === "experience" ? { ...value, levelEvidence: `경험에 대한 자기 보고: ${label.slice(0, 400)}` } : value;
+      const applied = applySetupAnswer(flow.setup, flow.progress, flow.step.id, evidence);
+      const state = { subject: flow.subject, setup: applied.setup, progress: applied.progress };
+      setMessages((previous) => [...markAnswered(previous, flow.step.id, label), { id: nextId(), role: "user", text: label }]);
+      persist({ role: "user", text: label, setupState: state });
+      if (feedback) {
+        addMessages({ id: nextId(), role: "assistant", text: feedback });
+        persist({ role: "assistant", text: feedback, setupState: state });
+      }
+      if (flow.step.id === "levelCheck" && nextQuestion && (applied.progress.levelCheckCount ?? 0) < SETUP_LIMITS.maxLevelChecks) {
+        const progress = { ...applied.progress, answered: applied.progress.answered.filter(id => id !== "levelCheck") };
+        setFlow({ subject: flow.subject, setup: applied.setup, progress, step: SETUP_STEPS.levelCheck, question: nextQuestion, reasked: false });
+        askStep(SETUP_STEPS.levelCheck, nextQuestion, false, { ...state, progress });
+        return;
+      }
+      await advanceSetup(flow.subject, applied.setup, applied.progress);
+    } finally {
+      setLoading(false);
+    }
   };
 
   /** 남은 질문을 건너뛰고 기본값으로 바로 만듭니다. */
@@ -272,7 +294,7 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
     const label = SETUP_SKIP_OPTION.label;
     setMessages((previous) => [...markAnswered(previous, flow.step.id, label), { id: nextId(), role: "user", text: label }]);
     persist({ role: "user", text: label });
-    finishSetup(flow.subject, flow.setup);
+    finishSetup(flow.subject, flow.setup, { ...flow.progress, skipped: true });
   };
 
   /** 질문에 직접 적어서 답했을 때: 규칙 → (로그인 사용자) AI 순으로 해석합니다. */
@@ -284,7 +306,7 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
       return;
     }
     setLoading(true);
-    const result = await resolveSetupAnswer(flow.step.id, text, { subject: flow.subject, signedIn: isSignedIn, question: flow.question, experience: flow.setup.experience });
+    const result = await resolveSetupAnswer(flow.step.id, text, { subject: flow.subject, signedIn: isSignedIn, question: flow.question, experience: flow.setup.experience, levelEvidence: flow.setup.levelEvidence, levelCheckCount: flow.progress.levelCheckCount ?? 0 });
     setLoading(false);
     const needsMatch = flow.step.id === "experience" || flow.step.id === "dailyMinutes";
     if (!result.matched && needsMatch && !flow.reasked) {
@@ -294,7 +316,7 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
       persist({ role: "assistant", text: SETUP_REASK });
       return;
     }
-    await answerStep(result.setup, text);
+    await answerStep(result.setup, text, result.feedback, result.nextQuestion);
   };
 
   const send = async (question: string) => {
@@ -309,7 +331,7 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
     if (courseMode) {
       setCourseMode(false);
       setInput("");
-      beginSetup(trimmed, trimmed);
+      await beginSetup(trimmed, trimmed);
       return;
     }
 
@@ -318,7 +340,7 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
       const intent = detectLearningIntent(trimmed);
       if (intent) {
         setInput("");
-        beginSetup(intent.subject, trimmed);
+        await beginSetup(intent.subject, trimmed);
       } else {
         savePendingChat(trimmed);
         onRequestAuth();
@@ -353,7 +375,7 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
         window.dispatchEvent(new CustomEvent("learnhub:request-auth"));
         throw new Error("auth_required");
       }
-      if (!response.ok) throw new Error("unavailable");
+      if (!response.ok) throw await readAiResponseError(response);
       const data = await response.json();
       const tangentName = typeof data.tangent?.conceptName === "string" ? data.tangent.conceptName.trim() : "";
       const reply: string = data.reply || "답변을 준비하지 못했습니다.";
@@ -363,11 +385,11 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
         { id: nextId(), role: "assistant", text: reply, question: trimmed, conceptName: tangentName || undefined, setupStarted: Boolean(subject) },
       ]);
       persist({ role: "assistant", text: reply, question: trimmed, conceptName: tangentName || undefined });
-      if (subject) beginSetup(subject);
+      if (subject) await beginSetup(subject);
     } catch (error) {
       setMessages((items) => [
         ...items,
-        { id: nextId(), role: "assistant", text: error instanceof Error && error.message === "auth_required" ? "AI 대화를 계속하려면 로그인해 주세요." : "지금은 답변을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요." },
+        { id: nextId(), role: "assistant", text: error instanceof Error && error.message === "auth_required" ? "AI 대화를 계속하려면 로그인해 주세요." : aiResponseErrorMessage(error) },
       ]);
     } finally {
       setLoading(false);
@@ -542,7 +564,7 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
                   ) : undefined
                 }
               >
-                <p className="whitespace-pre-wrap">{message.text}</p>
+                <RichLessonRenderer content={message.text} />
                 {message.setupQuestion && (
                   <div className="mt-3.5 flex flex-wrap gap-2" role="group" aria-label="빠른 답">
                     {SETUP_STEPS[message.setupQuestion.stepId].options.map((option) => {
@@ -554,7 +576,7 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
                           type="button"
                           disabled={!active}
                           aria-pressed={answered === option.label}
-                          onClick={() => void answerStep(option.value, option.label)}
+                          onClick={() => void (message.setupQuestion!.stepId === "levelCheck" ? answerWithText(option.label) : answerStep(option.value, option.label))}
                           className={`inline-flex min-h-10 items-center rounded-full border px-4 text-[15px] font-medium transition ${
                             answered === option.label
                               ? "border-[var(--lh-primary)] bg-[var(--lh-primary)] text-white"
@@ -587,7 +609,7 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
                       type="button"
                       onClick={() => {
                         const subject = message.conceptName || toConceptName(message.question!);
-                        if (!flow) beginSetup(subject);
+                        if (!flow) void beginSetup(subject);
                       }}
                       className="inline-flex min-h-10 items-center gap-1.5 rounded-full bg-[var(--lh-primary)] px-4 text-sm font-medium text-white transition hover:bg-[var(--lh-primary-hover)] cursor-pointer"
                     >

@@ -12,11 +12,12 @@ export function reservePreviewCount(usage: PreviewUsage, client: string, perIp =
 export class PreviewQuota {
   private day = "";
   private usage: PreviewUsage = { total: 0, clients: {} };
-  constructor(private options: { perIp?: number; globalLimit?: number; now?: () => Date; durableReserve?: (day: string, client: string, perIp: number, globalLimit: number) => Promise<void> } = {}) {
+  constructor(private options: { usageLimitsEnabled?: boolean; perIp?: number; globalLimit?: number; now?: () => Date; durableReserve?: (day: string, client: string, perIp: number, globalLimit: number) => Promise<void> } = {}) {
     for (const n of [options.perIp ?? 3, options.globalLimit ?? 100]) if (!Number.isSafeInteger(n) || n < 1 || n > 10000) throw new Error("미리보기 한도 설정을 확인해 주세요.");
   }
   async reserve(ip: string): Promise<void> {
     if (!ip || ip.length > 200) throw new Error("접속 정보를 확인하지 못했습니다.");
+    if (this.options.usageLimitsEnabled === false) return;
     const day = (this.options.now?.() || new Date()).toISOString().slice(0, 10);
     const client = createHash("sha256").update(`${day}:${ip.replace(/^::ffff:/iu, "")}`).digest("hex");
     if (this.options.durableReserve) return this.options.durableReserve(day, client, this.options.perIp ?? 3, this.options.globalLimit ?? 100);

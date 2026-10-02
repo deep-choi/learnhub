@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowRight, ChevronDown, Loader2, Pencil } from "lucide-react";
+import { ArrowRight, ChevronDown, Loader2 } from "lucide-react";
 import type { Course } from "../../types/learning";
 import { authorizedFetch } from "../../services/authClient";
 import { validateCurriculumPayload } from "../../domain/contentValidation";
@@ -7,22 +7,22 @@ import { buildCourseFromPayload, unwrapCurriculum } from "../graph/courseFromPay
 import { existingConceptNames } from "../graph/graphBridge";
 import type { CurriculumConceptLinks } from "../graph/graphTypes";
 import { isUsablePreviewData } from "./previewPersist";
-import { SETUP_STEPS, courseRequestFromSetup, resolveCourseSetup, summarizeCourseSetup } from "../../domain/courseSetup";
-import type { CourseSetup, SetupOption, SetupStepId } from "../../types/courseSetup";
+import { courseRequestFromSetup, resolveCourseSetup, summarizeCourseSetup } from "../../domain/courseSetup";
+import type { CourseSetup } from "../../types/courseSetup";
 
 interface CoursePreviewCardProps {
   subject: string;
   isSignedIn: boolean;
-  /** 대화로 정한 설정. 없으면 기본값(초급 · 원리 탐구 · 15분)입니다. */
+  /** 대화에서 확인한 수준과 진단 근거. */
   setup?: CourseSetup;
   /** 로그인한 사용자가 "이 과정으로 시작하기"를 눌렀을 때 */
   onStart: (course: Course, links: CurriculumConceptLinks) => void;
   /** 로그인 전 사용자가 눌렀을 때: 같은 결과와 설정을 로그인 뒤에도 이어 쓰도록 넘깁니다. */
   onGuestStart: (subject: string, data: Record<string, any>, setup: CourseSetup) => void;
   onRequestAuth: () => void;
-  /** 저장해 둔 미리보기 결과. 있으면 AI를 부르지 않고 이 값으로 바로 그리며, 설정을 '수정'할 때만 다시 만듭니다. */
+  /** 저장해 둔 미리보기 결과. 있으면 AI를 부르지 않고 이 값으로 바로 그립니다. */
   initialData?: Record<string, any>;
-  /** 새로 만든 미리보기를 받은 직후(처음, 수정 뒤)에 최종 설정과 함께 알립니다. 대화에 저장하는 데 씁니다. */
+  /** 새 미리보기와 그 과정에 사용한 진단 근거를 대화에 저장합니다. */
   onReady?: (data: Record<string, any>, setup: CourseSetup) => void;
 }
 
@@ -31,18 +31,9 @@ type State =
   | { status: "error"; message: string; limited: boolean }
   | { status: "ready"; data: Record<string, any> };
 
-const EDIT_STEPS: SetupStepId[] = ["experience", "goal", "dailyMinutes"];
-
-const isSelected = (setup: CourseSetup, option: SetupOption): boolean => {
-  const resolved: Record<string, unknown> = { ...resolveCourseSetup(setup) };
-  return Object.entries(option.value).every(([key, value]) => resolved[key] === value);
-};
-
 /** 대화 안에 놓이는 과목 미리보기 카드. 과정 요약과 설정 요약을 보여 주고, 눌러서 과목을 시작합니다. */
 export const CoursePreviewCard: React.FC<CoursePreviewCardProps> = ({ subject, isSignedIn, setup: initialSetup, onStart, onGuestStart, onRequestAuth, initialData, onReady }) => {
-  const [setup, setSetup] = useState<CourseSetup>(initialSetup ?? {});
-  const [draft, setDraft] = useState<CourseSetup>(initialSetup ?? {});
-  const [editing, setEditing] = useState(false);
+  const setup = useMemo(() => initialSetup ?? {}, [initialSetup]);
   const usableInitial = useMemo(() => isUsablePreviewData(initialData), []); // eslint-disable-line react-hooks/exhaustive-deps
   const [state, setState] = useState<State>(() => (usableInitial && initialData ? { status: "ready", data: initialData } : { status: "loading" }));
   const onReadyRef = useRef(onReady);
@@ -111,57 +102,11 @@ export const CoursePreviewCard: React.FC<CoursePreviewCardProps> = ({ subject, i
     onStart(built.course, built.links);
   };
 
-  const applyDraft = () => {
-    setSetup(draft);
-    setEditing(false);
-  };
-
   return (
     <section aria-label={`‘${subject}’ 과목 미리보기`} className="w-full overflow-hidden rounded-3xl border border-[var(--lh-line)] bg-[var(--lh-surface)] shadow-[var(--lh-shadow-md)]">
       <div className="flex items-center justify-between gap-3 border-b border-[var(--lh-line)] px-4 py-2.5">
-        <p className="min-w-0 truncate text-xs text-[var(--lh-ink-secondary)]">{summarizeCourseSetup(resolved)}</p>
-        <button
-          type="button"
-          onClick={() => { setDraft(setup); setEditing((open) => !open); }}
-          aria-expanded={editing}
-          className="inline-flex min-h-8 shrink-0 items-center gap-1.5 rounded-full px-3 text-xs font-medium text-[var(--lh-primary-text)] transition hover:bg-[var(--lh-primary-subtle)] cursor-pointer"
-        >
-          <Pencil aria-hidden className="h-3.5 w-3.5" /> 수정
-        </button>
+        <p className="min-w-0 truncate text-xs text-[var(--lh-ink-secondary)]">{summarizeCourseSetup({ level: setup.level, experience: setup.experience }) || "기초부터 시작"}</p>
       </div>
-
-      {editing && (
-        <div className="space-y-3 border-b border-[var(--lh-line)] bg-[var(--lh-surface-subtle)] px-4 py-3">
-          {EDIT_STEPS.map((stepId) => {
-            const step = SETUP_STEPS[stepId];
-            return (
-              <div key={stepId} role="group" aria-label={step.question?.(subject)} className="space-y-1.5">
-                <p className="text-xs font-medium text-[var(--lh-ink-secondary)]">{step.question?.(subject)}</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {step.options.map((option) => {
-                    const selected = isSelected(draft, option);
-                    return (
-                      <button
-                        key={option.id}
-                        type="button"
-                        aria-pressed={selected}
-                        onClick={() => setDraft((previous) => ({ ...previous, ...option.value }))}
-                        className={`min-h-8 rounded-full border px-3 text-xs font-medium transition cursor-pointer ${selected ? "border-[var(--lh-primary)] bg-[var(--lh-primary)] text-white" : "border-[var(--lh-line-strong)] bg-[var(--lh-surface)] text-[var(--lh-ink)] hover:border-[var(--lh-primary-border)]"}`}
-                      >
-                        {option.label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })}
-          <div className="flex justify-end gap-2">
-            <button type="button" onClick={() => setEditing(false)} className="min-h-9 rounded-full px-4 text-xs font-medium text-[var(--lh-ink-secondary)] transition hover:bg-[var(--lh-surface)] cursor-pointer">취소</button>
-            <button type="button" onClick={applyDraft} className="min-h-9 rounded-full bg-[var(--lh-primary)] px-4 text-xs font-medium text-white transition hover:bg-[var(--lh-primary-hover)] cursor-pointer">이 설정으로 다시 만들기</button>
-          </div>
-        </div>
-      )}
 
       {state.status === "loading" && (
         <div role="status" className="flex flex-col items-center gap-3 px-5 py-12 text-sm text-[var(--lh-ink-secondary)]">
@@ -184,7 +129,7 @@ export const CoursePreviewCard: React.FC<CoursePreviewCardProps> = ({ subject, i
           <div className="space-y-1.5">
             <h3 className="text-lg font-medium leading-snug tracking-tight text-[var(--lh-ink)]">{built.course.title}</h3>
             {built.course.summary && <p className="text-base leading-[1.75] text-[var(--lh-ink-secondary)]">{built.course.summary}</p>}
-            <p className="text-sm text-[var(--lh-ink-tertiary)]">{built.course.chapters.length}단계 · 레슨 {lessonCount}개 · 하루 {resolved.dailyMinutes}분</p>
+            <p className="text-sm text-[var(--lh-ink-tertiary)]">{built.course.chapters.length}단계 · 레슨 {lessonCount}개</p>
           </div>
 
           {expanded && (

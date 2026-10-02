@@ -60,12 +60,15 @@ API 키 값, 조직 ID, 결제 정보는 반환하지 않는다.
 
 - `GEMINI_API_KEY`
 - `OPENAI_API_KEY`
+- `ANTHROPIC_API_KEY` (선택. 없으면 Claude 모델은 입력바에 "준비 중"으로 보이고, 저장된 Claude 선택은 서버 기본 모델로 처리된다.)
 
-키는 서버 환경이나 secret manager에만 저장한다. `VITE_` 접두사, 브라우저 localStorage, Firebase 공개 웹 설정, source control에 넣지 않는다. 키 하나가 없으면 그 공급자의 모델은 설정 화면에 “서버 API 키 필요”로 표시되고 저장을 막는다. 다른 공급자는 계속 사용할 수 있다.
+키는 서버 환경이나 secret manager에만 저장한다. `VITE_` 접두사, 브라우저 localStorage, Firebase 공개 웹 설정, source control에 넣지 않는다. 키 하나가 없으면 그 공급자의 모델은 설정 화면에 “준비 중”으로 표시되고 저장을 막는다. 다른 공급자는 계속 사용할 수 있다.
+
+Claude Haiku 4.5는 출력 한도에 추론 예산을 더해 요청하므로, 게이트웨이의 사용량 제한과 계정의 영구 사용량 예약은 `reservedAiOutputTokens`로 같은 금액을 예약한다. 짧은 설정·추천 요청의 추론 단계 상한도 예약량 계산에 반영한다.
 
 ## 공개 전 검증
 
-1. 두 공급자의 별도 테스트 키와 결제/usage limit을 확인한다.
+1. 사용하는 공급자(Gemini, GPT, Claude)의 별도 테스트 키와 결제/usage limit을 확인한다.
 2. 같은 학생 질문 세트로 모델별 정확성, 힌트 품질, 오답 교정, 지연시간, 실제 token·비용을 비교한다.
 3. 모델별 모든 reasoning 수준에서 과정·레슨·튜터·복습·평가 JSON validation을 통과하는지 확인한다.
 4. 429, timeout, invalid JSON, provider 중단 상태에서 사용자 메시지와 fallback을 따로 확인한다.

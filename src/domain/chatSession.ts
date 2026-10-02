@@ -1,5 +1,5 @@
-import type { ChatCoursePreview, ChatSession, ChatSessionMessage, LearningIntent, NewChatMessage } from "../types/chat";
-import { sanitizeCourseSetup } from "./courseSetup";
+import type { ChatCoursePreview, ChatSession, ChatSessionMessage, ChatSetupState, LearningIntent, NewChatMessage } from "../types/chat";
+import { SETUP_LIMITS, sanitizeCourseSetup } from "./courseSetup";
 
 /** 저장 상한. 백업(8MB)과 클라우드 스냅샷 한도 안에 충분히 들어가도록 잡았다. */
 export const CHAT_LIMITS = {
@@ -67,7 +67,23 @@ export function isChatMessage(value: unknown): value is ChatSessionMessage {
     (value.question === undefined || str(value.question, 400)) &&
     (value.conceptName === undefined || str(value.conceptName, 400)) &&
     (value.learningIntent === undefined || isLearningIntent(value.learningIntent)) &&
-    (value.coursePreview === undefined || isChatCoursePreview(value.coursePreview));
+    (value.coursePreview === undefined || isChatCoursePreview(value.coursePreview)) &&
+    (value.setupState === undefined || isChatSetupState(value.setupState));
+}
+
+export function isChatSetupState(value: unknown): value is ChatSetupState {
+  if (!isRecord(value) || !nonEmpty(value.subject, 160) || !isRecord(value.setup) || !isRecord(value.progress)) return false;
+  if (Object.keys(value).some(key => !["subject", "setup", "progress", "stepId", "question"].includes(key))) return false;
+  const setup = value.setup;
+  const clean = sanitizeCourseSetup(setup) as Record<string, unknown>;
+  if (!Object.keys(setup).every(key => clean[key] !== undefined && clean[key] === setup[key])) return false;
+  const ids = ["experience", "levelCheck", "goal", "dailyMinutes"];
+  const progress = value.progress;
+  if (Object.keys(progress).some(key => !["answered", "skipped", "levelCheckCount"].includes(key))) return false;
+  return Array.isArray(progress.answered) && progress.answered.length <= ids.length
+    && progress.answered.every(id => typeof id === "string" && ids.includes(id)) && typeof progress.skipped === "boolean"
+    && (progress.levelCheckCount === undefined || (Number.isInteger(progress.levelCheckCount) && Number(progress.levelCheckCount) >= 0 && Number(progress.levelCheckCount) <= SETUP_LIMITS.maxLevelChecks))
+    && (value.stepId === undefined ? value.question === undefined : typeof value.stepId === "string" && ids.includes(value.stepId) && nonEmpty(value.question, 300));
 }
 
 export function isChatSession(value: unknown): value is ChatSession {
@@ -83,7 +99,7 @@ export function isChatSession(value: unknown): value is ChatSession {
 }
 
 export const chatSessionChars = (session: ChatSession): number =>
-  session.title.length + session.messages.reduce((sum, message) => sum + message.text.length + (message.coursePreview ? previewJsonLength(message.coursePreview) : 0), 0);
+  session.title.length + session.messages.reduce((sum, message) => sum + message.text.length + (message.coursePreview ? previewJsonLength(message.coursePreview) : 0) + (message.setupState ? JSON.stringify(message.setupState).length : 0), 0);
 
 /** coursePreview가 있는 메시지는 가장 최근 N건만 남기고, 오래된 것은 필드만 지운다(메시지는 유지). */
 export function limitCoursePreviews(session: ChatSession): ChatSession {
@@ -143,6 +159,7 @@ export function normalizeNewMessage(message: NewChatMessage, now: string): ChatS
   if (message.learningIntent && isLearningIntent(message.learningIntent)) result.learningIntent = { subject: message.learningIntent.subject.trim() };
   const preview = message.coursePreview === undefined ? null : normalizeCoursePreview(message.coursePreview);
   if (preview) result.coursePreview = preview;
+  if (message.setupState && isChatSetupState(message.setupState)) result.setupState = { ...message.setupState, setup: sanitizeCourseSetup(message.setupState.setup), progress: { ...message.setupState.progress, answered: [...message.setupState.progress.answered] } };
   return result;
 }
 

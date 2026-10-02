@@ -1,4 +1,5 @@
 export interface AiAdmissionOptions {
+  usageLimitsEnabled?: boolean;
   maxConcurrent?: number;
   maxRequestsPerClientPerMinute?: number;
   dailyOutputTokenBudget?: number;
@@ -78,6 +79,7 @@ export const isAllowedLoopbackRequest = (input: LoopbackRequestHeaders): boolean
 
 /** Process-local limits; these are not a distributed quota or billing cap. */
 export class AiAdmissionController {
+  private readonly usageLimitsEnabled: boolean;
   private readonly maxConcurrent: number;
   private readonly maxRequestsPerClientPerMinute: number;
   private readonly dailyOutputTokenBudget: number;
@@ -94,6 +96,7 @@ export class AiAdmissionController {
   private dailyRequests = 0;
 
   constructor(options: AiAdmissionOptions = {}) {
+    this.usageLimitsEnabled = options.usageLimitsEnabled ?? true;
     this.maxConcurrent = finitePositiveInteger(options.maxConcurrent ?? 2, "maxConcurrent");
     this.maxRequestsPerClientPerMinute = finitePositiveInteger(options.maxRequestsPerClientPerMinute ?? 12, "maxRequestsPerClientPerMinute");
     this.dailyOutputTokenBudget = finitePositiveInteger(options.dailyOutputTokenBudget ?? 1_000_000, "dailyOutputTokenBudget");
@@ -121,14 +124,14 @@ export class AiAdmissionController {
       this.clientDailyUsage.clear();
     }
     if (this.activeRequests >= this.maxConcurrent) return { lease: null, reason: "global_concurrency" };
-    if (this.reservedDailyTokens + tokens > this.dailyOutputTokenBudget) return { lease: null, reason: "daily_budget" };
-    if (this.dailyRequests >= this.dailyRequestBudget) return { lease: null, reason: "daily_request_budget" };
+    if (this.usageLimitsEnabled && this.reservedDailyTokens + tokens > this.dailyOutputTokenBudget) return { lease: null, reason: "daily_budget" };
+    if (this.usageLimitsEnabled && this.dailyRequests >= this.dailyRequestBudget) return { lease: null, reason: "daily_request_budget" };
 
     const clientDaily = this.clientDailyUsage.get(safeClientKey)?.dayKey === currentDay
       ? this.clientDailyUsage.get(safeClientKey)!
       : { dayKey: currentDay, reservedTokens: 0, requests: 0 };
-    if (clientDaily.reservedTokens + tokens > this.perClientDailyOutputTokenBudget) return { lease: null, reason: "daily_budget" };
-    if (clientDaily.requests >= this.perClientDailyRequestBudget) return { lease: null, reason: "daily_request_budget" };
+    if (this.usageLimitsEnabled && clientDaily.reservedTokens + tokens > this.perClientDailyOutputTokenBudget) return { lease: null, reason: "daily_budget" };
+    if (this.usageLimitsEnabled && clientDaily.requests >= this.perClientDailyRequestBudget) return { lease: null, reason: "daily_request_budget" };
 
     for (const [key, value] of this.clientWindows) {
       if (nowMs - value.startedAt >= 60_000) this.clientWindows.delete(key);
@@ -137,7 +140,7 @@ export class AiAdmissionController {
     const activeWindow = window && nowMs - window.startedAt < 60_000
       ? window
       : { startedAt: nowMs, requests: 0 };
-    if (activeWindow.requests >= this.maxRequestsPerClientPerMinute) return { lease: null, reason: "client_rate_limit" };
+    if (this.usageLimitsEnabled && activeWindow.requests >= this.maxRequestsPerClientPerMinute) return { lease: null, reason: "client_rate_limit" };
     if (!window && this.clientWindows.size >= this.maxTrackedClients) return { lease: null, reason: "client_registry_full" };
 
     activeWindow.requests += 1;
@@ -174,6 +177,7 @@ export class AiAdmissionController {
       trackedClients: this.clientWindows.size,
       dayKey: this.dayKey,
       limits: {
+        enabled: this.usageLimitsEnabled,
         maxConcurrent: this.maxConcurrent,
         requestsPerMinute: this.maxRequestsPerClientPerMinute,
         requestsPerDay: this.perClientDailyRequestBudget,

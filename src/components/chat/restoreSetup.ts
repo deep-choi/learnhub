@@ -13,6 +13,7 @@ import {
   pickSetupFields,
 } from "../../domain/courseSetup";
 import type { CourseSetup, SetupProgress, SetupStep } from "../../types/courseSetup";
+import type { ChatSetupState } from "../../types/chat";
 
 export interface RestoredSetup {
   subject: string;
@@ -25,7 +26,7 @@ export interface RestoredSetup {
   messageIndex: number;
 }
 
-type Line = { role: "user" | "assistant"; text: string };
+type Line = { role: "user" | "assistant"; text: string; setupState?: ChatSetupState };
 
 /** 저장된 질문 문구가 어느 단계의 질문인지 알아봅니다. */
 const stepOfQuestion = (text: string, subject: string): SetupStep | null => {
@@ -33,7 +34,7 @@ const stepOfQuestion = (text: string, subject: string): SetupStep | null => {
     const question = SETUP_STEPS[id].question?.(subject);
     if (question && text.includes(question)) return SETUP_STEPS[id];
   }
-  return text.includes(SETUP_LEVEL_CHECK_NOTE) ? SETUP_STEPS.levelCheck : null;
+  return text.includes(SETUP_LEVEL_CHECK_NOTE) || text.includes("정답을 맞히는 게 아니에요. 수준을 가늠하는 데만 써요.") ? SETUP_STEPS.levelCheck : null;
 };
 
 interface Replay {
@@ -101,11 +102,21 @@ function replaySetup(messages: Line[]): Replay | null {
  * 질문이 끝났거나(미리보기를 만든 뒤) 읽을 수 없으면 null입니다.
  */
 export function restoreSetupFlow(messages: Line[], signedIn: boolean): RestoredSetup | null {
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const state = messages[index].setupState;
+    if (!state) continue;
+    const expectedStep = nextSetupStep(state.progress, state.setup, signedIn)?.id;
+    const legacyExperienceQuestion = signedIn && state.stepId === "experience" && !state.progress.answered.includes("experience");
+    if (!state.stepId || !state.question || (expectedStep !== state.stepId && !legacyExperienceQuestion)) return null;
+    return { subject: state.subject, setup: state.setup, progress: state.progress, step: SETUP_STEPS[state.stepId], question: state.question, messageIndex: index };
+  }
   const replay = replaySetup(messages);
   if (!replay?.pending) return null;
   const { subject, setup, progress, pending } = replay;
   // 지금 상태에서 실제로 다음에 물을 질문과 같을 때만 이어갑니다.
-  if (nextSetupStep(progress, setup, signedIn)?.id !== pending.step.id) return null;
+  const expectedStep = nextSetupStep(progress, setup, signedIn)?.id;
+  const legacyExperienceQuestion = signedIn && pending.step.id === "experience" && !progress.answered.includes("experience");
+  if (expectedStep !== pending.step.id && !legacyExperienceQuestion) return null;
   return { subject, setup, progress, step: pending.step, question: pending.question, messageIndex: pending.index };
 }
 
@@ -137,6 +148,9 @@ export function parseSetupSummary(text: string): CourseSetup | null {
  * 없으면 앞선 질문·답을 다시 읽어 만듭니다.
  */
 export function restorePreviewSetup(messages: Line[], index: number): CourseSetup | undefined {
+  for (let i = Math.min(index, messages.length - 1); i >= 0; i--) {
+    if (messages[i].setupState) return messages[i].setupState!.setup;
+  }
   const parsed = parseSetupSummary(messages[index]?.text ?? "");
   if (parsed) return parsed;
   return replaySetup(messages.slice(0, index))?.setup;

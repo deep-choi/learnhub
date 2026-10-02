@@ -3,6 +3,7 @@ import { ArrowRight, ArrowUp, CircleHelp, Lightbulb, Loader2 } from "lucide-reac
 import { Course, LessonContent, LessonMeta, LessonStep } from "../types/learning";
 import type { LessonCheckResult, LessonPhase } from "../types/lessonProgress";
 import { authorizedFetch } from "../services/authClient";
+import { aiResponseErrorMessage, readAiResponseError } from "../services/aiResponseError";
 import { notifyLearningDataChanged, StorageService } from "../services/storage";
 import { completeLesson } from "../services/lessonCompletion";
 import { clearLessonProgress, getLessonProgress, saveLessonProgress } from "../services/lessonProgressStore";
@@ -252,7 +253,7 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
       setIsLoadingContent(true);
       const cached = StorageService.getCachedLessonContent(lessonMeta.id);
       if (isUsableContent(cached, course, lessonMeta)) {
-        if (!cancelled) setContent(cached);
+        if (!cancelled) setContent(cached!);
         setIsLoadingContent(false);
         return;
       }
@@ -328,7 +329,7 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
   const stepMessage = (stepContent: LessonContent, index: number, withIntro: boolean): ConversationMessage => {
     const total = stepContent.steps.length;
     const i = clampStepIndex(index, total);
-    const intro = `오늘은 ‘${lessonMeta.conceptName}’${josa(lessonMeta.conceptName, "을/를")} 배워요.`;
+    const intro = `오늘은 **${lessonMeta.conceptName}**${josa(lessonMeta.conceptName, "을/를")} 배워요.`;
     let text = buildStepText({ index: i, total, step: stepContent.steps[i], intro: withIntro ? intro : undefined });
     if (i === total - 1) text += `\n\n${closingPrompt(isPractical)}`;
     return { sender: "tutor", text, actions: stepActions(i, total, isPractical) };
@@ -350,17 +351,33 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
     const total = content.steps.length;
     let nextMessages = stored;
     let next: FlowProgress;
+    const legacyOpening = stored[0]?.sender === "tutor"
+      && stored[0].text.includes("처음엔 큰 그림을")
+      && (stored[0].text.match(/^#{1,3}\s/gm)?.length ?? 0) >= 3;
+    const onlyLegacyIntroduction = legacyOpening && stored.every((message, index) =>
+      message.sender === "tutor" && (index === 0
+        || message.text === "이전에 한 번에 읽어 보셨던 레슨이에요. 이어서 확인해 볼까요?")
+    );
 
-    if (saved) {
+    if (onlyLegacyIntroduction && !lessonMeta.isCompleted && saved?.phase !== "done" && !saved?.checkResult) {
+      // 아직 질문하거나 문제를 풀지 않은 이전 도입만 새 단계 형식으로 바꿉니다.
+      next = { stepIndex: 0, phase: "steps" };
+      nextMessages = [stepMessage(content, 0, true)];
+    } else if (saved) {
       next = { stepIndex: clampStepIndex(saved.stepIndex, total), phase: saved.phase, ...(saved.checkResult ? { checkResult: saved.checkResult } : {}) };
-      if (stored.length === 0) nextMessages = [stepMessage(content, next.stepIndex, true)];
+      // 질문하기 전의 첫 안내는 현재 레슨 데이터로 표시합니다.
+      const untouchedOpening = stored.length === 1 && stored[0].sender === "tutor"
+        && !!stored[0].actions?.length && next.phase === "steps" && next.stepIndex === 0;
+      if (stored.length === 0 || untouchedOpening) nextMessages = [stepMessage(content, next.stepIndex, true)];
     } else if (stored.length === 0) {
       next = { stepIndex: 0, phase: "steps" };
       nextMessages = [stepMessage(content, 0, true)];
     } else {
       // 단계 대화가 생기기 전에 한 번에 읽던 레슨: 대화는 그대로 두고 확인 단계에서 이어갑니다.
       next = { stepIndex: Math.max(0, total - 1), phase: lessonMeta.isCompleted ? "done" : "check" };
-      nextMessages = [...stored, { sender: "tutor", text: lessonMeta.isCompleted ? "이미 마친 레슨이에요. 어떻게 할까요?" : "이전에 한 번에 읽어 보셨던 레슨이에요. 이어서 확인해 볼까요?", actions: lessonMeta.isCompleted ? reopenActions() : checkActions(isPractical) }];
+      const legacyText = lessonMeta.isCompleted ? "이미 마친 레슨이에요. 어떻게 할까요?" : "이전에 한 번에 읽어 보셨던 레슨이에요. 이어서 확인해 볼까요?";
+      // 진행 상태가 아직 저장되지 않은 채 다시 열어도 같은 안내가 쌓이지 않게 합니다.
+      nextMessages = stored[stored.length - 1]?.text === legacyText ? stored : [...stored, { sender: "tutor", text: legacyText, actions: lessonMeta.isCompleted ? reopenActions() : checkActions(isPractical) }];
     }
 
     // 마지막 메시지에 이어갈 칩이 없으면(질문 도중 나갔거나 오류로 끝난 경우) 지금 단계의 칩을 다시 보여 줍니다.
@@ -372,7 +389,7 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
     }
 
     setMessages(nextMessages);
-    setProgress(next);
+    saveProgress(next);
     saveConversation(historyKey, nextMessages);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [content, historyKey]);
@@ -390,7 +407,6 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
       return;
     }
     addUser(display ?? trimmed);
-    if (depth) setDepthReached(currentConceptId, depth);
     if (PRACTICE_REQUEST.test(trimmed)) {
       // 문제 요청은 AI 대화 호출 없이 대화 흐름 안에 바로 문제를 띄웁니다.
       startCheck();
@@ -398,6 +414,10 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
     }
     setIsSending(true);
     try {
+      const activeIndex = clampStepIndex(progress.stepIndex, content.steps.length);
+      const activeStep = content.steps[activeIndex];
+      const currentContext = `${course.summary}\n\n현재 챕터: ${chapterTitle}\n현재 단계 (${activeIndex + 1}/${content.steps.length}): ${activeStep.title}\n${activeStep.content}`;
+      const lessonContext = depth ? currentContext : `${currentContext}\n\n레슨의 전체 흐름:\n${content.steps.map((step, index) => `${index + 1}. ${step.title}\n${step.content}`).join("\n\n")}`;
       const response = await authorizedFetch("/api/ai/tutor-chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -405,7 +425,7 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
           courseTitle: course.title,
           lessonTitle: lessonMeta.title,
           conceptName: lessonMeta.conceptName,
-          currentStepContent: `${course.summary}\n\n현재 챕터: ${chapterTitle}\n현재 학습 본문:\n${content.steps.map((step, index) => `${index + 1}. ${step.title}\n${step.content}`).join("\n\n")}`.slice(0, 8_000),
+          currentStepContent: lessonContext.slice(0, 8_000),
           history: boundedHistory(messages),
           userQuestion: trimmed,
           ...(depth ? { depth } : {}),
@@ -416,8 +436,9 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
         window.dispatchEvent(new CustomEvent("learnhub:request-auth"));
         throw new Error("auth_required");
       }
-      if (!response.ok) throw new Error("tutor_unavailable");
+      if (!response.ok) throw await readAiResponseError(response);
       const data = await response.json();
+      if (depth) setDepthReached(currentConceptId, depth);
       const tangent = data.tangent && typeof data.tangent.conceptName === "string" && typeof data.tangent.question === "string"
         ? { conceptName: data.tangent.conceptName.trim().slice(0, 40), question: data.tangent.question.trim().slice(0, 200) }
         : undefined;
@@ -434,7 +455,7 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
     } catch (error) {
       appendMessage({
         sender: "tutor",
-        text: error instanceof Error && error.message === "auth_required" ? "AI 학습 대화를 계속하려면 로그인해 주세요." : "지금은 답변을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.",
+        text: error instanceof Error && error.message === "auth_required" ? "AI 학습 대화를 계속하려면 로그인해 주세요." : aiResponseErrorMessage(error),
         actions: [{ id: "continue", label: ACTION_LABEL.continue }],
       });
     } finally {
@@ -446,6 +467,7 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
     if (!content || isPracticeLoading) return;
     setPracticeOpen(true);
     setPracticeError("");
+    setPracticeQuestion(null);
     setPracticeResult(null);
     setPracticeAnswer("");
     setPracticeHintIndex(0);
@@ -469,7 +491,7 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
         window.dispatchEvent(new CustomEvent("learnhub:request-auth"));
         throw new Error("auth_required");
       }
-      if (!response.ok) throw new Error("practice_unavailable");
+      if (!response.ok) throw await readAiResponseError(response);
       const data = await response.json();
       if (typeof data.question !== "string" || typeof data.answer !== "string" || !Array.isArray(data.hints) || !["multiple_choice", "short_answer"].includes(data.quizType)) throw new Error("practice_invalid");
       setPracticeQuestion({
@@ -481,7 +503,7 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
         hints: data.hints,
       });
     } catch (error) {
-      setPracticeError(error instanceof Error && error.message === "auth_required" ? "로그인 후 문제를 생성할 수 있습니다." : "문제를 준비하지 못했습니다. 다시 시도해 주세요.");
+      setPracticeError(error instanceof Error && error.message === "auth_required" ? "로그인 후 문제를 생성할 수 있습니다." : aiResponseErrorMessage(error, "문제를 준비하지 못했습니다. 다시 시도해 주세요."));
     } finally {
       setIsPracticeLoading(false);
     }
@@ -508,7 +530,7 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
         window.dispatchEvent(new CustomEvent("learnhub:request-auth"));
         throw new Error("auth_required");
       }
-      if (!response.ok) throw new Error("evaluation_unavailable");
+      if (!response.ok) throw await readAiResponseError(response);
       const data = await response.json();
       const isCorrect = typeof data.isCorrect === "boolean" ? data.isCorrect : null;
       setPracticeResult({ isCorrect, feedback: data.feedback || "답안을 확인해 보세요.", hint: data.hint, explanation: data.explanation });
@@ -517,7 +539,7 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
         if (isCorrect) triggerPulse(currentConceptId);
       }
     } catch (error) {
-      setPracticeResult({ isCorrect: null, feedback: error instanceof Error && error.message === "auth_required" ? "로그인 후 답안을 채점할 수 있습니다." : "채점을 완료하지 못했습니다. 잠시 후 다시 시도해 주세요." });
+      setPracticeResult({ isCorrect: null, feedback: error instanceof Error && error.message === "auth_required" ? "로그인 후 답안을 채점할 수 있습니다." : aiResponseErrorMessage(error, "채점을 완료하지 못했습니다. 잠시 후 다시 시도해 주세요.") });
     } finally {
       setIsPracticeLoading(false);
     }

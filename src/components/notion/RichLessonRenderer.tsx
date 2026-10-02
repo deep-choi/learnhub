@@ -27,7 +27,7 @@ const renderInlineContent = (text: string): React.ReactNode[] => {
       return <MathRenderer key={idx} math={part.slice(2, -2).trim()} />;
     }
     if (part.startsWith("**") && part.endsWith("**")) {
-      return <strong key={idx} className="font-medium text-[var(--lh-ink)]">{part.slice(2, -2)}</strong>;
+      return <strong key={idx} className="font-semibold text-[var(--lh-ink)]">{part.slice(2, -2)}</strong>;
     }
     if (part.startsWith("`") && part.endsWith("`")) {
       return (
@@ -38,6 +38,32 @@ const renderInlineContent = (text: string): React.ReactNode[] => {
     }
     return <React.Fragment key={idx}>{part}</React.Fragment>;
   });
+};
+
+/** Pipes inside inline code or escaped pipes belong to the cell, not the table layout. */
+const tableCells = (line: string): string[] => {
+  const cells: string[] = [];
+  let cell = "";
+  let inCode = false;
+  const value = line.trim().replace(/^\|/, "").replace(/\|$/, "");
+  for (let i = 0; i < value.length; i++) {
+    if (value[i] === "\\" && value[i + 1] === "|") { cell += "|"; i++; }
+    else if (value[i] === "`") { inCode = !inCode; cell += value[i]; }
+    else if (value[i] === "|" && !inCode) { cells.push(cell.trim()); cell = ""; }
+    else cell += value[i];
+  }
+  cells.push(cell.trim());
+  return cells;
+};
+
+/** Older lessons often contain a single long paragraph. Break it at sentence boundaries without changing its words. */
+const readableParagraphs = (text: string): string[] => {
+  if (text.length < 240 || /\$|\\\(|\\\[|`/.test(text)) return [text];
+  const sentences = text.match(/[^.!?。]+(?:[.!?。]+(?=\s|$)|$)/g);
+  if (!sentences || sentences.length < 4 || sentences.join("") !== text) return [text];
+  const paragraphs: string[] = [];
+  for (let i = 0; i < sentences.length; i += 2) paragraphs.push(sentences.slice(i, i + 2).join("").trim());
+  return paragraphs;
 };
 
 export const RichLessonRenderer: React.FC<RichLessonRendererProps> = ({ content, className = "" }) => {
@@ -55,7 +81,7 @@ export const RichLessonRenderer: React.FC<RichLessonRendererProps> = ({ content,
     blocks.push(
       <List
         key={`list-${blocks.length}`}
-        className={`${currentList.type === "ul" ? "list-disc" : "list-decimal"} my-2 ml-5 space-y-1 text-base leading-[1.75] text-[var(--lh-ink)]`}
+        className={`${currentList.type === "ul" ? "list-disc" : "list-decimal"} my-4 ml-5 space-y-2 text-base leading-[1.8] text-[var(--lh-ink)] marker:text-[var(--lh-ink-secondary)]`}
       >
         {currentList.items.map((item, i) => <li key={i}>{item}</li>)}
       </List>
@@ -119,6 +145,32 @@ export const RichLessonRenderer: React.FC<RichLessonRendererProps> = ({ content,
       flushList();
       continue;
     }
+    const separators = i + 1 < lines.length ? tableCells(lines[i + 1]) : [];
+    const headers = tableCells(line);
+    if (trimmed.includes("|") && headers.length >= 2 && separators.length === headers.length && separators.every((cell) => /^:?-{3,}:?$/.test(cell))) {
+      flushList();
+      const rows: string[][] = [];
+      let nextLine = i + 2;
+      while (nextLine < lines.length && lines[nextLine].trim().includes("|")) {
+        const cells = tableCells(lines[nextLine]);
+        if (cells.length !== headers.length) break;
+        rows.push(cells);
+        nextLine++;
+      }
+      const align = (column: number): "left" | "center" | "right" => separators[column].endsWith(":") ? (separators[column].startsWith(":") ? "center" : "right") : "left";
+      blocks.push(
+        <div key={`table-${i}`} role="region" aria-label="학습 내용 표" tabIndex={0} className="my-5 max-w-full overflow-x-auto rounded-xl border border-[var(--lh-line)] focus-visible:outline-2 focus-visible:outline-[var(--lh-primary)]">
+          <table className="w-full border-collapse text-base leading-relaxed text-[var(--lh-ink)]">
+            <thead className="bg-[var(--lh-surface-subtle)]">
+              <tr>{headers.map((header, column) => <th key={column} scope="col" style={{ textAlign: align(column) }} className="min-w-24 border-b border-[var(--lh-line)] px-4 py-3 font-semibold">{renderInlineContent(header)}</th>)}</tr>
+            </thead>
+            <tbody>{rows.map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, column) => <td key={column} style={{ textAlign: align(column) }} className="border-b border-[var(--lh-line)] px-4 py-3 align-top [tr:last-child_&]:border-b-0">{renderInlineContent(cell)}</td>)}</tr>)}</tbody>
+          </table>
+        </div>,
+      );
+      i = nextLine - 1;
+      continue;
+    }
     if (trimmed.startsWith("$$") && !trimmed.endsWith("$$")) {
       flushList();
       pendingMath = { closing: "$$", lines: [trimmed.slice(2)] };
@@ -139,22 +191,22 @@ export const RichLessonRenderer: React.FC<RichLessonRendererProps> = ({ content,
     }
     if (trimmed.startsWith("### ")) {
       flushList();
-      blocks.push(<h4 key={i} className="mt-4 mb-1.5 text-base font-medium text-[var(--lh-ink)]">{renderInlineContent(trimmed.slice(4))}</h4>);
+      blocks.push(<h4 key={i} className="mt-6 mb-3 text-lg font-semibold leading-snug text-[var(--lh-ink)]">{renderInlineContent(trimmed.slice(4))}</h4>);
       continue;
     }
     if (trimmed.startsWith("## ")) {
       flushList();
-      blocks.push(<h3 key={i} className="mt-5 mb-2 text-lg font-medium text-[var(--lh-ink)]">{renderInlineContent(trimmed.slice(3))}</h3>);
+      blocks.push(<h3 key={i} className="mt-7 mb-3 text-xl font-semibold leading-snug text-[var(--lh-ink)]">{renderInlineContent(trimmed.slice(3))}</h3>);
       continue;
     }
     if (trimmed.startsWith("# ")) {
       flushList();
-      blocks.push(<h2 key={i} className="mt-6 mb-2.5 text-xl font-medium text-[var(--lh-ink)]">{renderInlineContent(trimmed.slice(2))}</h2>);
+      blocks.push(<h2 key={i} className="mt-7 mb-4 text-2xl font-semibold leading-snug text-[var(--lh-ink)]">{renderInlineContent(trimmed.slice(2))}</h2>);
       continue;
     }
     if (trimmed.startsWith("> ")) {
       flushList();
-      blocks.push(<blockquote key={i} className="my-3 rounded-r-md border-l-2 border-[var(--lh-ink)] bg-[var(--lh-surface-subtle)] py-2 px-3 text-sm italic text-[var(--lh-ink-secondary)]">{renderInlineContent(trimmed.slice(2))}</blockquote>);
+      blocks.push(<blockquote key={i} className="my-5 border-l-3 border-[var(--lh-primary)] py-1 pl-4 text-lg font-medium leading-relaxed text-[var(--lh-ink)]">{renderInlineContent(trimmed.slice(2))}</blockquote>);
       continue;
     }
     if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
@@ -177,12 +229,14 @@ export const RichLessonRenderer: React.FC<RichLessonRendererProps> = ({ content,
     }
 
     flushList();
-    blocks.push(<p key={i} className="my-3.5 text-base leading-[1.75] text-[var(--lh-ink)] break-keep">{renderInlineContent(line)}</p>);
+    readableParagraphs(line).forEach((paragraph, paragraphIndex) => {
+      blocks.push(<p key={`${i}-${paragraphIndex}`} className="my-4 text-base leading-[1.8] text-[var(--lh-ink)] break-keep [overflow-wrap:anywhere]">{renderInlineContent(paragraph)}</p>);
+    });
   }
 
   if (codeFence) pushCodeBlock();
   if (pendingMath) pushMathBlock(pendingMath.lines.join("\n"), "unterminated");
   flushList();
 
-  return <div className={`space-y-1 ${className}`}>{blocks}</div>;
+  return <div className={`min-w-0 max-w-full [&>:first-child]:mt-0 [&>:last-child]:mb-0 ${className}`}>{blocks}</div>;
 };

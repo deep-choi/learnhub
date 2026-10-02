@@ -1,6 +1,7 @@
 import {
   DEFAULT_AI_SELECTION,
   normalizeAiSelection,
+  type AiProvider,
   type AiRuntimeSelection,
 } from "../domain/aiModels";
 import { notifyLearningDataChanged } from "./storage";
@@ -9,6 +10,7 @@ export const AI_PREFERENCES_STORAGE_KEY = "learnhub_ai_preferences_v1";
 
 export interface AiQuotaSnapshot {
   limits: {
+    enabled?: boolean;
     requestsPerMinute: number;
     requestsPerDay: number;
     reservedOutputTokensPerDay: number;
@@ -25,10 +27,11 @@ export interface AiQuotaSnapshot {
 }
 
 export interface AiPublicConfiguration extends AiQuotaSnapshot {
-  providers: Record<"openai" | "gemini", { configured: boolean }>;
+  /** Claude를 모르는 이전 서버는 `anthropic`을 보내지 않는다. */
+  providers: Partial<Record<AiProvider, { configured: boolean }>>;
   models: Array<{
     id: string;
-    provider: "openai" | "gemini";
+    provider: AiProvider;
     label: string;
     lifecycle: "stable" | "preview";
     reasoningEfforts: AiRuntimeSelection["reasoningEffort"][];

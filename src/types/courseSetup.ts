@@ -9,7 +9,7 @@ export interface CourseSetup {
   dailyMinutes?: number;
   /** 경험 질문에 대한 답. 수준 추정의 근거이며 화면에 "처음 · 취미 · 하루 15분"처럼 보여 준다. */
   experience?: SetupExperience;
-  /** 확인 질문에 대한 사용자의 답(채점하지 않고 수준 추정에만 쓴다). 200자 이내 */
+  /** 경험 답변과 실제 확인 질문·답변·판단 근거. 시작 지점 결정에 사용한다. */
   levelEvidence?: string;
 }
 
@@ -42,6 +42,7 @@ export interface SetupStep {
 export interface SetupProgress {
   answered: SetupStepId[];
   skipped: boolean;
+  levelCheckCount?: number;
 }
 
 export interface ResolvedCourseSetup {
@@ -57,4 +58,8 @@ export interface SetupAnswerResult {
   /** 규칙이나 AI가 답을 실제로 해석했는지. false면 기본값/원문을 쓴 것이다. */
   matched: boolean;
   source: "chip" | "local" | "ai" | "fallback";
+  /** 실제 답변에서 확인된 이해와 다음에 배울 내용을 짚는다. */
+  feedback?: string;
+  /** 이해 범위를 더 확인해야 할 때 AI가 만드는 후속 질문. */
+  nextQuestion?: string;
 }

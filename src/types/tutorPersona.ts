@@ -11,6 +11,11 @@ export type TutorAvatar =
 export interface TutorPersona {
   name: string;
   avatar?: TutorAvatar;
+  /** 튜터의 역할(예: '수학 선생님'). 20자 이하. 비우면 없음. */
+  role?: string;
+  /** 말투(예: '친절하고 차분하게'). 자유 입력 40자 이하. 비우면 없음. */
+  tone?: string;
+  /** 내부 기본값/하위 호환용. 편집 화면에서는 더 이상 고르지 않는다. */
   preset: TutorPersonaPreset;
   customPersonality?: string;
   responseLength: TutorResponseLength;
@@ -23,10 +28,12 @@ export type TutorPersonaInput = Omit<TutorPersona, "updatedAt">;
 /** 대화 요청에 실어 보내는 값. 이미지는 서버로 보내지 않는다. */
 export interface TutorPersonaRequest {
   name: string;
+  role?: string;
+  tone?: string;
   preset: TutorPersonaPreset;
   customPersonality?: string;
   responseLength: TutorResponseLength;
 }
 
-export type SaveTutorPersonaFailure = "invalid_name" | "invalid_personality" | "invalid_preset" | "invalid_image" | "storage";
+export type SaveTutorPersonaFailure = "invalid_name" | "invalid_role" | "invalid_tone" | "invalid_personality" | "invalid_preset" | "invalid_image" | "storage";
 export type SaveTutorPersonaResult = { ok: true; persona: TutorPersona } | { ok: false; reason: SaveTutorPersonaFailure };
