@@ -27,6 +27,8 @@ import { authorizedFetch } from "../../services/authClient";
 import {
   AI_MODEL_CATALOG,
   AI_OUTPUT_TOKEN_OPTIONS,
+  AI_PROVIDER_LABELS,
+  AI_PROVIDER_ORDER,
   REASONING_EFFORT_LABELS,
   nearestReasoningEffort,
   type AiProvider,
@@ -202,7 +204,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setAiSettingsError("");
     if (!selectedModel?.available) {
       setAiSettingsStatus("error");
-      setAiSettingsError(`${aiSelection.provider === "openai" ? "OpenAI" : "Gemini"} API 키가 서버에 설정되지 않았습니다.`);
+      setAiSettingsError(`${AI_PROVIDER_LABELS[aiSelection.provider]} 모델은 아직 준비 중입니다. 다른 모델을 선택해 주세요.`);
       return;
     }
     if (!saveAiPreferences(aiSelection)) {
@@ -553,13 +555,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       </button>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-2">
-                      {(["gemini", "openai"] as AiProvider[]).map((provider) => {
-                        const configured = aiConfiguration?.providers[provider].configured === true;
+                    <div className="grid grid-cols-3 gap-2">
+                      {AI_PROVIDER_ORDER.map((provider) => {
+                        const configured = aiConfiguration?.providers[provider]?.configured === true;
                         return (
-                          <button key={provider} type="button" onClick={() => updateAiProvider(provider)} className={`rounded-xl border px-3 py-2 text-left transition ${aiSelection.provider === provider ? "border-[var(--lh-primary)] bg-[var(--lh-surface)]" : "border-[var(--lh-line)] hover:bg-[var(--lh-surface)]"}`}>
-                            <span className="block text-xs font-medium text-[var(--lh-ink)]">{provider === "gemini" ? "Google Gemini" : "OpenAI GPT"}</span>
-                            <span className={`mt-0.5 block text-[10px] ${configured ? "text-[var(--lh-primary)]" : "text-[var(--lh-ink-tertiary)]"}`}>{configured ? "API 연결됨" : "서버 API 키 필요"}</span>
+                          <button key={provider} type="button" onClick={() => updateAiProvider(provider)} className={`min-w-0 rounded-xl border px-3 py-2 text-left transition ${aiSelection.provider === provider ? "border-[var(--lh-primary)] bg-[var(--lh-surface)]" : "border-[var(--lh-line)] hover:bg-[var(--lh-surface)]"}`}>
+                            <span className="block truncate text-xs font-medium text-[var(--lh-ink)]">{AI_PROVIDER_LABELS[provider]}</span>
+                            <span className={`mt-0.5 block truncate text-[10px] ${configured ? "text-[var(--lh-primary)]" : "text-[var(--lh-ink-tertiary)]"}`}>{configured ? "API 연결됨" : "준비 중"}</span>
                           </button>
                         );
                       })}
@@ -568,9 +570,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     <label className="block space-y-1.5 text-[11px] text-[var(--lh-ink-secondary)]">
                       <span>모델</span>
                       <select value={aiSelection.model} onChange={(event) => updateAiModel(event.target.value)} className="min-h-10 w-full rounded-xl border border-[var(--lh-line)] bg-[var(--lh-surface)] px-3 text-xs text-[var(--lh-ink)] outline-none focus:border-[var(--lh-primary)]">
-                        {availableModels.map((model) => <option key={model.id} value={model.id}>{model.label}{model.lifecycle === "preview" ? " · Preview" : ""}</option>)}
+                        {availableModels.map((model) => <option key={model.id} value={model.id}>{model.label}{model.lifecycle === "preview" ? " · Preview" : ""}{model.available ? "" : " · 준비 중"}</option>)}
                       </select>
-                      {selectedModel && <span className="block text-[10px] text-[var(--lh-ink-tertiary)]">{selectedModel.recommendedFor}</span>}
                     </label>
 
                     <div className="space-y-1.5">

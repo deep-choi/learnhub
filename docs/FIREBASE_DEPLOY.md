@@ -32,6 +32,7 @@ Firebase Authentication과 Firestore가 온라인 계정·데이터 원본이다
 
 - `GEMINI_API_KEY`
 - `OPENAI_API_KEY`
+- `ANTHROPIC_API_KEY` (Claude를 켤 때만. secret을 등록한 뒤 `functions/index.cjs`의 `secrets`에 `defineSecret("ANTHROPIC_API_KEY")`를 추가한다. 등록 전에 추가하면 배포가 실패한다.)
 - AI quota 환경변수
 
 ## 배포 순서

@@ -1,6 +1,7 @@
 import {
   DEFAULT_AI_SELECTION,
   normalizeAiSelection,
+  type AiProvider,
   type AiRuntimeSelection,
 } from "../domain/aiModels";
 import { notifyLearningDataChanged } from "./storage";
@@ -25,10 +26,11 @@ export interface AiQuotaSnapshot {
 }
 
 export interface AiPublicConfiguration extends AiQuotaSnapshot {
-  providers: Record<"openai" | "gemini", { configured: boolean }>;
+  /** Claude를 모르는 이전 서버는 `anthropic`을 보내지 않는다. */
+  providers: Partial<Record<AiProvider, { configured: boolean }>>;
   models: Array<{
     id: string;
-    provider: "openai" | "gemini";
+    provider: AiProvider;
     label: string;
     lifecycle: "stable" | "preview";
     reasoningEfforts: AiRuntimeSelection["reasoningEffort"][];

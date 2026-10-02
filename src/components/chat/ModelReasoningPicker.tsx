@@ -1,8 +1,10 @@
 import React, { useEffect, useId, useRef, useState } from "react";
 import { Check, ChevronDown, ChevronLeft, ChevronRight, Clock } from "lucide-react";
 import {
+  AI_PROVIDER_LABELS,
   REASONING_EFFORT_LABELS,
   getAiModel,
+  groupModelsByProvider,
   isCostlyReasoningEffort,
   selectionForModel,
   sortReasoningEfforts,
@@ -13,8 +15,80 @@ import { getAiPreferences, saveAiPreferences } from "../../services/aiPreference
 import { fetchAiAvailability, type AiAvailability } from "../../services/aiAvailability";
 import { LEARNHUB_DATA_CHANGED_EVENT } from "../../services/storage";
 
-const PROVIDER_LABELS = { gemini: "Gemini", openai: "OpenAI" } as const;
 export const REASONING_COST_HINT = "답이 더 느리고 하루 사용량을 더 써요";
+export const PREPARING_LABEL = "준비 중";
+
+/** 서버에 키가 없는 제공자의 모델에 붙는 작은 표시. */
+const PreparingBadge: React.FC = () => (
+  <span className="shrink-0 rounded-full bg-[var(--lh-surface-subtle)] px-1.5 text-[10px] leading-4 text-[var(--lh-ink-tertiary)]">{PREPARING_LABEL}</span>
+);
+
+/** 팝오버 첫 화면의 모델 이름. 설명 문구 없이 이름과 "준비 중" 표시만 보여 줍니다. */
+export const ModelSummary: React.FC<{ label: string; available: boolean }> = ({ label, available }: { label: string; available: boolean }) => (
+  <span className="flex min-w-0 flex-1 items-center gap-1.5">
+    <span className="truncate text-[15px] font-medium">{label}</span>
+    {!available && <PreparingBadge />}
+  </span>
+);
+
+interface ModelListProps {
+  models: AiAvailability["models"];
+  selection: AiRuntimeSelection;
+  onChoose: (provider: AiRuntimeSelection["provider"], id: string) => void;
+  listRef?: React.Ref<HTMLDivElement>;
+  onKeyDown?: (event: React.KeyboardEvent) => void;
+}
+
+/**
+ * "모델 고르기" 목록. Claude → GPT → Gemini 순서로 제공자 제목 아래에 모델 이름만 보여 줍니다.
+ * 키가 없는 제공자의 모델은 "준비 중"으로 표시하고 고를 수 없습니다.
+ */
+export const ModelList: React.FC<ModelListProps> = ({ models, selection, onChoose, listRef, onKeyDown }: ModelListProps) => {
+  const selectedAvailable = models.some((item) => item.available && item.provider === selection.provider && item.id === selection.model);
+  const firstAvailable = models.find((item) => item.available);
+  const groups = groupModelsByProvider(models);
+  return (
+    <div ref={listRef} role="radiogroup" aria-label="AI 모델" onKeyDown={onKeyDown} className="mt-1 max-h-[min(18rem,40dvh)] overflow-y-auto">
+      {groups.map((group) => (
+        <div key={group.provider} className="py-1">
+          <p className="px-3 pb-1 pt-1.5 text-[11px] font-medium text-[var(--lh-ink-tertiary)]">{AI_PROVIDER_LABELS[group.provider]}</p>
+          {group.models.map((item) => {
+            const selected = item.provider === selection.provider && item.id === selection.model;
+            const focusable = item.available && (selected || (!selectedAvailable && item === firstAvailable));
+            return (
+              <button
+                key={`${item.provider}:${item.id}`}
+                type="button"
+                role="radio"
+                aria-checked={selected}
+                disabled={!item.available}
+                aria-label={item.available ? item.label : `${item.label}, ${PREPARING_LABEL}`}
+                tabIndex={focusable ? 0 : -1}
+                onClick={() => onChoose(item.provider, item.id)}
+                className={`flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left transition ${
+                  !item.available
+                    ? "cursor-not-allowed opacity-60"
+                    : selected
+                      ? "bg-[var(--lh-primary-subtle)] cursor-pointer"
+                      : "hover:bg-[var(--lh-surface-subtle)] cursor-pointer"
+                }`}
+              >
+                <span className="flex min-w-0 flex-1 items-center gap-1.5">
+                  <span className={`truncate text-sm font-medium ${selected && item.available ? "text-[var(--lh-primary-text)]" : ""}`}>{item.label}</span>
+                  {item.lifecycle === "preview" && (
+                    <span className="shrink-0 rounded-full border border-[var(--lh-line-strong)] px-1.5 text-[10px] leading-4 text-[var(--lh-ink-secondary)]">미리보기</span>
+                  )}
+                  {!item.available && <PreparingBadge />}
+                </span>
+                {selected && item.available && <Check aria-hidden className="h-4 w-4 shrink-0 text-[var(--lh-primary-text)]" />}
+              </button>
+            );
+          })}
+        </div>
+      ))}
+    </div>
+  );
+};
 
 interface ReasoningSliderProps {
   efforts: AiReasoningEffort[];
@@ -159,18 +233,18 @@ export const ModelReasoningPicker: React.FC<ModelReasoningPickerProps> = ({ dire
 
   useEffect(() => {
     if (!open) return;
-    if (view === "models") (listRef.current?.querySelector<HTMLElement>("[aria-checked='true']") ?? listRef.current?.querySelector<HTMLElement>("[role='radio']"))?.focus();
+    if (view === "models") (listRef.current?.querySelector<HTMLElement>("[aria-checked='true']:not(:disabled)") ?? listRef.current?.querySelector<HTMLElement>("[role='radio']:not(:disabled)"))?.focus();
     else modelButtonRef.current?.focus();
   }, [open, view]);
 
-  if (!availability || availability.models.length === 0) return null;
+  if (!availability || !availability.models.some((item) => item.available)) return null;
 
   const model = getAiModel(selection.provider, selection.model);
-  const modelAvailable = availability.models.some((item) => item.provider === selection.provider && item.id === selection.model);
+  const modelAvailable = availability.models.some((item) => item.available && item.provider === selection.provider && item.id === selection.model);
   const efforts = sortReasoningEfforts(model?.reasoningEfforts ?? []);
   const effortLabel = REASONING_EFFORT_LABELS[selection.reasoningEffort];
   const modelLabel = model?.label ?? selection.model;
-  const providers = (["gemini", "openai"] as const).filter((provider) => availability.models.some((item) => item.provider === provider));
+  const statusLabel = modelAvailable ? effortLabel : PREPARING_LABEL;
 
   const save = (next: AiRuntimeSelection) => {
     if (saveAiPreferences(next)) {
@@ -194,7 +268,7 @@ export const ModelReasoningPicker: React.FC<ModelReasoningPickerProps> = ({ dire
 
   const moveInList = (event: React.KeyboardEvent) => {
     if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
-    const items = [...(listRef.current?.querySelectorAll<HTMLElement>("[role='radio']") ?? [])];
+    const items = [...(listRef.current?.querySelectorAll<HTMLElement>("[role='radio']:not(:disabled)") ?? [])];
     const current = items.indexOf(document.activeElement as HTMLElement);
     const next = items[(current + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length];
     if (next) {
@@ -228,11 +302,11 @@ export const ModelReasoningPicker: React.FC<ModelReasoningPickerProps> = ({ dire
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-controls={open ? popoverId : undefined}
-        aria-label={`AI 모델과 추론 단계: ${modelLabel} ${effortLabel}`}
+        aria-label={`AI 모델과 추론 단계: ${modelLabel} ${statusLabel}`}
         className="flex h-9 min-w-0 max-w-[10.5rem] items-center gap-1 rounded-full px-2.5 text-sm text-[var(--lh-ink-secondary)] transition hover:bg-[var(--lh-surface-subtle)] hover:text-[var(--lh-ink)] sm:max-w-[17rem] cursor-pointer"
       >
         <span className="truncate">{modelLabel}</span>
-        <span className="shrink-0 text-[var(--lh-ink-tertiary)]">{effortLabel}</span>
+        <span className="shrink-0 text-[var(--lh-ink-tertiary)]">{statusLabel}</span>
         <ChevronDown aria-hidden className={`h-4 w-4 shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
 
@@ -249,17 +323,14 @@ export const ModelReasoningPicker: React.FC<ModelReasoningPickerProps> = ({ dire
                 ref={modelButtonRef}
                 type="button"
                 onClick={() => setView("models")}
-                aria-label={`모델: ${modelLabel}. 눌러서 다른 모델 고르기`}
+                aria-label={`모델: ${modelLabel}${modelAvailable ? "" : `, ${PREPARING_LABEL}`}. 눌러서 다른 모델 고르기`}
                 className="flex min-h-12 w-full items-center gap-2 rounded-xl px-3 py-2 text-left transition hover:bg-[var(--lh-surface-subtle)] cursor-pointer"
               >
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[15px] font-medium">{modelLabel}</span>
-                  {model && <span className="block truncate text-xs text-[var(--lh-ink-tertiary)]">{model.recommendedFor}</span>}
-                </span>
+                <ModelSummary label={modelLabel} available={modelAvailable} />
                 <ChevronRight aria-hidden className="h-4 w-4 shrink-0 text-[var(--lh-ink-tertiary)]" />
               </button>
               {!modelAvailable && (
-                <p className="px-3 text-xs leading-5 text-[var(--lh-danger)]">지금 이 모델은 쓸 수 없어요. 다른 모델을 골라 주세요.</p>
+                <p className="px-3 text-xs leading-5 text-[var(--lh-ink-secondary)]">이 모델은 아직 준비 중이에요. 그동안에는 기본 모델이 답해요. 다른 모델을 골라도 돼요.</p>
               )}
               {efforts.length > 1 && (
                 <div className="border-t border-[var(--lh-line)] px-1 pb-1 pt-3">
@@ -286,38 +357,7 @@ export const ModelReasoningPicker: React.FC<ModelReasoningPickerProps> = ({ dire
               >
                 <ChevronLeft aria-hidden className="h-4 w-4" /> 모델 고르기
               </button>
-              <div ref={listRef} role="radiogroup" aria-label="AI 모델" onKeyDown={moveInList} className="mt-1 max-h-[min(18rem,40dvh)] overflow-y-auto">
-                {providers.map((provider) => (
-                  <div key={provider} className="py-1">
-                    {providers.length > 1 && <p className="px-3 pb-1 pt-1.5 text-[11px] font-medium text-[var(--lh-ink-tertiary)]">{PROVIDER_LABELS[provider]}</p>}
-                    {availability.models.filter((item) => item.provider === provider).map((item) => {
-                      const selected = item.provider === selection.provider && item.id === selection.model;
-                      return (
-                        <button
-                          key={`${item.provider}:${item.id}`}
-                          type="button"
-                          role="radio"
-                          aria-checked={selected}
-                          tabIndex={selected || (!modelAvailable && item === availability.models[0]) ? 0 : -1}
-                          onClick={() => chooseModel(item.provider, item.id)}
-                          className={`flex w-full items-start gap-2 rounded-xl px-3 py-2 text-left transition cursor-pointer ${selected ? "bg-[var(--lh-primary-subtle)]" : "hover:bg-[var(--lh-surface-subtle)]"}`}
-                        >
-                          <span className="min-w-0 flex-1">
-                            <span className="flex items-center gap-1.5">
-                              <span className={`truncate text-sm font-medium ${selected ? "text-[var(--lh-primary-text)]" : ""}`}>{item.label}</span>
-                              {item.lifecycle === "preview" && (
-                                <span className="shrink-0 rounded-full border border-[var(--lh-line-strong)] px-1.5 text-[10px] leading-4 text-[var(--lh-ink-secondary)]">미리보기</span>
-                              )}
-                            </span>
-                            <span className="block text-xs leading-5 text-[var(--lh-ink-tertiary)]">{item.recommendedFor}</span>
-                          </span>
-                          {selected && <Check aria-hidden className="mt-0.5 h-4 w-4 shrink-0 text-[var(--lh-primary-text)]" />}
-                        </button>
-                      );
-                    })}
-                  </div>
-                ))}
-              </div>
+              <ModelList models={availability.models} selection={selection} onChoose={chooseModel} listRef={listRef} onKeyDown={moveInList} />
             </div>
           )}
         </div>

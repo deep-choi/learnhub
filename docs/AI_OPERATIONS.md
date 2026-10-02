@@ -60,6 +60,7 @@ API 키 값, 조직 ID, 결제 정보는 반환하지 않는다.
 
 - `GEMINI_API_KEY`
 - `OPENAI_API_KEY`
+- `ANTHROPIC_API_KEY` (선택. 없으면 Claude 모델은 입력바에 "준비 중"으로 보이고, 저장된 Claude 선택은 서버 기본 모델로 처리된다.)
 
 키는 서버 환경이나 secret manager에만 저장한다. `VITE_` 접두사, 브라우저 localStorage, Firebase 공개 웹 설정, source control에 넣지 않는다. 키 하나가 없으면 그 공급자의 모델은 설정 화면에 “서버 API 키 필요”로 표시되고 저장을 막는다. 다른 공급자는 계속 사용할 수 있다.
 

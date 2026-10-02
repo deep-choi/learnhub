@@ -19,10 +19,8 @@ import { PreviewQuota, reserveFirestorePreview } from "./server/previewQuota";
 import { installUnhandledRejectionLogger } from "./server/runtimeSafety";
 import { learningSafetyPrompt } from "./server/learningSafety";
 import { personaOutputTokens, personaPrompt, sanitizePersona } from "./server/tutorPersona";
-import { defaultAiSelectionFor, publicAiAvailability } from "./server/aiAvailability";
+import { configuredSelectionOrDefault, defaultAiSelectionFor, publicAiAvailability } from "./server/aiAvailability";
 import {
-  AI_MODEL_CATALOG,
-  AI_OUTPUT_TOKEN_OPTIONS,
   isAiRuntimeSelection,
   type AiRuntimeSelection,
 } from "./src/domain/aiModels";
@@ -143,13 +141,14 @@ const aiPolicy = new AiAdmissionController({
 const aiGateway = new AiGateway({
   geminiApiKey: process.env.GEMINI_API_KEY,
   openAiApiKey: process.env.OPENAI_API_KEY,
+  anthropicApiKey: process.env.ANTHROPIC_API_KEY,
   policy: aiPolicy,
 });
 // Accept forwarding headers only when the operator configures trusted proxy hops.
 const previewProxyHops = Number(process.env.PREVIEW_TRUSTED_PROXY_HOPS || 0);
 if (!Number.isInteger(previewProxyHops) || previewProxyHops < 0 || previewProxyHops > 5) throw new Error("PREVIEW_TRUSTED_PROXY_HOPS 설정을 확인해 주세요.");
 app.set("trust proxy", previewProxyHops);
-const previewGateway = new AiGateway({ geminiApiKey: process.env.GEMINI_API_KEY, openAiApiKey: process.env.OPENAI_API_KEY,
+const previewGateway = new AiGateway({ geminiApiKey: process.env.GEMINI_API_KEY, openAiApiKey: process.env.OPENAI_API_KEY, anthropicApiKey: process.env.ANTHROPIC_API_KEY,
   policy: new AiAdmissionController({ maxConcurrent: 2, dailyRequestBudget: 100, perClientDailyRequestBudget: 3, dailyOutputTokenBudget: 260000, perClientDailyOutputTokenBudget: 7800 }) });
 const previewQuota = new PreviewQuota({
   perIp: positiveEnvInteger("PREVIEW_REQUESTS_PER_IP_PER_DAY", 3), globalLimit: positiveEnvInteger("PREVIEW_GLOBAL_REQUESTS_PER_DAY", 100),
@@ -190,7 +189,8 @@ const aiSelectionFor = (req: Request): AiRuntimeSelection => {
     maxOutputTokens: Number(maxOutputTokens),
   };
   if (!isAiRuntimeSelection(candidate)) throw new AiGatewayError("AI_INVALID_REQUEST", 400);
-  return candidate;
+  // 키가 없는 제공자("준비 중")를 고른 채로 보내면 기본 모델로 답한다.
+  return configuredSelectionOrDefault(candidate, (configured) => aiGateway.isConfigured(configured));
 };
 
 /** 서버에 키가 설정된 제공자와 그 모델. 비밀 값은 없고 설정 여부만 담는다. */
@@ -261,16 +261,11 @@ app.get("/api/ai/config", async (req, res) => {
       return res.status(503).json({ error: "AI 사용량을 확인할 수 없습니다.", code: "AI_QUOTA_UNAVAILABLE" });
     }
   }
+  const ai = aiAvailability();
   return res.json({
-    providers: {
-      openai: { configured: aiGateway.isConfigured("openai") },
-      gemini: { configured: aiGateway.isConfigured("gemini") },
-    },
-    models: AI_MODEL_CATALOG.map((model) => ({
-      ...model,
-      available: aiGateway.isConfigured(model.provider),
-    })),
-    outputTokenOptions: [...AI_OUTPUT_TOKEN_OPTIONS],
+    providers: ai.providers,
+    models: ai.models,
+    outputTokenOptions: ai.outputTokenOptions,
     limits: {
       requestsPerMinute: quota.limits.requestsPerMinute,
       requestsPerDay: durableUsage?.requestLimit ?? quota.limits.requestsPerDay,
@@ -297,6 +292,7 @@ const sendAiError = (res: Response, error: unknown) => {
       AI_INVALID_REQUEST: "AI 요청 형식을 확인해 주세요.",
       AI_UNAVAILABLE: "AI 기능을 잠시 사용할 수 없습니다.",
     };
+    if (error.detail === "refusal") return res.status(error.httpStatus).json({ error: "AI가 이 요청에는 답하지 않았어요. 질문을 조금 바꿔서 다시 시도해 주세요.", code: error.code });
     return res.status(error.httpStatus).json({ error: messages[error.code] || messages.AI_UNAVAILABLE, code: error.code });
   }
   return res.status(503).json({ error: "AI 기능을 잠시 사용할 수 없습니다.", code: "AI_UNAVAILABLE" });

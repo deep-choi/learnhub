@@ -1,4 +1,4 @@
-export type AiProvider = "openai" | "gemini";
+export type AiProvider = "anthropic" | "openai" | "gemini";
 export type AiReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
 export interface AiModelDefinition {
@@ -12,11 +12,15 @@ export interface AiModelDefinition {
 
 /**
  * Text/JSON models supported by LearnHub's teaching endpoints.
- * Verified against the vendors' official model pages on 2026-09-15.
+ * Verified against the vendors' official model pages on 2026-09-15 (Claude models on 2026-10-02).
+ * Claude IDs are the exact API aliases; never append date suffixes.
  * Image, audio, realtime, embedding, and agent-only models are intentionally
  * excluded because the current endpoints require structured text output.
  */
 export const AI_MODEL_CATALOG: readonly AiModelDefinition[] = [
+  { id: "claude-opus-5-5", provider: "anthropic", label: "Claude Opus 5.5", lifecycle: "stable", reasoningEfforts: ["low", "medium", "high", "xhigh", "max"], recommendedFor: "가장 깊이 있는 설명과 복잡한 추론" },
+  { id: "claude-sonnet-5-5", provider: "anthropic", label: "Claude Sonnet 5.5", lifecycle: "stable", reasoningEfforts: ["low", "medium", "high", "xhigh", "max"], recommendedFor: "품질과 속도의 균형" },
+  { id: "claude-haiku-4-5", provider: "anthropic", label: "Claude Haiku 4.5", lifecycle: "stable", reasoningEfforts: ["none", "low", "medium", "high"], recommendedFor: "빠르고 가벼운 반복 학습" },
   { id: "gpt-6-astra", provider: "openai", label: "GPT-6 Astra", lifecycle: "stable", reasoningEfforts: ["low", "medium", "high", "xhigh", "max"], recommendedFor: "최신 최고 성능의 복잡한 학습 설계와 추론" },
   { id: "gpt-5.6-sol", provider: "openai", label: "GPT-5.6 Sol", lifecycle: "stable", reasoningEfforts: ["none", "low", "medium", "high", "xhigh", "max"], recommendedFor: "가장 복잡한 설명과 정밀한 추론" },
   { id: "gpt-5.6-terra", provider: "openai", label: "GPT-5.6 Terra", lifecycle: "stable", reasoningEfforts: ["none", "low", "medium", "high", "xhigh", "max"], recommendedFor: "품질과 비용의 균형" },
@@ -53,7 +57,16 @@ export const DEFAULT_AI_SELECTION: AiRuntimeSelection = {
 export const getAiModel = (provider: AiProvider, model: string): AiModelDefinition | null =>
   AI_MODEL_CATALOG.find((candidate) => candidate.provider === provider && candidate.id === model) || null;
 
-export const isAiProvider = (value: unknown): value is AiProvider => value === "openai" || value === "gemini";
+export const isAiProvider = (value: unknown): value is AiProvider => value === "anthropic" || value === "openai" || value === "gemini";
+
+/** 모델 목록에서 제공자를 보여 주는 순서와 이름. */
+export const AI_PROVIDER_ORDER: readonly AiProvider[] = ["anthropic", "openai", "gemini"];
+export const AI_PROVIDER_LABELS: Record<AiProvider, string> = { anthropic: "Claude", openai: "GPT", gemini: "Gemini" };
+
+/** 모델을 제공자별로 묶는다. 순서는 Claude → GPT → Gemini이고, 각 묶음 안에서는 받은 순서를 지킨다. */
+export const groupModelsByProvider = <T extends { provider: AiProvider }>(models: readonly T[]): Array<{ provider: AiProvider; models: T[] }> =>
+  AI_PROVIDER_ORDER.map((provider) => ({ provider, models: models.filter((model) => model.provider === provider) }))
+    .filter((group) => group.models.length > 0);
 
 export const isAiReasoningEffort = (value: unknown): value is AiReasoningEffort =>
   value === "none" || value === "minimal" || value === "low" || value === "medium" || value === "high" || value === "xhigh" || value === "max";
