@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { Type } from "@google/genai";
 import type { AiGateway } from "./aiGateway";
-import type { AiRuntimeSelection } from "../src/domain/aiModels";
+import { DEFAULT_AI_SELECTION, type AiRuntimeSelection } from "../src/domain/aiModels";
 import type { CurriculumConceptLinks, NextStep, NudgeResponse } from "../src/types/knowledgeGraph";
 import { validateCurriculumPayload } from "../src/domain/contentValidation";
 import { learningSafetyPrompt } from "./learningSafety";
@@ -194,6 +194,8 @@ export function knowledgeGraphRouter(deps: {
   previewQuota: PreviewQuota;
   authorize: (req: Request, res: Response) => Promise<boolean>;
   selection: (req: Request) => AiRuntimeSelection;
+  /** 비로그인 미리보기에 쓰는 모델. 요청 헤더의 모델·추론 선택은 무시한다. 없으면 기본 모델이다. */
+  previewSelection?: () => AiRuntimeSelection;
   reserveUser: (req: Request, res: Response, tokens: number) => Promise<void>;
   clientKey: (req: Request, res: Response) => string;
   error: (res: Response, error: unknown) => unknown;
@@ -203,7 +205,8 @@ export function knowledgeGraphRouter(deps: {
     if (!validCourseRequest(req.body)) return res.status(400).json({ error: "주제와 학습 설정을 확인해 주세요.", code: "INVALID_REQUEST" });
     res.setHeader("Cache-Control", "no-store");
     try {
-      const selection = deps.selection(req);
+      // 인증 없이 부르는 엔드포인트라 클라이언트가 보낸 모델·추론 헤더를 따르지 않는다(비용 보호).
+      const selection = deps.previewSelection ? deps.previewSelection() : { ...DEFAULT_AI_SELECTION };
       await deps.previewQuota.reserve(req.ip || req.socket.remoteAddress || "unknown");
       const result = await deps.previewGateway.generateJson<Record<string, unknown>>({ endpoint: "preview-course", requestId: res.locals.requestId, clientKey: `preview:${req.ip || req.socket.remoteAddress}`, prompt: coursePrompt(req.body), config: { responseMimeType: "application/json", responseSchema: graphCurriculumSchema }, maxOutputTokens: 2600, selection, validate: v => validateCurriculumPayload(v, { requireConceptLinks: true }) });
       return res.json({ preview: true, curriculum: result.payload, conceptLinks: extractConceptLinks(result.payload) });

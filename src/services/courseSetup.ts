@@ -1,4 +1,5 @@
 import { authorizedFetch } from "./authClient";
+import { getTutorPersonaRequest } from "./tutorPersonaStore";
 import { defaultsForStep, interpretSetupAnswerLocally, pickSetupFields } from "../domain/courseSetup";
 import type { CourseSetup, SetupAnswerResult, SetupStepId } from "../types/courseSetup";
 
@@ -29,7 +30,7 @@ export async function resolveSetupAnswer(
     const response = await authorizedFetch("/api/ai/interpret-setup", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ stepId, subject: context.subject.slice(0, 160), answer: text.slice(0, 400), ...(context.question ? { question: context.question.slice(0, 300) } : {}), ...(context.experience ? { experience: context.experience } : {}) }),
+      body: JSON.stringify({ stepId, subject: context.subject.slice(0, 160), answer: text.slice(0, 400), ...(context.question ? { question: context.question.slice(0, 300) } : {}), ...(context.experience ? { experience: context.experience } : {}), persona: getTutorPersonaRequest() }),
     });
     if (!response.ok) return fallback;
     const data = (await response.json()) as { setup?: unknown; fallback?: unknown };
@@ -49,7 +50,7 @@ export async function fetchLevelCheckQuestion(subject: string, experience: "some
     const response = await authorizedFetch("/api/ai/setup-question", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ subject: subject.slice(0, 160), experience }),
+      body: JSON.stringify({ subject: subject.slice(0, 160), experience, persona: getTutorPersonaRequest() }),
       signal: controller.signal,
     });
     if (!response.ok) return null;

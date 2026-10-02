@@ -19,10 +19,10 @@ import { PreviewQuota, reserveFirestorePreview } from "./server/previewQuota";
 import { installUnhandledRejectionLogger } from "./server/runtimeSafety";
 import { learningSafetyPrompt } from "./server/learningSafety";
 import { personaOutputTokens, personaPrompt, sanitizePersona } from "./server/tutorPersona";
+import { defaultAiSelectionFor, publicAiAvailability } from "./server/aiAvailability";
 import {
   AI_MODEL_CATALOG,
   AI_OUTPUT_TOKEN_OPTIONS,
-  DEFAULT_AI_SELECTION,
   isAiRuntimeSelection,
   type AiRuntimeSelection,
 } from "./src/domain/aiModels";
@@ -175,11 +175,7 @@ const isLoopbackRequest = (req: Request) => isAllowedLoopbackRequest({
 });
 const bearerToken = (req: Request) => /^Bearer\s+([^\s]{1,4096})$/i.exec(req.header("authorization") || "")?.[1] || null;
 
-const defaultAiSelection = (): AiRuntimeSelection => {
-  if (aiGateway.isConfigured("gemini")) return { ...DEFAULT_AI_SELECTION };
-  if (aiGateway.isConfigured("openai")) return { provider: "openai", model: "gpt-5.6-terra", reasoningEffort: "medium", maxOutputTokens: 8_192 };
-  return { ...DEFAULT_AI_SELECTION };
-};
+const defaultAiSelection = (): AiRuntimeSelection => defaultAiSelectionFor((provider) => aiGateway.isConfigured(provider));
 
 const aiSelectionFor = (req: Request): AiRuntimeSelection => {
   const provider = req.header("x-learnhub-ai-provider");
@@ -198,15 +194,7 @@ const aiSelectionFor = (req: Request): AiRuntimeSelection => {
 };
 
 /** 서버에 키가 설정된 제공자와 그 모델. 비밀 값은 없고 설정 여부만 담는다. */
-const aiAvailability = () => ({
-  providers: {
-    openai: { configured: aiGateway.isConfigured("openai") },
-    gemini: { configured: aiGateway.isConfigured("gemini") },
-  },
-  models: AI_MODEL_CATALOG.map((model) => ({ ...model, available: aiGateway.isConfigured(model.provider) })),
-  outputTokenOptions: [...AI_OUTPUT_TOKEN_OPTIONS],
-  defaultSelection: defaultAiSelection(),
-});
+const aiAvailability = () => publicAiAvailability((provider) => aiGateway.isConfigured(provider));
 
 app.get("/api/public-config", (_req, res) => {
   const firebaseConfig = getFirebasePublicConfig();
@@ -398,7 +386,7 @@ const validateReviewPayload = (payload: unknown): string[] => {
 };
 
 app.use("/api/ai", assessmentRouter({ gateway: aiGateway, authorize: requireAiAccess, clientKey: clientKeyFor, selection: aiSelectionFor, error: sendAiError }));
-app.use("/api/ai", knowledgeGraphRouter({ gateway: aiGateway, previewGateway, previewQuota, authorize: requireAiAccess, clientKey: clientKeyFor, selection: aiSelectionFor, error: sendAiError,
+app.use("/api/ai", knowledgeGraphRouter({ gateway: aiGateway, previewGateway, previewQuota, authorize: requireAiAccess, clientKey: clientKeyFor, selection: aiSelectionFor, previewSelection: defaultAiSelection, error: sendAiError,
   reserveUser: async (_req, res, tokens) => { if (typeof res.locals.userId === "string") await reserveFirebaseAiUsage(res.locals.userId, tokens); },
 }));
 
