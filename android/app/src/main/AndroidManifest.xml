@@ -1,8 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
-    <application android:allowBackup="false" android:icon="@drawable/ic_launcher" android:label="@string/app_name" android:supportsRtl="true" android:theme="@android:style/Theme.Material.Light.NoActionBar">
+    <application android:allowBackup="false" android:icon="@drawable/ic_launcher" android:label="@string/app_name" android:supportsRtl="true" android:manageSpaceActivity="com.google.androidbrowserhelper.trusted.ManageDataLauncherActivity" android:theme="@android:style/Theme.Material.Light.NoActionBar">
         <meta-data android:name="asset_statements" android:resource="@string/asset_statements" />
+        <activity android:name="com.google.androidbrowserhelper.trusted.ManageDataLauncherActivity" android:exported="false" android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <meta-data android:name="android.support.customtabs.trusted.MANAGE_SPACE_URL" android:value="https://learnhub-1de94.web.app" />
+        </activity>
+        <activity android:name="com.google.androidbrowserhelper.trusted.FocusActivity" android:exported="false" />
         <activity android:name="com.google.androidbrowserhelper.trusted.LauncherActivity" android:exported="true" android:screenOrientation="unspecified" android:theme="@android:style/Theme.Translucent.NoTitleBar" android:configChanges="orientation|screenSize">
             <meta-data android:name="android.support.customtabs.trusted.DEFAULT_URL" android:value="https://learnhub-1de94.web.app/" />
             <meta-data android:name="android.support.customtabs.trusted.STATUS_BAR_COLOR" android:resource="@color/brand" />
