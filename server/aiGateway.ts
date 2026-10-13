@@ -2,6 +2,7 @@ import {
   GoogleGenAI,
   ThinkingLevel,
   type GenerateContentConfig,
+  type ContentListUnion,
   type GenerateContentResponse,
 } from "@google/genai";
 import {
@@ -37,6 +38,8 @@ export interface AiGatewayRequest<T> {
   requestId: string;
   clientKey: string;
   prompt: string;
+  media?: { mimeType: string; data: string };
+  plainText?: boolean;
   config: GenerateContentConfig;
   maxOutputTokens: number;
   /**
@@ -46,11 +49,13 @@ export interface AiGatewayRequest<T> {
    */
   maxReasoningEffort?: AiReasoningEffort;
   selection?: AiRuntimeSelection;
+  normalize?: (payload: unknown) => unknown;
   validate: (payload: unknown) => string[];
 }
 
 export interface AiGatewayResult<T> {
   payload: T;
+  grounding?: { sources: { title: string; url: string }[]; searchHtml?: string };
   usage: AiUsageMetadata;
   selection: AiRuntimeSelection;
 }
@@ -72,7 +77,7 @@ export interface AiModelsClient {
   models: {
     generateContent(input: {
       model: string;
-      contents: string;
+      contents: ContentListUnion;
       config?: GenerateContentConfig;
     }): Promise<GenerateContentResponse>;
   };
@@ -306,6 +311,7 @@ export class AiGateway {
     const model = getAiModel(selection.provider, selection.model);
 
     if (
+      (!!request.media && (selection.provider !== "gemini" || request.media.data.length > 5_400_000)) ||
       !request.prompt.trim() ||
       safePrompt.length > AI_MAX_PROMPT_CHARS ||
       !Number.isFinite(request.maxOutputTokens) ||
@@ -339,13 +345,14 @@ export class AiGateway {
     const abortController = new AbortController();
     const timeout = setTimeout(() => abortController.abort(), AI_TIMEOUT_MS);
     try {
+      let grounding: AiGatewayResult<T>["grounding"];
       let text = "";
       let finishReason: string | undefined;
       let thinkingTokenCount: number | null = null;
       if (selection.provider === "gemini") {
         const response = await this.geminiClient!.models.generateContent({
           model: selection.model,
-          contents: safePrompt,
+          contents: request.media ? [{ role: "user", parts: [{ text: safePrompt }, { inlineData: request.media }] }] : safePrompt,
           config: {
             ...request.config,
             maxOutputTokens,
@@ -362,6 +369,8 @@ export class AiGateway {
         finishReason = response.candidates?.[0]?.finishReason;
         thinkingTokenCount = finiteOrNull(response.usageMetadata?.thoughtsTokenCount);
         text = response.text || "";
+        const metadata = response.candidates?.[0]?.groundingMetadata;
+        if (metadata) grounding = { sources: (metadata.groundingChunks || []).flatMap(c => c.web?.uri ? [{ title: c.web.title || c.web.uri, url: c.web.uri }] : []), searchHtml: metadata.searchEntryPoint?.renderedContent };
       } else if (selection.provider === "anthropic") {
         const result = await generateClaudeJson(this.claudeClient(), {
           model: selection.model,
@@ -417,12 +426,13 @@ export class AiGateway {
         status = "invalid_output";
         throw new AiGatewayError("AI_INVALID_OUTPUT", 502, undefined, finishReason === "MAX_TOKENS" ? "truncated" : undefined);
       }
-      const payload = parseJsonText(text);
+      let payload = request.plainText ? { text } : parseJsonText(text);
       if (payload === null) {
         console.error(JSON.stringify({ event: "ai_output_rejected", endpoint: request.endpoint, requestId: request.requestId, reason: "json_parse", responseChars: text.length, maxOutputTokens, finishReason, thinkingTokenCount }));
         status = "invalid_output";
         throw new AiGatewayError("AI_INVALID_OUTPUT", 502, undefined, finishReason === "MAX_TOKENS" ? "truncated" : undefined);
       }
+      if (request.normalize) payload = request.normalize(payload);
       const validationErrors = request.validate(payload);
       if (validationErrors.length > 0) {
         console.error(JSON.stringify({ event: "ai_output_rejected", endpoint: request.endpoint, requestId: request.requestId, reason: "schema_validation", responseChars: text.length, shape: outputShape(payload) }));
@@ -430,7 +440,7 @@ export class AiGateway {
         throw new AiGatewayError("AI_INVALID_OUTPUT", 502);
       }
       status = "success";
-      return { payload: payload as T, usage: usage || emptyUsage(), selection };
+      return { payload: payload as T, usage: usage || emptyUsage(), selection, ...(grounding ? { grounding } : {}) };
     } catch (error) {
       if (error instanceof AiGatewayError) throw error;
       if (error instanceof AnthropicProviderError) {

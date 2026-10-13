@@ -1,3 +1,4 @@
+import { useStudyWorkspace } from "./study/useStudyWorkspace";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowRight, ArrowUp, CircleHelp, Lightbulb, Loader2 } from "lucide-react";
 import { Course, LessonContent, LessonMeta, LessonStep } from "../types/learning";
@@ -53,6 +54,7 @@ interface LearningConversationViewProps {
 }
 
 interface ConversationMessage {
+  studyResultId?: string;
   sender: "user" | "tutor";
   text: string;
   chips?: string[];
@@ -398,16 +400,22 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages, isSending, practiceResult, practiceOpen, practiceQuestion]);
 
+  const study = useStudyWorkspace({ scope: `course:${course.id}`, courseId: course.id, learningContext: { courseId: course.id, lessonId: lessonMeta.id, conceptId: currentConceptId, conceptName: lessonMeta.conceptName || lessonMeta.title }, busy: isSending || awaitingReflection, enabled: isSignedIn, onVoiceTurn: async (text) => sendQuestion(text) });
+
   const sendQuestion = async (question: string, depth?: ExplanationDepth, display?: string) => {
-    const trimmed = question.trim();
-    if (!trimmed || isSending || !content) return;
+    const trimmed = question.trim() || study.defaultQuestion;
+    if (!trimmed || isSending || study.working || !content) return;
     setInput("");
     if (awaitingReflection) {
       void submitReflection(trimmed);
       return;
     }
+    if (!depth && progress.phase === "steps" && /^(?:이해(?:했어|했어요|했습니다)[.!]?\s*)?(?:이제\s*)?다음(?:\s*단계)?(?:로)?(?:\s*(?:가자|가요|넘어갈래|넘어가자|넘어가요|진행해줘|넘어가 주세요))?[.!?]*$/.test(trimmed)) {
+      handleAction({ id: progress.stepIndex < content.steps.length - 1 ? "next" : "check", label: trimmed });
+      return;
+    }
     addUser(display ?? trimmed);
-    if (PRACTICE_REQUEST.test(trimmed)) {
+    if (!study.active && PRACTICE_REQUEST.test(trimmed)) {
       // 문제 요청은 AI 대화 호출 없이 대화 흐름 안에 바로 문제를 띄웁니다.
       startCheck();
       return;
@@ -417,7 +425,12 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
       const activeIndex = clampStepIndex(progress.stepIndex, content.steps.length);
       const activeStep = content.steps[activeIndex];
       const currentContext = `${course.summary}\n\n현재 챕터: ${chapterTitle}\n현재 단계 (${activeIndex + 1}/${content.steps.length}): ${activeStep.title}\n${activeStep.content}`;
-      const lessonContext = depth ? currentContext : `${currentContext}\n\n레슨의 전체 흐름:\n${content.steps.map((step, index) => `${index + 1}. ${step.title}\n${step.content}`).join("\n\n")}`;
+      const lessonContext = currentContext;
+      const studied = await study.answer(trimmed, boundedHistory(messages), lessonContext);
+      if (studied) {
+        appendMessage({ sender: "tutor", text: studied.reply, studyResultId: studied.id, actions: [{ id: "continue", label: ACTION_LABEL.continue }] });
+        return studied.reply;
+      }
       const response = await authorizedFetch("/api/ai/tutor-chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -452,6 +465,7 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
       });
       const learned = typeof data.learnedConcept === "string" ? data.learnedConcept : data.learnedConcept?.conceptName;
       if (typeof learned === "string" && learned.trim()) triggerPulse(findMatchingConcept(graph, learned)?.id ?? currentConceptId);
+      return data.reply as string;
     } catch (error) {
       appendMessage({
         sender: "tutor",
@@ -828,6 +842,7 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
                 message.sender === "tutor" ? (
                   <AgentMessage key={`${message.sender}-${index}`} showProfile={messages[index - 1]?.sender !== "tutor"} className={messages[index - 1]?.sender === "tutor" ? "-mt-2" : ""}>
                     <RichLessonRenderer content={message.text} />
+                    {study.renderResultLink(message.studyResultId)}
                     {message.tangent && (
                       <div className="mt-4 rounded-2xl border border-[var(--lh-line)] bg-[var(--lh-surface-subtle)] p-4">
                         <p className="text-[15px] leading-6 text-[var(--lh-ink)]">
@@ -1047,6 +1062,8 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
 
           {/* 하단 고정 AI 채팅 입력바: 읽다가 대화창처럼 바로 질문하고 코칭받습니다. */}
           <form
+            onDragOver={event => event.preventDefault()}
+            onDrop={study.onDrop}
             onSubmit={(event) => {
               event.preventDefault();
               void sendQuestion(input);
@@ -1057,6 +1074,7 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
             <div aria-hidden className="pointer-events-none absolute inset-x-0 -top-14 h-14 bg-gradient-to-t from-[var(--lh-chat-bg)] to-transparent" />
             {/* 로그인하면 글 칸 아래 줄에 모델·추론 선택과 보내기 버튼을 둡니다. */}
             <div className={`relative border border-[var(--lh-line-strong)] bg-[var(--lh-surface)] p-2 shadow-[var(--lh-shadow-md)] transition focus-within:border-[var(--lh-primary)] ${isSignedIn ? "flex flex-col gap-0.5 rounded-[28px]" : "flex items-end gap-1 rounded-[32px]"}`}>
+              {isSignedIn && study.status}
               <label htmlFor="lesson-chat-input" className="sr-only">궁금한 내용을 물어보세요</label>
               <textarea
                 id="lesson-chat-input"
@@ -1069,14 +1087,16 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
                   }
                 }}
                 rows={1}
+                maxLength={2000}
                 placeholder={awaitingReflection ? "해본 뒤 느낀 점을 한 줄로 적어 주세요" : "읽다가 궁금한 점을 바로 물어보세요"}
                 className={`lh-bare-input max-h-[160px] min-h-11 resize-none bg-transparent text-base leading-6 text-[var(--lh-ink)] outline-none placeholder:text-[var(--lh-ink-tertiary)] ${isSignedIn ? "block w-full px-3 pb-1 pt-2.5" : "flex-1 px-4 py-2.5"}`}
               />
               <div className={isSignedIn ? "flex items-center justify-end gap-1" : "contents"}>
+                {isSignedIn && <>{study.toolbar}<div className="flex-1" /></>}
                 {isSignedIn && <ModelReasoningPicker direction="up" />}
                 <button
                   type="submit"
-                  disabled={!input.trim() || isSending}
+                  disabled={(!input.trim() && !study.defaultQuestion) || isSending || study.working}
                   aria-label="보내기"
                   className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[var(--lh-primary)] text-white transition hover:bg-[var(--lh-primary-hover)] disabled:cursor-default disabled:opacity-30 cursor-pointer"
                 >
@@ -1088,6 +1108,7 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
         </section>
       </div>
 
+      {study.modal}
       <PaneWorkspace context={paneContext} request={paneRequest} />
     </div>
   );

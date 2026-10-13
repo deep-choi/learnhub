@@ -38,6 +38,7 @@ export const LEARNHUB_STORAGE_KEYS = {
   CHAT_SESSIONS: "ai_learnhub_chat_sessions_v1",
   LEARNING_NOTES: "ai_learnhub_learning_notes_v1",
   LESSON_PROGRESS: "ai_learnhub_lesson_progress_v1",
+  STUDY_LIBRARY: "ai_learnhub_study_library_v1",
   TUTOR_PERSONA: "ai_learnhub_tutor_persona_v1",
   USER: "ai_learnhub_user_v2",
 } as const;
@@ -429,15 +430,17 @@ export class StorageService {
     try {
       localStorage.setItem(KEYS.MISTAKES, JSON.stringify(mistakes));
       notifyLearningDataChanged();
+      return true;
     } catch (e) {
       console.error("Failed to save mistakes:", e);
+      return false;
     }
   }
 
   static addMistake(mistake: MistakeItem) {
     const mistakes = this.getMistakes();
     const existingIdx = mistakes.findIndex(
-      (m) => m.question === mistake.question && m.concept === mistake.concept
+      (m) => m.question === mistake.question && m.concept === mistake.concept && m.courseId === mistake.courseId
     );
     let updated: MistakeItem[];
     if (existingIdx >= 0) {
@@ -446,7 +449,7 @@ export class StorageService {
     } else {
       updated = [mistake, ...mistakes];
     }
-    this.saveMistakes(updated);
+    return this.saveMistakes(updated);
   }
 
   static toggleMistakeResolved(id: string): boolean {

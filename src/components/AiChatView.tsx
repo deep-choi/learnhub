@@ -1,3 +1,4 @@
+import { useStudyWorkspace } from "./study/useStudyWorkspace";
 import React, { useEffect, useRef, useState } from "react";
 import { ArrowRight, ArrowUp, BookOpen, ListChecks, Loader2, Plus, Sparkles, X } from "lucide-react";
 import type { Course } from "../types/learning";
@@ -21,7 +22,6 @@ import { findPreviewMessageIndex, toChatCoursePreview } from "./chat/previewPers
 import {
   SETUP_INTRO,
   SETUP_LIMITS,
-  SETUP_LEVEL_CHECK_NOTE,
   SETUP_REASK,
   SETUP_SKIP_OPTION,
   SETUP_STEPS,
@@ -34,6 +34,7 @@ import type { CourseSetup, SetupProgress, SetupStep, SetupStepId } from "../type
 import type { ChatSetupState } from "../types/chat";
 
 interface ChatMessage {
+  studyResultId?: string;
   id: string;
   role: "user" | "assistant";
   text: string;
@@ -120,6 +121,7 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
       id: nextId(),
       role: message.role,
       text: message.text,
+      studyResultId: message.studyResultId,
       question: message.question,
       conceptName: message.conceptName,
       previewSubject: message.coursePreview?.subject ?? message.learningIntent?.subject,
@@ -127,7 +129,7 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
       previewSetup: message.coursePreview?.setup ?? (message.learningIntent ? restorePreviewSetup(initial.stored, index) : undefined),
       previewData: message.coursePreview?.data,
       // 이 답 뒤로 설정 질문이 이어졌으면 '궁금해요/과목 만들기' 버튼은 숨깁니다.
-      setupStarted: Boolean(message.question) && Boolean(initial.stored[index + 1]?.text.startsWith(SETUP_INTRO)),
+      setupStarted: Boolean(message.question) && Boolean(initial.stored[index + 1]?.setupState || initial.stored[index + 1]?.text.startsWith(SETUP_INTRO)),
       setupQuestion: initial.restored?.messageIndex === index ? { stepId: initial.restored.step.id, question: initial.restored.question } : undefined,
     })),
   );
@@ -145,6 +147,11 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const started = messages.length > 0;
+  const study = useStudyWorkspace({ scope: `chat:${sessionId || "draft"}`, busy: loading || !!flow || courseMode, enabled: isSignedIn, onVoiceTurn: async (text) => send(text), extraActions: [
+    { label: "\uacfc\ubaa9 \ub9cc\ub4e4\uae30", run: () => { setCourseMode(true); inputRef.current?.focus(); } },
+    { label: "\ubb38\uc81c \ud480\uae30", run: onPractice },
+    { label: "\uacfc\uc815 \ub458\ub7ec\ubcf4\uae30", run: onBrowseCourses },
+  ] });
 
   useEffect(() => {
     if (started) endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -200,10 +207,9 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
 
   const addMessages = (...items: ChatMessage[]) => setMessages((previous) => [...previous, ...items]);
 
-  /** 질문 하나를 대화에 올립니다. 첫 질문에는 안내 문장을 붙입니다. */
+  /** 안내를 반복하지 않고 질문만 표시합니다. */
   const askStep = (step: SetupStep, question: string, first = false, state?: Omit<ChatSetupState, "stepId" | "question">) => {
-    const note = step.id === "levelCheck" ? `\n\n${SETUP_LEVEL_CHECK_NOTE}` : "";
-    const text = `${first ? `${SETUP_INTRO}\n\n` : ""}${question}${note}`;
+    const text = question;
     addMessages({ id: nextId(), role: "assistant", text, setupQuestion: { stepId: step.id, question } });
     persist({ role: "assistant", text, ...(state ? { setupState: { ...state, stepId: step.id, question } } : {}) });
   };
@@ -320,8 +326,8 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
   };
 
   const send = async (question: string) => {
-    const trimmed = question.trim();
-    if (!trimmed || loading) return;
+    const trimmed = question.trim() || study.defaultQuestion;
+    if (!trimmed || loading || study.working) return;
 
     if (flow) {
       await answerWithText(trimmed);
@@ -355,6 +361,12 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
     setLoading(true);
     persist({ role: "user", text: trimmed });
     try {
+      const studied = await study.answer(trimmed, toTutorHistory(previous));
+      if (studied) {
+        setMessages(items => [...items, { id: nextId(), role: "assistant", text: studied.reply, studyResultId: studied.id }]);
+        persist({ role: "assistant", text: studied.reply, studyResultId: studied.id });
+        return studied.reply;
+      }
       const response = await authorizedFetch("/api/ai/tutor-chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -386,6 +398,7 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
       ]);
       persist({ role: "assistant", text: reply, question: trimmed, conceptName: tangentName || undefined });
       if (subject) await beginSetup(subject);
+      return reply;
     } catch (error) {
       setMessages((items) => [
         ...items,
@@ -461,6 +474,7 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
           }
         }}
         rows={1}
+        maxLength={2000}
         autoFocus={!started}
         placeholder={flow ? "직접 적어서 답해도 돼요" : courseMode ? "어떤 과목을 만들까요?" : "배우고 싶은 것을 물어보세요"}
         className={`lh-bare-input max-h-[200px] min-h-11 resize-none bg-transparent text-base leading-6 outline-none placeholder:text-[var(--lh-ink-tertiary)] ${isSignedIn ? "block w-full px-3 pb-1 pt-2.5" : "flex-1 px-2 py-2.5"}`}
@@ -471,7 +485,7 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
   const sendButton = (
     <button
       type="submit"
-      disabled={!input.trim() || loading}
+      disabled={(!input.trim() && !study.defaultQuestion) || loading || study.working}
       aria-label="보내기"
       className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[var(--lh-primary)] text-white transition hover:bg-[var(--lh-primary-hover)] disabled:opacity-30 cursor-pointer disabled:cursor-default"
     >
@@ -482,6 +496,8 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
   const composer = (
     <form
       onSubmit={(event) => { event.preventDefault(); void send(input); }}
+      onDragOver={event => event.preventDefault()}
+      onDrop={study.onDrop}
       className={`mx-auto w-full max-w-[720px] ${started ? "px-4 pb-4 pt-2 sm:px-6" : "px-4 sm:px-6"}`}
     >
       {courseMode && (
@@ -495,9 +511,10 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
       <div className={`relative border border-[var(--lh-line-strong)] bg-[var(--lh-surface)] p-2 shadow-[var(--lh-shadow-md)] transition focus-within:border-[var(--lh-primary)] ${isSignedIn ? "flex flex-col gap-0.5 rounded-[28px]" : "flex items-end gap-1 rounded-[32px]"}`}>
         {isSignedIn ? (
           <>
+            {study.status}
             {textField}
             <div className="flex items-center gap-1">
-              {plusMenu}
+              {study.toolbar}
               <div className="min-w-0 flex-1" />
               <ModelReasoningPicker direction="up" />
               {sendButton}
@@ -511,12 +528,13 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
           </>
         )}
       </div>
+      {study.modal}
     </form>
   );
 
   if (!started) {
     return (
-      <div className="relative flex min-h-full flex-col items-center justify-center overflow-hidden px-0 pb-24 pt-16">
+      <div className="relative flex min-h-full flex-col items-center justify-center px-0 pb-24 pt-16">
         <div aria-hidden className="lh-start-glow pointer-events-none absolute inset-0" />
         <div className="relative z-10 flex w-full flex-col items-center gap-8">
           <h1 className="px-6 text-center text-3xl font-medium tracking-[-0.03em] text-[var(--lh-ink)] sm:text-4xl">{greeting}</h1>
@@ -565,6 +583,7 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
                 }
               >
                 <RichLessonRenderer content={message.text} />
+                {study.renderResultLink(message.studyResultId)}
                 {message.setupQuestion && (
                   <div className="mt-3.5 flex flex-wrap gap-2" role="group" aria-label="빠른 답">
                     {SETUP_STEPS[message.setupQuestion.stepId].options.map((option) => {
@@ -629,7 +648,6 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
         </div>
       </div>
       {composer}
-      <p className="pb-3 text-center text-xs text-[var(--lh-ink-tertiary)]">AI 답변은 틀릴 수 있어요. 중요한 내용은 다시 확인하세요.</p>
     </div>
   );
 };

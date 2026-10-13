@@ -59,9 +59,6 @@ export const LearningRecordsView: React.FC<LearningRecordsViewProps> = ({
         <h1 className="text-3xl font-medium tracking-[-0.03em] text-[var(--lh-ink)] sm:text-4xl">
           학습 기록
         </h1>
-        <p className="max-w-2xl text-sm leading-relaxed text-[var(--lh-ink-secondary)] font-normal">
-          완료한 공부와 다시 볼 기록을 한곳에서 확인합니다. 읽기 완료는 숙달이나 학습 효과를 뜻하지 않습니다.
-        </p>
       </header>
 
       {/* M3 Segmented Pill Tabs */}
@@ -93,9 +90,6 @@ export const LearningRecordsView: React.FC<LearningRecordsViewProps> = ({
             <Metric label="다시 볼 개념" value={weakSkillCount} highlight={weakSkillCount > 0} />
             <Metric label="예정된 복습" value={learnerReviews.length} />
             <Metric label="완료 레슨 예상 시간 합계" value={completedEstimatedMinutes} suffix="분" />
-          </div>
-          <div className="rounded-2xl border border-[var(--lh-line)] bg-[var(--lh-surface-subtle)] p-5 text-xs leading-relaxed text-[var(--lh-ink-secondary)] font-normal">
-            예상 시간 합계는 완료 레슨의 추정 소요 시간입니다. 실제 집중 시간, 정답률, 학습 효과는 이 화면에서 측정하지 않습니다.
           </div>
         </section>
       )}

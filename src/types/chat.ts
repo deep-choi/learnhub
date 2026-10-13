@@ -11,6 +11,7 @@ export interface ChatSetupState {
 
 /** 레슨에 묶이지 않은 자유 대화(최근 목록)의 저장 타입. */
 export interface ChatSessionMessage {
+  studyResultId?: string;
   role: "user" | "assistant";
   text: string;
   createdAt: string;

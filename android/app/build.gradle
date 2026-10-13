@@ -1,0 +1,27 @@
+plugins { id 'com.android.application' }
+// Upload secrets stay outside the repository and are supplied only during release builds.
+def signingNames = ['ANDROID_UPLOAD_KEYSTORE', 'ANDROID_UPLOAD_PASSWORD', 'ANDROID_UPLOAD_ALIAS']
+def signingReady = signingNames.every { System.getenv(it)?.trim() }
+android {
+    namespace 'com.deepchoi.learnhub'
+    compileSdk 36
+    defaultConfig { applicationId 'com.deepchoi.learnhub'; minSdk 24; targetSdk 36; versionCode 1; versionName '1.0.0' }
+    signingConfigs {
+        release {
+            if (signingReady) {
+                storeFile file(System.getenv('ANDROID_UPLOAD_KEYSTORE'))
+                storePassword System.getenv('ANDROID_UPLOAD_PASSWORD')
+                keyAlias System.getenv('ANDROID_UPLOAD_ALIAS')
+                keyPassword System.getenv('ANDROID_UPLOAD_PASSWORD')
+            }
+        }
+    }
+    buildTypes { release { minifyEnabled false; if (signingReady) signingConfig signingConfigs.release } }
+}
+// Google's browser helper preserves HTTPS origin, browser authentication, files and microphone APIs.
+dependencies { implementation 'com.google.androidbrowserhelper:androidbrowserhelper:2.7.4' }
+tasks.configureEach { task ->
+    if (task.name in ['bundleRelease', 'assembleRelease']) {
+        task.doFirst { if (!signingReady) throw new GradleException('Release upload signing is missing; refusing an unsigned release.') }
+    }
+}

@@ -175,7 +175,7 @@ test("preview API is anonymous, preserves reusable response, rejects spoofed IPs
   const app = express(); app.use(express.json());
   let calls = 0; let authCalls = 0;
   const gateway = { async generateJson<T>(req: AiGatewayRequest<T>): Promise<AiGatewayResult<T>> {
-    calls++; assert.deepEqual(req.validate(curriculum), []); assert.equal(req.maxOutputTokens, 2600);
+    calls++; assert.deepEqual(req.validate(curriculum), []); assert.equal(req.maxOutputTokens, 6144); assert.equal(req.maxReasoningEffort, "low");
     return { payload: curriculum as T, selection: DEFAULT_AI_SELECTION, usage: { promptTokenCount: 0, candidatesTokenCount: 0, totalTokenCount: 0 } };
   } };
   app.use("/api/ai", knowledgeGraphRouter({ gateway, previewGateway: gateway, previewQuota: new PreviewQuota({ perIp: 1 }), authorize: async () => { authCalls++; return true; }, selection: () => DEFAULT_AI_SELECTION, defaultSelection: () => DEFAULT_AI_SELECTION, reserveUser: async () => {}, clientKey: () => "test", error: (res) => res.status(503).json({ code: "AI_UNAVAILABLE" }) }));

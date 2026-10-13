@@ -1,0 +1,1 @@
+<resources><string name="app_name">LearnHub</string><string name="asset_statements">[{\"relation\":[\"delegate_permission/common.handle_all_urls\"],\"target\":{\"namespace\":\"web\",\"site\":\"https://learnhub-1de94.web.app\"}}]</string></resources>

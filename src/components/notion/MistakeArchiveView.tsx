@@ -12,6 +12,9 @@ import {
 import { Course, MistakeItem } from "../../types/learning";
 import { StorageService } from "../../services/storage";
 import { NotionPageView } from "./Sidebar";
+import { getStudyLibrary } from "../../services/studyStore";
+import { StudyDialog } from "../study/StudyDialog";
+import { StudyResultView } from "../study/StudyResultView";
 
 interface MistakeArchiveViewProps {
   courses?: Course[];
@@ -23,16 +26,26 @@ export const MistakeArchiveView: React.FC<MistakeArchiveViewProps> = ({
   onSelectView,
 }) => {
   const [items, setItems] = useState<MistakeItem[]>([]);
+  const [studyLibrary, setStudyLibrary] = useState(getStudyLibrary);
+  const [reviewId, setReviewId] = useState<string | null>(null);
+  const review = studyLibrary.results.find(result => result.id === reviewId);
   const [activeTab, setActiveTab] = useState<"table" | "board">("table");
   const [filterStatus, setFilterStatus] = useState<"all" | "unresolved" | "resolved">("all");
   const [filterTag, setFilterTag] = useState<string>("all");
 
   const loadMistakes = () => {
     setItems(StorageService.getMistakes());
+    setStudyLibrary(getStudyLibrary());
   };
 
   useEffect(() => {
     loadMistakes();
+    window.addEventListener("learnhub:data-changed", loadMistakes);
+    window.addEventListener("storage", loadMistakes);
+    return () => {
+      window.removeEventListener("learnhub:data-changed", loadMistakes);
+      window.removeEventListener("storage", loadMistakes);
+    };
   }, []);
 
   const handleToggleResolved = (id: string) => {
@@ -47,6 +60,10 @@ export const MistakeArchiveView: React.FC<MistakeArchiveViewProps> = ({
   };
 
   const handleJumpToLesson = (item: MistakeItem) => {
+    if (item.studyResultId && studyLibrary.results.some(result => result.id === item.studyResultId)) {
+      setReviewId(item.studyResultId);
+      return;
+    }
     if (!onSelectView) return;
 
     let targetCourse: Course | undefined;
@@ -256,7 +273,7 @@ export const MistakeArchiveView: React.FC<MistakeArchiveViewProps> = ({
                 </dl>
                 <p className="text-xs leading-relaxed text-[var(--lh-ink-secondary)] font-normal">{item.explanation}</p>
                 <div className="flex gap-2 border-t border-[var(--lh-line)] pt-4">
-                  {onSelectView && (
+                    {(onSelectView || item.studyResultId) && (
                     <button
                       type="button"
                       onClick={() => handleJumpToLesson(item)}
@@ -342,10 +359,10 @@ export const MistakeArchiveView: React.FC<MistakeArchiveViewProps> = ({
 
                     {/* Action */}
                     <td className="px-5 py-4 align-top text-right whitespace-nowrap space-x-1">
-                      {onSelectView && (
+                      {(onSelectView || item.studyResultId) && (
                         <button
                           onClick={() => handleJumpToLesson(item)}
-                          title="해당 레슨으로 복습 이동"
+                          title="다시 공부하기"
                           className="rounded-full border border-[var(--lh-primary-border)] bg-[var(--lh-primary-subtle)] px-3.5 py-1.5 text-xs font-medium text-[var(--lh-primary-text)] hover:bg-[var(--lh-primary)] hover:text-white shadow-xs transition cursor-pointer"
                         >
                           다시 풀기 ➔
@@ -422,7 +439,7 @@ export const MistakeArchiveView: React.FC<MistakeArchiveViewProps> = ({
 
                         <div className="flex items-center justify-between pt-2 border-t border-[var(--lh-line)] text-[10px]">
                           <span className="text-[var(--lh-ink-tertiary)] font-normal">{item.date}</span>
-                          {onSelectView && (
+                          {(onSelectView || item.studyResultId) && (
                             <button
                               onClick={() => handleJumpToLesson(item)}
                               className="font-medium text-[var(--lh-primary)] hover:underline cursor-pointer"
@@ -445,6 +462,9 @@ export const MistakeArchiveView: React.FC<MistakeArchiveViewProps> = ({
           </div>
         )}
       </div>
+      {review && <StudyDialog title={review.title} close={() => setReviewId(null)}>
+        <StudyResultView key={review.id} result={review} sources={studyLibrary.sources} />
+      </StudyDialog>}
     </div>
   );
 };

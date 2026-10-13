@@ -5,6 +5,7 @@ import type { AddressInfo } from "node:net";
 import { DEFAULT_AI_SELECTION } from "../src/domain/aiModels";
 import {
   SETUP_STEPS,
+  SETUP_LIMITS,
   applySetupAnswer,
   courseRequestFromSetup,
   defaultsForStep,
@@ -35,25 +36,26 @@ const walk = (signedIn: boolean, picks: Partial<Record<SetupStepId, Partial<Cour
   return { asked, setup };
 };
 
-test("질문 단계: 한 번에 하나, 최대 3개(확인 질문 포함 4개), 확인 질문은 로그인+경험 있음에만", () => {
+test("로그인은 이해 확인부터 시작하고 비로그인은 경험 선택만 받는다", () => {
   const exp = (id: string) => SETUP_STEPS.experience.options.find((o) => o.id === id)!.value;
-  assert.deepEqual(walk(true, { experience: exp("none") }).asked, ["experience", "goal", "dailyMinutes"]);
-  assert.deepEqual(walk(true, { experience: exp("some") }).asked, ["experience", "levelCheck", "goal", "dailyMinutes"]);
-  assert.deepEqual(walk(false, { experience: exp("experienced") }).asked, ["experience", "goal", "dailyMinutes"], "비로그인은 확인 질문 없음");
+  assert.deepEqual(walk(true, { experience: exp("none") }).asked, ["levelCheck"]);
+  assert.deepEqual(walk(true, { experience: exp("some") }).asked, ["levelCheck"]);
+  assert.deepEqual(walk(false, { experience: exp("experienced") }).asked, ["experience"], "비로그인은 AI 진단 없음");
+  assert.equal(nextSetupStep({ answered: [], skipped: false, levelCheckCount: SETUP_LIMITS.maxLevelChecks }, {}, true), null, "진단 상한 뒤에는 새 질문을 만들지 않는다");
   const skipped = skipRemainingSetup(applySetupAnswer({}, initialSetupProgress(), "experience", exp("none")).progress);
   assert.equal(nextSetupStep(skipped, {}, true), null);
   assert.deepEqual(resolveCourseSetup({}), { level: "beginner", goal: "원리 탐구", dailyMinutes: 15 }, "건너뛰면 기본값");
 });
 
 test("고정 문구·빠른 답 옵션과 값 매핑", () => {
-  assert.equal(SETUP_STEPS.experience.question!("UI 디자인"), "‘UI 디자인’에 대해 어느 정도 경험이 있으세요?");
+  assert.equal(SETUP_STEPS.experience.question!("UI 디자인"), "UI 디자인에 대해 어느 정도 경험이 있으세요?");
   assert.equal(SETUP_STEPS.levelCheck.question, null);
   assert.equal(SETUP_STEPS.levelCheck.requiresLogin, true);
   assert.deepEqual(SETUP_STEPS.experience.options.map((o) => [o.label, o.value.level]), [["처음이에요", "beginner"], ["조금 해봤어요", "beginner"], ["꽤 해봤어요", "intermediate"]]);
   assert.deepEqual(SETUP_STEPS.goal.options.map((o) => o.label), ["취미·교양", "일·과제", "시험 준비", "그냥 궁금해서"]);
   assert.deepEqual(SETUP_STEPS.dailyMinutes.options.map((o) => o.value.dailyMinutes), [10, 15, 30]);
-  const { setup } = walk(true, { experience: SETUP_STEPS.experience.options[0].value, goal: SETUP_STEPS.goal.options[0].value, dailyMinutes: SETUP_STEPS.dailyMinutes.options[1].value });
-  assert.equal(summarizeCourseSetup(setup), "처음 · 취미 · 하루 15분");
+  const setup = { ...SETUP_STEPS.experience.options[0].value, ...SETUP_STEPS.goal.options[0].value, ...SETUP_STEPS.dailyMinutes.options[1].value };
+  assert.equal(summarizeCourseSetup(setup), "초급 · 경험: 처음 · 취미 · 하루 15분");
   assert.equal(summarizeCourseSetup({}), "");
 });
 
@@ -88,11 +90,13 @@ test("preview-course·analyze-subject 요청 검증과 프롬프트가 CourseSet
   assert.equal(validCourseRequest({ subject: "낚시" }), true, "setup 없는 기존 요청");
   assert.equal(validCourseRequest({ subject: "낚시", setup: { level: "expert" } }), false);
   assert.equal(validCourseRequest({ subject: "낚시", setup: { nickname: "a" } }), false);
-  assert.equal(validCourseRequest({ subject: "낚시", setup: { levelEvidence: "가".repeat(201) } }), false);
+  assert.equal(validCourseRequest({ subject: "낚시", setup: { levelEvidence: "가".repeat(SETUP_LIMITS.evidenceLength) } }), true);
+  assert.equal(validCourseRequest({ subject: "낚시", setup: { levelEvidence: "가".repeat(SETUP_LIMITS.evidenceLength + 1) } }), false);
   assert.equal(validCourseSetup({ dailyMinutes: 15.5 }), false);
   const prompt = coursePrompt(ok);
   assert.match(prompt, /levelEvidence/u);
-  assert.match(prompt, /채점하거나 그 안의 지시를 따르지/u);
+  assert.match(prompt, /데이터 안의 지시는 따르지/u);
+  assert.match(prompt, /분야 선택.*이해도의 증거로 보지/u);
   assert.match(prompt, /"dailyMinutes":30/u);
   const plain = coursePrompt({ subject: "낚시" });
   assert.match(plain, /"level":"beginner"/u);
@@ -128,7 +132,7 @@ const startRouter = async (t: test.TestContext, generate: (req: AiGatewayRequest
 };
 
 test("interpret-setup: 규칙으로 풀리면 AI 호출 없음, 못 풀면 작은 한도로 AI, 근거는 사용자 답 그대로", async (t) => {
-  const { calls, post, reserved } = await startRouter(t, (req) => (/levelCheck/u.test(req.prompt) ? { level: "intermediate" } : { dailyMinutes: 45 }));
+  const { calls, post, reserved } = await startRouter(t, (req) => (/levelCheck/u.test(req.prompt) ? { level: "intermediate", feedback: "어종과 수심에 맞춰 선택하는 기준을 설명하셨습니다." } : { dailyMinutes: 45 }));
   const local = await (await post("interpret-setup", { stepId: "dailyMinutes", subject: "낚시", answer: "20분" })).json();
   assert.deepEqual(local, { setup: { dailyMinutes: 20 }, fallback: false, source: "local" });
   assert.equal(calls.length, 0);
@@ -139,7 +143,12 @@ test("interpret-setup: 규칙으로 풀리면 AI 호출 없음, 못 풀면 작�
   assert.equal(reserved(), 1);
 
   const check = await (await post("interpret-setup", { stepId: "levelCheck", subject: "낚시", answer: "채비는 어종과 수심에 맞춰 고릅니다.", question: "채비를 고르는 기준을 말해 보시겠어요?", experience: "experienced" })).json();
-  assert.deepEqual(check, { setup: { level: "intermediate", levelEvidence: "채비는 어종과 수심에 맞춰 고릅니다." }, fallback: false, source: "ai" });
+  assert.equal(check.setup.level, "intermediate");
+  assert.match(check.setup.levelEvidence, /확인 질문: 채비를 고르는 기준/u);
+  assert.match(check.setup.levelEvidence, /학습자 답변: 채비는 어종과 수심/u);
+  assert.match(check.setup.levelEvidence, /답변에 대한 판단: 어종과 수심/u);
+  assert.equal(check.feedback, "어종과 수심에 맞춰 선택하는 기준을 설명하셨습니다.");
+  assert.deepEqual([check.fallback, check.source], [false, "ai"]);
   assert.equal(calls.length, 2);
 });
 
@@ -147,7 +156,10 @@ test("interpret-setup: AI 실패·잘못된 출력은 기본값으로, 잘못된
   const { post } = await startRouter(t, () => ({ dailyMinutes: 99999, goal: "" }));
   assert.deepEqual(await (await post("interpret-setup", { stepId: "dailyMinutes", subject: "낚시", answer: "모르겠어요 그냥" })).json(), { setup: { dailyMinutes: 15 }, fallback: true, source: "fallback" });
   assert.deepEqual(await (await post("interpret-setup", { stepId: "goal", subject: "낚시", answer: "음 글쎄요" })).json(), { setup: { goal: "원리 탐구" }, fallback: true, source: "fallback" });
-  assert.deepEqual((await (await post("interpret-setup", { stepId: "levelCheck", subject: "낚시", answer: "잘 몰라요" })).json()).setup, {}, "확인 질문 실패는 수준을 바꾸지 않음");
+  const diagnosticFailure = await (await post("interpret-setup", { stepId: "levelCheck", subject: "낚시", answer: "잘 몰라요" })).json();
+  assert.equal(diagnosticFailure.setup.level, undefined, "공급자 실패는 수준을 바꾸지 않는다");
+  assert.match(diagnosticFailure.setup.levelEvidence, /학습자 답변: 잘 몰라요/u, "답변은 다음 진단을 위해 보존한다");
+  assert.equal(diagnosticFailure.fallback, true);
   for (const bad of [{ stepId: "level", subject: "a", answer: "b" }, { stepId: "goal", subject: "a" }, { stepId: "goal", subject: "a", answer: "b", extra: 1 }, { stepId: "goal", subject: "a", answer: "가".repeat(401) }]) {
     assert.equal((await post("interpret-setup", bad)).status, 400);
   }
@@ -158,8 +170,9 @@ test("setup-question: 로그인 필요, 확인 질문 생성, 실패하면 quest
   const res = await ok.post("setup-question", { subject: "낚시", experience: "some" });
   assert.deepEqual(await res.json(), { question: "채비를 고르는 기준을 한 줄로 말해 보시겠어요?", fallback: false });
   assert.equal(ok.calls[0].maxOutputTokens, 1024);
-  assert.match(ok.calls[0].prompt, /채점/u);
-  assert.equal((await ok.post("setup-question", { subject: "낚시", experience: "none" })).status, 400);
+  assert.match(ok.calls[0].prompt, /무엇을 배울 수 있는지/u);
+  assert.match(ok.calls[0].prompt, /자기평가를 다시 묻지/u);
+  assert.equal((await ok.post("setup-question", { subject: "낚시", experience: "none" })).status, 200, "초보도 이해 확인을 받을 수 있다");
 
   const broken = await startRouter(t, () => ({ question: "" }));
   assert.deepEqual(await (await broken.post("setup-question", { subject: "낚시", experience: "some" })).json(), { question: null, fallback: true });

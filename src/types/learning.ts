@@ -108,6 +108,7 @@ export interface UserProgress {
 
 export interface MistakeItem {
   id: string;
+  studyResultId?: string;
   conceptId?: string;
   concept: string;
   courseId?: string;

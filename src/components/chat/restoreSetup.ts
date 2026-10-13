@@ -32,7 +32,8 @@ type Line = { role: "user" | "assistant"; text: string; setupState?: ChatSetupSt
 const stepOfQuestion = (text: string, subject: string): SetupStep | null => {
   for (const id of ["experience", "goal", "dailyMinutes"] as const) {
     const question = SETUP_STEPS[id].question?.(subject);
-    if (question && text.includes(question)) return SETUP_STEPS[id];
+    const legacyExperience = id === "experience" && text.includes(`‘${subject}’에 대해 어느 정도 경험이 있으세요?`);
+    if (question && (text.includes(question) || legacyExperience)) return SETUP_STEPS[id];
   }
   return text.includes(SETUP_LEVEL_CHECK_NOTE) || text.includes("정답을 맞히는 게 아니에요. 수준을 가늠하는 데만 써요.") ? SETUP_STEPS.levelCheck : null;
 };
@@ -52,11 +53,13 @@ function replaySetup(messages: Line[]): Replay | null {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const message = messages[i];
     if (message.role !== "assistant") continue;
-    const quoted = /‘([^’]+)’/u.exec(message.text)?.[1];
-    const question = quoted ? SETUP_STEPS.experience.question?.(quoted) : null;
-    if (quoted && question && message.text.includes(question)) {
+    // 따옴표를 쓰던 저장본과 현재의 일반 문장을 모두 읽습니다. 안내 문구는
+    // 주제에 섞이지 않도록 질문이 시작하는 줄에서만 주제를 추출합니다.
+    const match = /(?:^|\n)(?:‘([^’]+)’|([^\n]+?))에 대해 어느 정도 경험이 있으세요\?/u.exec(message.text);
+    const restoredSubject = (match?.[1] ?? match?.[2])?.trim();
+    if (restoredSubject) {
       start = i;
-      subject = quoted;
+      subject = restoredSubject;
       break;
     }
   }
@@ -113,10 +116,9 @@ export function restoreSetupFlow(messages: Line[], signedIn: boolean): RestoredS
   const replay = replaySetup(messages);
   if (!replay?.pending) return null;
   const { subject, setup, progress, pending } = replay;
-  // 지금 상태에서 실제로 다음에 물을 질문과 같을 때만 이어갑니다.
-  const expectedStep = nextSetupStep(progress, setup, signedIn)?.id;
-  const legacyExperienceQuestion = signedIn && pending.step.id === "experience" && !progress.answered.includes("experience");
-  if (expectedStep !== pending.step.id && !legacyExperienceQuestion) return null;
+  // 문장으로 복원하는 저장본은 이전 질문 순서를 사용했습니다. 새 진단 순서와
+  // 달라도 화면에 남은 미응답 질문은 이어받되, 로그인 전 진단은 허용하지 않습니다.
+  if (pending.step.requiresLogin && !signedIn) return null;
   return { subject, setup, progress, step: pending.step, question: pending.question, messageIndex: pending.index };
 }
 
@@ -132,10 +134,15 @@ export function parseSetupSummary(text: string): CourseSetup | null {
     const part = raw.trim();
     if (!part) continue;
     const minutes = /^하루\s*(\d+)\s*분$/u.exec(part);
-    const experience = EXPERIENCE_OPTIONS.find((option) => option.short === part);
+    const experience = EXPERIENCE_OPTIONS.find((option) => option.short === part.replace(/^경험\s*:\s*/u, ""));
     const goal = GOAL_OPTIONS.find((option) => option.short === part);
     if (minutes) setup.dailyMinutes = Number(minutes[1]);
-    else if (experience) Object.assign(setup, experience.value);
+    else if (experience) {
+      // 표시된 진단 수준과 자기 보고 경험을 분리합니다. 경험 라벨이 뒤에 와도
+      // 앞에서 복원한 실제 진단 수준을 기본 수준으로 덮어쓰지 않습니다.
+      setup.experience = experience.value.experience;
+      setup.level ??= experience.value.level;
+    }
     else if (LEVEL_OF_LABEL[part]) setup.level = LEVEL_OF_LABEL[part];
     else setup.goal = goal ? goal.value.goal : part;
     matched = true;

@@ -1,4 +1,4 @@
-import { Router, type Request, type Response } from "express";
+﻿import { Router, type Request, type Response } from "express";
 import { Type } from "@google/genai";
 import { reservedAiOutputTokens, type AiGateway } from "./aiGateway";
 import { DEFAULT_AI_SELECTION, type AiRuntimeSelection } from "../src/domain/aiModels";
@@ -116,7 +116,7 @@ export function validTutorRequest(body: unknown): body is Record<string, unknown
 /** `persona`는 검증·정리한 뒤 말투 참고 자료로만 붙인다. 원본 문자열이 데이터 JSON에 섞이지 않게 뺀다. */
 export function tutorPrompt(body: Record<string, unknown>): string {
   const { persona, ...data } = body;
-  return `${tutorPromptBase(data)}${learningPresentationPrompt()}${personaPrompt(sanitizePersona(persona))}`;
+  return `${tutorPromptBase(data)}\n해당하지 않는 tangent, learnedConcept${body.mode === "free" ? ", learningIntent" : ""}는 생략하세요. 빈 객체나 빈 문자열로 채우지 마세요. 레슨 대화에서는 현재 단계의 질문에만 답하고 임의로 다음 단계로 진행하지 마세요. 연습 단계에서 학습자가 아직 답하지 않았다면 풀이와 정답을 먼저 알려주지 마세요. 정답/풀이를 명시적으로 요청한 경우는 예외입니다.${learningPresentationPrompt()}${personaPrompt(sanitizePersona(persona))}`;
 }
 function tutorPromptBase(body: Record<string, unknown>): string {
   const free = body.mode === "free" ? ` 이 대화는 특정 레슨에 묶이지 않은 자유 대화입니다. learnerContext가 있으면 학습자의 현재 위치와 최근 배운 개념, 다시 볼 개념을 참고해 답을 이어 주되 억지로 언급하지 마세요. learningIntent는 학습자가 새 주제를 체계적으로 배우고 싶다고 분명히 말했을 때만 subject에 그 주제를 짧은 명사구로 적고, 단순 질문이나 한 번 설명을 구하는 말에는 넣지 마세요. 새 주제를 배우려는 뜻이 분명하면 reply는 1~2문장으로 그 주제가 무엇을 다루는지 쉽게 알려 주고, 배우기 시작할 수 있게 자연스럽게 받아 주세요. 이 reply에서는 갈래를 나열하거나 질문하지 마세요. 바로 이어지는 설정 질문 하나가 주제에 맞는 선택지와 구체적인 시작점 질문을 제공합니다. 아직 선택하지 않은 세부 분야를 임의로 정하지 마세요. 이미 사용자가 좁은 분야를 골랐다면 그 답을 인정하고 무엇을 배울 수 있는지 간단히 안내하세요.` : "";
@@ -130,6 +130,16 @@ export function validateTutorResponse(value: unknown, conceptName: string, optio
   if (value.learnedConcept !== undefined && value.learnedConcept !== conceptName) return ["학습한 개념을 확인해 주세요."];
   if (value.learningIntent !== undefined && value.learningIntent !== null && (!options.free || !record(value.learningIntent) || !text(value.learningIntent.subject, 160))) return ["학습 의도를 확인해 주세요."];
   return [];
+}
+/** Some providers emit empty optional fields instead of omitting them. Never discard nonempty invalid data. */
+export function normalizeTutorResponse(value: unknown): unknown {
+  if (!record(value)) return value;
+  const next = { ...value };
+  for (const key of ["tangent", "learningIntent", "learnedConcept"]) {
+    const field = next[key];
+    if (field === null || field === "" || (record(field) && Object.values(field).every(v => v === "" || v === null))) delete next[key];
+  }
+  return next;
 }
 export function nudgeFallback(step: NextStep, current: string, target?: string): NudgeResponse {
   if (step.kind === "wrap_up") return { question: "오늘은 여기까지 하고 쉬어볼까요?", reason: "오늘 배운 내용은 다음에 이어갈 수 있어요.", fallback: true };
@@ -217,7 +227,7 @@ export function knowledgeGraphRouter(deps: {
       // 인증 없이 부르는 엔드포인트라 클라이언트가 보낸 모델·추론 헤더를 따르지 않는다(비용 보호).
       const selection = deps.previewSelection?.() ?? deps.defaultSelection?.() ?? { ...DEFAULT_AI_SELECTION };
       await deps.previewQuota.reserve(req.ip || req.socket.remoteAddress || "unknown");
-      const result = await deps.previewGateway.generateJson<Record<string, unknown>>({ endpoint: "preview-course", requestId: res.locals.requestId, clientKey: `preview:${req.ip || req.socket.remoteAddress}`, prompt: coursePrompt(req.body), config: { responseMimeType: "application/json", responseSchema: graphCurriculumSchema }, maxOutputTokens: 2600, selection, validate: v => validateCurriculumPayload(v, { requireConceptLinks: true }) });
+      const result = await deps.previewGateway.generateJson<Record<string, unknown>>({ endpoint: "preview-course", requestId: res.locals.requestId, clientKey: `preview:${req.ip || req.socket.remoteAddress}`, prompt: coursePrompt(req.body), config: { responseMimeType: "application/json", responseSchema: graphCurriculumSchema }, maxOutputTokens: 6144, maxReasoningEffort: "low", selection, validate: v => validateCurriculumPayload(v, { requireConceptLinks: true }) });
       return res.json({ preview: true, curriculum: result.payload, conceptLinks: extractConceptLinks(result.payload) });
     } catch (error) {
       if (error instanceof PreviewQuotaExceededError) return res.status(429).json({ error: "오늘의 지도 미리보기 한도에 도달했어요. 나중에 다시 이용해 주세요.", code: "PREVIEW_DAILY_LIMIT" });
@@ -246,7 +256,9 @@ export function knowledgeGraphRouter(deps: {
       const local = interpretSetupAnswerLocally(body.stepId, body.answer);
       if (local.matched) return res.json({ setup: pickSetupFields(body.stepId, local.setup), fallback: false, source: "local" });
     }
-    const fallback = { setup: body.stepId === "levelCheck" ? { level: "beginner", levelEvidence: appendLevelEvidence(body.levelEvidence, body.question ?? "", body.answer) } : defaultsForStep(body.stepId), fallback: true, source: "fallback" };
+    // 공급자 오류는 이해 수준의 근거가 아닙니다. 답변은 남기되 기존 수준을
+    // 초급으로 덮어쓰지 않아 다음 진단이나 과정 생성에서 다시 판단할 수 있습니다.
+    const fallback = { setup: body.stepId === "levelCheck" ? { levelEvidence: appendLevelEvidence(body.levelEvidence, body.question ?? "", body.answer) } : defaultsForStep(body.stepId), fallback: true, source: "fallback" };
     try {
       const selection = deps.selection(req);
       await deps.reserveUser(req, res, reservedAiOutputTokens(selection, SETUP_MAX_OUTPUT_TOKENS, "minimal"));

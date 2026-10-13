@@ -1,0 +1,14 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "sha256_cert_fingerprints": [
+        "5A:EF:3C:F6:52:26:55:B6:D7:ED:FC:B9:80:05:84:BD:26:24:CE:71:9F:0D:EF:45:79:10:A3:EC:81:22:83:4B"
+      ],
+      "namespace": "android_app",
+      "package_name": "com.deepchoi.learnhub"
+    }
+  }
+]

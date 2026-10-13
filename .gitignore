@@ -9,3 +9,6 @@ functions/server.cjs
 functions/server.cjs.map
 .env*
 !.env.example
+
+test-results/
+playwright-report/

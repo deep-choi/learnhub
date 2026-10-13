@@ -71,3 +71,14 @@ test("the new intro sentence has no summary, so the setup is rebuilt from the an
   assert.deepEqual(restorePreviewSetup(messages, 6), { experience: "experienced", level: "intermediate", goal: "일·과제", dailyMinutes: 30 });
   assert.equal(restoreSetupFlow(messages, true), null);
 });
+
+test("quoted legacy experience questions still restore their unanswered next step", () => {
+  const restored = restoreSetupFlow([ask(`‘${subject}’에 대해 어느 정도 경험이 있으세요?`), say("처음이에요"), ask(q("goal"))], true);
+  assert.equal(restored?.subject, subject);
+  assert.equal(restored?.step.id, "goal");
+  assert.equal(restored?.setup.experience, "none");
+});
+
+test("current summaries preserve diagnosed level independently of self reported experience", () => {
+  assert.deepEqual(parseSetupSummary("(고급 · 경험: 처음 · 취미 · 하루 15분)"), { level: "advanced", experience: "none", goal: "취미·교양", dailyMinutes: 15 });
+});

@@ -1,3 +1,4 @@
+import { studyRouter } from "./server/study";
 import express, { type Request, type Response } from "express";
 import fs from "node:fs";
 import path from "path";
@@ -15,7 +16,7 @@ import { deleteFirebaseAccountData, FirebaseAiQuotaExceededError, getFirebaseAiU
 import type { LearningType } from "./src/types/learning";
 import { validateLearningBackup } from "./src/services/learningBackup";
 import { assessmentRouter } from "./server/assessment";
-import { coursePrompt, lessonPrompt, graphCurriculumSchema, knowledgeGraphRouter, learningIntentSchema, validCourseRequest, validTutorRequest, validateTutorResponse, tutorPrompt } from "./server/knowledgeGraphApi";
+import { coursePrompt, lessonPrompt, graphCurriculumSchema, knowledgeGraphRouter, learningIntentSchema, validCourseRequest, validTutorRequest, validateTutorResponse, normalizeTutorResponse, tutorPrompt } from "./server/knowledgeGraphApi";
 import { PreviewQuota, reserveFirestorePreview } from "./server/previewQuota";
 import { installUnhandledRejectionLogger } from "./server/runtimeSafety";
 import { learningSafetyPrompt } from "./server/learningSafety";
@@ -76,7 +77,7 @@ const renderIndexHtml = (template: string): string => template
 app.disable("x-powered-by");
 app.use((req, res, next) => {
   const isSnapshotPut = req.method === "PUT" && req.path === "/api/learning-snapshot";
-  return express.json({ limit: isSnapshotPut ? "8mb" : "64kb" })(req, res, next);
+  return express.json({ limit: isSnapshotPut || req.path === "/api/ai/study-import" ? "8mb" : "64kb" })(req, res, next);
 });
 app.use((req, res, next) => {
   const supplied = req.header("x-request-id") || "";
@@ -89,7 +90,7 @@ app.use((_req, res, next) => {
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-Frame-Options", "DENY");
   res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
-  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  res.setHeader("Permissions-Policy", "camera=(), microphone=(self), geolocation=()");
   if (!isSeoIndexable()) res.setHeader("X-Robots-Tag", "noindex, nofollow");
   next();
 });
@@ -307,10 +308,11 @@ type JsonConfig = Parameters<AiGateway["generateJson"]>[0]["config"];
 const runAi = async <T>(req: Request, res: Response, endpoint: string, prompt: string, config: JsonConfig, maxOutputTokens: number, validate: (payload: unknown) => string[]) => {
   try {
     const selection = aiSelectionFor(req);
-    const reservedOutputTokens = reservedAiOutputTokens(selection, maxOutputTokens);
+    const maxReasoningEffort = endpoint === "analyze-subject" || endpoint === "tutor-chat" ? "low" as const : undefined;
+    const reservedOutputTokens = reservedAiOutputTokens(selection, maxOutputTokens, maxReasoningEffort);
     if (typeof res.locals.userId === "string") await reserveFirebaseAiUsage(res.locals.userId, reservedOutputTokens);
     const safePrompt = `${learningSafetyPrompt(typeof req.body?.targetAudience === "string" ? req.body.targetAudience : undefined)}\n${prompt}`;
-    const result = await aiGateway.generateJson<T>({ endpoint, requestId: res.locals.requestId, clientKey: clientKeyFor(req, res), prompt: safePrompt, config, maxOutputTokens, selection, validate });
+    const result = await aiGateway.generateJson<T>({ endpoint, requestId: res.locals.requestId, clientKey: clientKeyFor(req, res), prompt: safePrompt, config, maxOutputTokens, maxReasoningEffort, selection, validate, ...(endpoint === "tutor-chat" ? { normalize: normalizeTutorResponse } : {}) });
     res.setHeader("x-learnhub-ai-provider", result.selection.provider);
     res.setHeader("x-learnhub-ai-model", result.selection.model);
     return res.json(result.payload);
@@ -386,6 +388,9 @@ const validateReviewPayload = (payload: unknown): string[] => {
   });
 };
 
+app.use("/api/ai", studyRouter({ gateway: aiGateway, authorize: requireAiAccess, clientKey: clientKeyFor, selection: aiSelectionFor, error: sendAiError,
+  reserve: async (res, tokens) => { if (typeof res.locals.userId === "string") await reserveFirebaseAiUsage(res.locals.userId, tokens); },
+}));
 app.use("/api/ai", assessmentRouter({ gateway: aiGateway, authorize: requireAiAccess, clientKey: clientKeyFor, selection: aiSelectionFor, error: sendAiError }));
 app.use("/api/ai", knowledgeGraphRouter({ gateway: aiGateway, previewGateway, previewQuota, authorize: requireAiAccess, clientKey: clientKeyFor, selection: aiSelectionFor, defaultSelection: defaultAiSelection, error: sendAiError,
   reserveUser: async (_req, res, tokens) => { if (typeof res.locals.userId === "string") await reserveFirebaseAiUsage(res.locals.userId, tokens); },
@@ -395,7 +400,7 @@ app.post("/api/ai/analyze-subject", async (req, res) => {
   if (!(await requireAiAccess(req, res))) return;
   const body = req.body;
   if (!validCourseRequest(body)) return invalidBody(res, "과목과 학습 설정을 확인해 주세요.");
-  return runAi(req, res, "analyze-subject", coursePrompt(body), { responseMimeType: "application/json", responseSchema: graphCurriculumSchema }, 2600, payload => validateCurriculumPayload(payload, { requireConceptLinks: true }));
+  return runAi(req, res, "analyze-subject", coursePrompt(body), { responseMimeType: "application/json", responseSchema: graphCurriculumSchema }, 6144, payload => validateCurriculumPayload(payload, { requireConceptLinks: true }));
 });
 
 app.post("/api/ai/generate-lesson", async (req, res) => {

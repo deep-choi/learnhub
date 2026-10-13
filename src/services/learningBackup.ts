@@ -1,3 +1,4 @@
+import { isStudyLibrary, mergeStudyLibraries, emptyStudyLibrary, type StudyLibrary } from "../domain/study";
 import {
   Course,
   LessonContent,
@@ -52,6 +53,7 @@ export interface TutorBackupMessage {
 }
 
 export interface LearningBackupData {
+  studyLibrary?: StudyLibrary;
   courses?: Course[];
   skills?: UserSkill[];
   progress?: UserProgress;
@@ -240,6 +242,7 @@ const isReview = (value: unknown): value is ReviewQuestion =>
 const isMistake = (value: unknown): value is MistakeItem =>
   isRecord(value) &&
   isNonEmptyString(value.id, 300) &&
+  (value.studyResultId === undefined || isNonEmptyString(value.studyResultId, 200)) &&
   (value.conceptId === undefined || isNonEmptyString(value.conceptId, 200)) &&
   isNonEmptyString(value.concept, 500) &&
   (value.courseId === undefined || isNonEmptyString(value.courseId, 200)) &&
@@ -341,6 +344,7 @@ export const isPortableLearningStorageKey = (key: string): boolean =>
   key === LEARNHUB_STORAGE_KEYS.CHAT_SESSIONS ||
   key === LEARNHUB_STORAGE_KEYS.LEARNING_NOTES ||
   key === LEARNHUB_STORAGE_KEYS.LESSON_PROGRESS ||
+  key === LEARNHUB_STORAGE_KEYS.STUDY_LIBRARY ||
   key === LEARNHUB_STORAGE_KEYS.TUTOR_PERSONA ||
   isSafeScopedKey(key, `${LEARNHUB_STORAGE_KEYS.LESSONS_CACHE}_`) ||
   isSafeScopedKey(key, LEARNHUB_SCOPED_STORAGE_PREFIXES.NOTES) ||
@@ -369,6 +373,7 @@ const categoryForKey = (key: string): string => {
   if (key === LEARNHUB_STORAGE_KEYS.CHAT_SESSIONS) return "chatSessions";
   if (key === LEARNHUB_STORAGE_KEYS.LEARNING_NOTES) return "learningNotes";
   if (key === LEARNHUB_STORAGE_KEYS.LESSON_PROGRESS) return "lessonProgress";
+  if (key === LEARNHUB_STORAGE_KEYS.STUDY_LIBRARY) return "studyLibrary";
   if (key === LEARNHUB_STORAGE_KEYS.TUTOR_PERSONA) return "tutorPersona";
   if (key.startsWith(`${LEARNHUB_STORAGE_KEYS.LESSONS_CACHE}_`)) return "lessonCache";
   if (key.startsWith(LEARNHUB_SCOPED_STORAGE_PREFIXES.NOTES)) return "notes";
@@ -409,6 +414,7 @@ const setDataField = (data: LearningBackupData, key: string, value: unknown) => 
   if (key === LEARNHUB_STORAGE_KEYS.CHAT_SESSIONS && isChatSessionList(value)) data.chatSessions = value;
   if (key === LEARNHUB_STORAGE_KEYS.LEARNING_NOTES && isLearningNoteList(value)) data.learningNotes = value;
   if (key === LEARNHUB_STORAGE_KEYS.LESSON_PROGRESS && isLessonProgressList(value)) data.lessonProgress = value;
+  if (key === LEARNHUB_STORAGE_KEYS.STUDY_LIBRARY && isStudyLibrary(value)) data.studyLibrary = value;
   if (key === LEARNHUB_STORAGE_KEYS.TUTOR_PERSONA && isTutorPersona(value)) data.tutorPersona = value;
 };
 
@@ -430,6 +436,7 @@ export const createLearningBackup = (storage?: Storage): LearningBackupDocument 
     LEARNHUB_STORAGE_KEYS.LEARNING_NOTES,
     LEARNHUB_STORAGE_KEYS.LESSON_PROGRESS,
     LEARNHUB_STORAGE_KEYS.TUTOR_PERSONA,
+    LEARNHUB_STORAGE_KEYS.STUDY_LIBRARY,
   ]) {
     const value = readJson(source, key);
     if (value !== null) setDataField(data, key, value);
@@ -502,7 +509,7 @@ export const validateLearningBackup = (input: unknown): BackupValidationResult =
 
   const data = input.data;
   const knownFields = new Set([
-    "courses", "skills", "progress", "reviews", "mistakes", "lessonCache", "notes", "scratchpad", "tutor", "practice", "assessments", "quizAttempts", "aiPreferences", "knowledgeGraph", "chatSessions", "learningNotes", "lessonProgress", "tutorPersona",
+    "courses", "skills", "progress", "reviews", "mistakes", "lessonCache", "notes", "scratchpad", "tutor", "practice", "assessments", "quizAttempts", "aiPreferences", "knowledgeGraph", "chatSessions", "learningNotes", "lessonProgress", "tutorPersona", "studyLibrary",
   ]);
   Object.keys(data).forEach((key) => {
     if (!knownFields.has(key)) errors.push(`알 수 없는 백업 데이터 필드: ${key}`);
@@ -516,6 +523,7 @@ export const validateLearningBackup = (input: unknown): BackupValidationResult =
   if (data.quizAttempts !== undefined && (!isBoundedArray(data.quizAttempts) || !data.quizAttempts.every((item) => isNonEmptyString(item, 500)))) errors.push("퀴즈 시도 데이터가 올바르지 않습니다.");
   if (data.aiPreferences !== undefined && !isAiRuntimeSelection(data.aiPreferences)) errors.push("AI 설정 데이터가 올바르지 않습니다.");
   if (data.knowledgeGraph !== undefined && !isKnowledgeGraph(data.knowledgeGraph)) errors.push("개념 지도 데이터가 올바르지 않습니다.");
+  if (data.studyLibrary !== undefined && !isStudyLibrary(data.studyLibrary)) errors.push("자료함 형식이 올바르지 않습니다.");
   if (data.chatSessions !== undefined && !isChatSessionList(data.chatSessions)) errors.push("대화 기록 데이터가 올바르지 않습니다.");
   if (data.learningNotes !== undefined && !isLearningNoteList(data.learningNotes)) errors.push("메모 데이터가 올바르지 않습니다.");
   if (data.lessonProgress !== undefined && !isLessonProgressList(data.lessonProgress)) errors.push("레슨 진행 데이터가 올바르지 않습니다.");
@@ -559,6 +567,7 @@ const entriesFromBackup = (backup: LearningBackupDocument): PortableEntry[] => {
   if (data.chatSessions !== undefined) addJson(LEARNHUB_STORAGE_KEYS.CHAT_SESSIONS, data.chatSessions);
   if (data.learningNotes !== undefined) addJson(LEARNHUB_STORAGE_KEYS.LEARNING_NOTES, data.learningNotes);
   if (data.lessonProgress !== undefined) addJson(LEARNHUB_STORAGE_KEYS.LESSON_PROGRESS, data.lessonProgress);
+  if (data.studyLibrary !== undefined) addJson(LEARNHUB_STORAGE_KEYS.STUDY_LIBRARY, data.studyLibrary);
   if (data.tutorPersona !== undefined) addJson(LEARNHUB_STORAGE_KEYS.TUTOR_PERSONA, data.tutorPersona);
   for (const [key, value] of Object.entries(data.lessonCache || {})) addJson(key, value);
   for (const [key, value] of Object.entries(data.notes || {})) entries.push({ key, value, category: "notes" });
@@ -630,6 +639,11 @@ const mergeByIdentity = (
       if (!isLearningNoteList(current)) return { value: importedRaw, replacedMalformed: true };
       if (!isLearningNoteList(imported)) throw new Error("메모 형식이 올바르지 않습니다.");
       return { value: JSON.stringify(mergeNotes(current, imported)), replacedMalformed: false };
+    }
+    if (category === "studyLibrary") {
+      if (!isStudyLibrary(current)) return { value: importedRaw, replacedMalformed: true };
+      if (!isStudyLibrary(imported)) throw new Error("자료함 형식이 올바르지 않습니다.");
+      return { value: JSON.stringify(mergeStudyLibraries(current, imported)), replacedMalformed: false };
     }
     if (category === "tutorPersona") {
       if (!isTutorPersona(current)) return { value: importedRaw, replacedMalformed: true };
@@ -820,9 +834,16 @@ export const carryNewerLocalRecords = (
     exportedAt,
   );
   const chats = newerLocalRecords(remote.data.chatSessions, local.data.chatSessions, (session) => session.id, exportedAt);
-  const carried = notes.length + progress.length + chats.length;
+  const localStudy = local.data.studyLibrary;
+  const remoteStudy = remote.data.studyLibrary || emptyStudyLibrary();
+  const studySources = newerLocalRecords(remoteStudy.sources, localStudy?.sources, item => item.id, exportedAt);
+  const studyBindings = newerLocalRecords(remoteStudy.bindings, localStudy?.bindings, item => item.scope, exportedAt);
+  const studyResults = (localStudy?.results || []).filter(item => Date.parse(item.quizProgress?.updatedAt || item.createdAt) > Math.max(exportedAt, Date.parse(remoteStudy.results.find(r => r.id === item.id)?.quizProgress?.updatedAt || remoteStudy.results.find(r => r.id === item.id)?.createdAt || "1970-01-01")));
+  const studyCarried = studySources.length + studyBindings.length + studyResults.length;
+  const carried = notes.length + progress.length + chats.length + studyCarried;
   if (carried === 0) return { snapshot: remote, carried };
   const data: LearningBackupData = { ...remote.data };
+  if (studyCarried > 0) data.studyLibrary = mergeStudyLibraries(remoteStudy, { sources: studySources, bindings: studyBindings, results: studyResults });
   if (notes.length > 0) data.learningNotes = mergeNotes(remote.data.learningNotes || [], notes);
   if (progress.length > 0) data.lessonProgress = mergeLessonProgress(remote.data.lessonProgress || [], progress);
   if (chats.length > 0) data.chatSessions = mergeChatSessions(remote.data.chatSessions || [], chats);

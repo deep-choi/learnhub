@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { NOTE_LIMITS, extractNoteLinkNames, resolveNoteLinks } from "../../domain/learningNote";
-import { getNoteForLesson, getNotesForConcept, saveNote } from "../../services/noteStore";
+import { getNote, getNoteForLesson, getNotesForConcept, saveNote } from "../../services/noteStore";
 import type { LearningNote, SaveNoteFailure } from "../../types/learningNotes";
 import type { PaneContext } from "./types";
 
@@ -25,11 +25,12 @@ const findNote = (context: PaneContext): LearningNote | undefined => {
 export const NotesPane: React.FC<{ context: PaneContext }> = ({ context }) => {
   const { noteTarget, graph, courseId, lessonId, currentConceptId } = context;
   const [body, setBody] = useState(() => findNote(context)?.body ?? "");
-  const [status, setStatus] = useState<"saved" | "saving" | SaveNoteFailure>("saved");
+  const [status, setStatus] = useState<"saved" | "saving" | "conflict" | SaveNoteFailure>("saved");
   /** 저장 버튼을 누른 직후 잠깐 "저장됨"을 보여 줍니다. */
   const [justSaved, setJustSaved] = useState(false);
   const justSavedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const noteIdRef = useRef<string | undefined>(findNote(context)?.id);
+  const savedBodyRef = useRef(findNote(context)?.body ?? "");
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingRef = useRef<{ conceptId: string; name: string; body: string; withLesson: boolean } | null>(null);
 
@@ -38,6 +39,11 @@ export const NotesPane: React.FC<{ context: PaneContext }> = ({ context }) => {
     timerRef.current = null;
     const pending = pendingRef.current;
     if (!pending) return;
+    const latest = noteIdRef.current ? getNote(noteIdRef.current) : undefined;
+    if (noteIdRef.current && (!latest || latest.body !== savedBodyRef.current)) {
+      setStatus("conflict");
+      return;
+    }
     pendingRef.current = null;
     // 아직 쓴 적 없는데 비어 있으면 빈 메모를 만들지 않습니다.
     if (!noteIdRef.current && !pending.body.trim()) {
@@ -54,6 +60,7 @@ export const NotesPane: React.FC<{ context: PaneContext }> = ({ context }) => {
       setStatus(result.reason);
     } else {
       noteIdRef.current = result.note.id;
+      savedBodyRef.current = result.note.body;
       setStatus("saved");
     }
   };
@@ -63,12 +70,13 @@ export const NotesPane: React.FC<{ context: PaneContext }> = ({ context }) => {
     flush();
     const note = findNote(context);
     noteIdRef.current = note?.id;
+    savedBodyRef.current = note?.body ?? "";
     setBody(note?.body ?? "");
     setStatus("saved");
     setJustSaved(false);
     return flush;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [noteTarget.conceptId]);
+  }, [noteTarget.conceptId, courseId, lessonId]);
 
   // 새로고침·탭 닫기는 컴포넌트 정리 함수를 부르지 않으므로, 자동 저장 대기 중인 메모를 이때 바로 저장합니다.
   const flushRef = useRef(flush);
@@ -77,12 +85,36 @@ export const NotesPane: React.FC<{ context: PaneContext }> = ({ context }) => {
     const flushNow = () => flushRef.current();
     const flushWhenHidden = () => { if (document.visibilityState === "hidden") flushRef.current(); };
     window.addEventListener("pagehide", flushNow);
+    window.addEventListener("learnhub:flush-notes", flushNow);
     document.addEventListener("visibilitychange", flushWhenHidden);
     return () => {
       window.removeEventListener("pagehide", flushNow);
+      window.removeEventListener("learnhub:flush-notes", flushNow);
       document.removeEventListener("visibilitychange", flushWhenHidden);
     };
   }, []);
+
+  useEffect(() => {
+    const refresh = () => {
+      const note = findNote(context);
+      if (note?.body === savedBodyRef.current && note?.id === noteIdRef.current) return;
+      if (pendingRef.current) {
+        if (timerRef.current) clearTimeout(timerRef.current);
+        setStatus("conflict");
+        return;
+      }
+      noteIdRef.current = note?.id;
+      savedBodyRef.current = note?.body ?? "";
+      setBody(note?.body ?? "");
+      setStatus("saved");
+    };
+    window.addEventListener("learnhub:data-changed", refresh);
+    window.addEventListener("storage", refresh);
+    return () => {
+      window.removeEventListener("learnhub:data-changed", refresh);
+      window.removeEventListener("storage", refresh);
+    };
+  }, [noteTarget.conceptId, courseId, lessonId]);
 
   const saveNow = () => {
     flush();
@@ -114,14 +146,22 @@ export const NotesPane: React.FC<{ context: PaneContext }> = ({ context }) => {
       <div className="flex items-center justify-between gap-2 border-b border-[var(--lh-line)] px-4 py-2.5">
         <div className="min-w-0">
           <p className="truncate text-base font-medium text-[var(--lh-ink)]">{noteTarget.conceptName}</p>
-          {status !== "saved" && status !== "saving" && <p className="text-sm text-[var(--lh-danger)]" role="alert">{FAILURE_TEXT[status]}</p>}
+          {status !== "saved" && status !== "saving" && <p className="text-sm text-[var(--lh-danger)]" role="alert">{status === "conflict" ? "다른 곳에서 메모가 수정됐습니다. 작성 중인 내용은 복사해 보관할 수 있습니다." : FAILURE_TEXT[status]}</p>}
         </div>
         <button
           type="button"
-          onClick={saveNow}
+          onClick={status === "conflict" ? () => {
+            pendingRef.current = null;
+            if (timerRef.current) clearTimeout(timerRef.current);
+            const note = findNote(context);
+            noteIdRef.current = note?.id;
+            savedBodyRef.current = note?.body ?? "";
+            setBody(note?.body ?? "");
+            setStatus("saved");
+          } : saveNow}
           className="inline-flex h-9 min-h-0! shrink-0 items-center rounded-full bg-[var(--lh-primary)] px-4 text-sm! font-medium text-white transition hover:bg-[var(--lh-primary-hover)] cursor-pointer"
         >
-          {justSaved && status === "saved" ? "저장됨" : "저장"}
+          {status === "conflict" ? "최신 메모 불러오기" : justSaved && status === "saved" ? "저장됨" : "저장"}
         </button>
       </div>
 
