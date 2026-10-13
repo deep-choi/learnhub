@@ -490,6 +490,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   </>
                 )}
 
+                <div className="flex flex-wrap gap-4 px-1 text-sm text-[var(--lh-ink-secondary)]">
+                  <a href="/privacy/" target="_blank" rel="noopener noreferrer">개인정보처리방침</a>
+                  <a href="/account-deletion/" target="_blank" rel="noopener noreferrer">계정 삭제 안내</a>
+                </div>
                 <p className="flex items-center gap-2 px-1 text-sm text-[var(--lh-ink-tertiary)]">
                   <ShieldCheck className="h-3.5 w-3.5 shrink-0" />
                   개인 학습 기록은 로그인한 계정별로 분리되어 저장됩니다.
