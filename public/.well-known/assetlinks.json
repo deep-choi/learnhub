@@ -5,7 +5,8 @@
     ],
     "target": {
       "sha256_cert_fingerprints": [
-        "5A:EF:3C:F6:52:26:55:B6:D7:ED:FC:B9:80:05:84:BD:26:24:CE:71:9F:0D:EF:45:79:10:A3:EC:81:22:83:4B"
+        "5A:EF:3C:F6:52:26:55:B6:D7:ED:FC:B9:80:05:84:BD:26:24:CE:71:9F:0D:EF:45:79:10:A3:EC:81:22:83:4B",
+        "05:79:75:A3:C0:89:E0:FF:6E:DE:6F:B3:3B:84:10:97:1E:D4:0C:FC:AD:43:61:74:B1:7B:92:02:CD:1C:3C:38"
       ],
       "namespace": "android_app",
       "package_name": "com.deepchoi.learnhub"
