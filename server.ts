@@ -17,6 +17,7 @@ import type { LearningType } from "./src/types/learning";
 import { validateLearningBackup } from "./src/services/learningBackup";
 import { assessmentRouter } from "./server/assessment";
 import { coursePrompt, lessonPrompt, graphCurriculumSchema, knowledgeGraphRouter, learningIntentSchema, validCourseRequest, validTutorRequest, validateTutorResponse, normalizeTutorResponse, tutorPrompt } from "./server/knowledgeGraphApi";
+import { isLessonLearningContext } from "./src/domain/lessonContext";
 import { PreviewQuota, reserveFirestorePreview } from "./server/previewQuota";
 import { FirestoreGuestTrialStorage, GUEST_TRIAL_LIMIT, GuestTrialExhaustedError, GuestTrialQuota, GuestTrialUnavailableError } from "./server/guestTrial";
 import { installUnhandledRejectionLogger } from "./server/runtimeSafety";
@@ -429,7 +430,7 @@ app.post("/api/ai/generate-lesson", async (req, res) => {
   if (!(await requireAiAccess(req, res))) return;
   const body = req.body;
   const fields = ["courseTitle", "chapterTitle", "lessonTitle", "learningType", "level", "conceptId", "conceptName"];
-  if (!isRecord(body) || !hasOnlyKeys(body, [...fields, "targetAudience"]) || !optionalBoundedString(body, "targetAudience", 80) || fields.some((key) => boundedString(body, key, key === "courseTitle" || key === "lessonTitle" ? 200 : 120) === null) || !isAllowed(body.learningType, LEARNING_TYPES)) return invalidBody(res, "레슨 생성 설정을 확인해 주세요.");
+  if (!isRecord(body) || !hasOnlyKeys(body, [...fields, "targetAudience", "learningContext"]) || !optionalBoundedString(body, "targetAudience", 80) || (body.learningContext !== undefined && !isLessonLearningContext(body.learningContext)) || fields.some((key) => boundedString(body, key, key === "courseTitle" || key === "lessonTitle" ? 200 : 120) === null) || !isAllowed(body.learningType, LEARNING_TYPES)) return invalidBody(res, "레슨 생성 설정을 확인해 주세요.");
   const learningType = body.learningType as LearningType;
   const prompt = lessonPrompt(body);
   return runAi(req, res, "generate-lesson", prompt, { responseMimeType: "application/json", responseSchema: lessonSchema }, 4096, (payload) => {

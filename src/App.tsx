@@ -391,9 +391,11 @@ export default function App() {
   };
 
   const handleCourseCreated = (newCourse: Course, links?: CurriculumConceptLinks) => {
-    StorageService.addCourse(newCourse);
+    const existing = StorageService.getCourseById(newCourse.id);
+    if (!existing) StorageService.addCourse(newCourse);
+    if (!StorageService.getCourseById(newCourse.id)) throw new Error("course_save_failed");
     if (links) mergeCourseLinks(newCourse, links);
-    trackLearningEvent("course_created", { courseId: newCourse.id, sample: false, source: "chat" });
+    if (!existing) trackLearningEvent("course_created", { courseId: newCourse.id, sample: false, source: "chat" });
     reloadData();
     if (newCourse.chapters[0]?.lessons[0]) {
       openLesson(
@@ -647,6 +649,13 @@ export default function App() {
               resume={resumeContext}
               onResume={openResume}
               onStartCourse={handleCourseCreated}
+              onResumeCourse={(courseId) => {
+                const course = StorageService.getCourseById(courseId);
+                if (!course) { setActiveView({ type: "courses" }); return; }
+                const next = getResumeLesson(course);
+                if (next) openLesson(course, next.lesson, next.chapterTitle, "chat-resume", true);
+                else setActiveView({ type: "course-detail", course });
+              }}
               onGuestStartCourse={handleGuestStartCourse}
               onRequestAuth={() => setIsAuthModalOpen(true)}
               onBrowseCourses={() => handleSelectView({ type: "courses" }, "chat-menu")}

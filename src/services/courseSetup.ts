@@ -21,10 +21,10 @@ export async function resolveSetupAnswer(
     if (local.matched) return { setup: local.setup, matched: true, source: "local" };
   }
   const fallback: SetupAnswerResult = {
-    setup: stepId === "goal" ? interpretSetupAnswerLocally("goal", text).setup : stepId === "levelCheck" ? pickSetupFields("levelCheck", { level: "beginner", levelEvidence: appendLevelEvidence(context.levelEvidence, context.question ?? "", text) }) : defaultsForStep(stepId),
+    setup: stepId === "goal" ? interpretSetupAnswerLocally("goal", text).setup : stepId === "levelCheck" ? pickSetupFields("levelCheck", { levelEvidence: appendLevelEvidence(context.levelEvidence, context.question ?? "", text) }) : defaultsForStep(stepId),
     matched: false,
     source: "fallback",
-    ...(stepId === "levelCheck" ? { feedback: "아직 수준을 확실히 판단하지 못했어요. 우선 기초부터 시작하고, 학습하면서 이해한 내용을 다시 확인하겠습니다." } : {}),
+    ...(stepId === "levelCheck" ? { feedback: "이 내용은 수업에서 함께 살펴볼게요." } : {}),
   };
   if (!context.signedIn || !text) return fallback;
   try {

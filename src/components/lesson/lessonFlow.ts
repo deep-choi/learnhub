@@ -50,11 +50,10 @@ interface StepLike {
   content: string;
 }
 
-/** 단계 하나를 튜터 말풍선 글로 만듭니다. 첫 단계에는 레슨 소개를 붙입니다. */
-export function buildStepText(options: { index: number; total: number; step: StepLike; intro?: string }): string {
-  const { index, total, step, intro } = options;
-  const head = index === 0 && intro ? `${intro} ${total}단계로 갈게요. ${stepProgressLabel(index, total)}` : stepProgressLabel(index, total);
-  return `${head}\n\n## ${step.title}\n\n${step.content}`;
+/** 첫 메시지는 곧바로 수업 내용으로 시작한다. 목표와 연결은 생성한 본문에 녹인다. */
+export function buildStepText(options: { index: number; step: StepLike }): string {
+  const { index, step } = options;
+  return index === 0 ? step.content : `## ${step.title}\n\n${step.content}`;
 }
 
 /** 마지막 단계를 마친 뒤 확인 문제(또는 실기형의 "해봤어요")를 권하는 문장 */

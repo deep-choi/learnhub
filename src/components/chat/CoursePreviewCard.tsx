@@ -11,6 +11,9 @@ import { courseRequestFromSetup, resolveCourseSetup, summarizeCourseSetup } from
 import type { CourseSetup } from "../../types/courseSetup";
 
 interface CoursePreviewCardProps {
+  /** 방금 마친 설정은 미리보기 확인 없이 수업으로 이어진다. 복원한 대화는 자동 실행하지 않는다. */
+  autoStart?: boolean;
+  onPreparingChange?: (preparing: boolean) => void;
   subject: string;
   isSignedIn: boolean;
   /** 대화에서 확인한 수준과 진단 근거. */
@@ -32,7 +35,7 @@ type State =
   | { status: "ready"; data: Record<string, any> };
 
 /** 대화 안에 놓이는 과목 미리보기 카드. 과정 요약과 설정 요약을 보여 주고, 눌러서 과목을 시작합니다. */
-export const CoursePreviewCard: React.FC<CoursePreviewCardProps> = ({ subject, isSignedIn, setup: initialSetup, onStart, onGuestStart, onRequestAuth, initialData, onReady }) => {
+export const CoursePreviewCard: React.FC<CoursePreviewCardProps> = ({ subject, isSignedIn, setup: initialSetup, onStart, onGuestStart, onRequestAuth, initialData, onReady, autoStart = false, onPreparingChange }) => {
   const setup = useMemo(() => initialSetup ?? {}, [initialSetup]);
   const usableInitial = useMemo(() => isUsablePreviewData(initialData), []); // eslint-disable-line react-hooks/exhaustive-deps
   const [state, setState] = useState<State>(() => (usableInitial && initialData ? { status: "ready", data: initialData } : { status: "loading" }));
@@ -40,11 +43,19 @@ export const CoursePreviewCard: React.FC<CoursePreviewCardProps> = ({ subject, i
   onReadyRef.current = onReady;
   const [attempt, setAttempt] = useState(0);
   const [expanded, setExpanded] = useState(false);
+  const [startError, setStartError] = useState("");
   const startedRef = useRef(false);
+  const autoStartedRef = useRef(false);
   const resolved = resolveCourseSetup(setup);
   const settingsKey = JSON.stringify(resolved);
   // 저장된 결과를 그리는 동안은 같은 설정으로 다시 요청하지 않습니다. 설정이 바뀌면 새로 만듭니다.
   const loadedKeyRef = useRef<string | null>(usableInitial ? settingsKey : null);
+
+  useEffect(() => {
+    if (!autoStart) return;
+    onPreparingChange?.(state.status === "loading");
+    return () => onPreparingChange?.(false);
+  }, [autoStart, state.status, onPreparingChange]);
 
   useEffect(() => {
     if (loadedKeyRef.current === settingsKey) return;
@@ -65,7 +76,7 @@ export const CoursePreviewCard: React.FC<CoursePreviewCardProps> = ({ subject, i
           return;
         }
         if (response.status === 429) {
-          setState({ status: "error", message: "오늘 볼 수 있는 미리보기를 모두 썼어요. 로그인하면 이어서 만들 수 있어요.", limited: true });
+          setState({ status: "error", message: isSignedIn ? "오늘의 AI 사용 한도에 도달했어요. 나중에 다시 시도해 주세요." : "오늘 볼 수 있는 미리보기를 모두 썼어요. 로그인하면 이어서 만들 수 있어요.", limited: !isSignedIn });
           return;
         }
         if (!response.ok) throw new Error("preview_unavailable");
@@ -98,9 +109,34 @@ export const CoursePreviewCard: React.FC<CoursePreviewCardProps> = ({ subject, i
       onGuestStart(subject, state.data, setup);
       return;
     }
+    setStartError("");
     startedRef.current = true;
-    onStart(built.course, built.links);
+    try { onStart(built.course, built.links); }
+    catch {
+      startedRef.current = false;
+      setStartError("수업을 저장하지 못했어요. 다시 시도해 주세요.");
+    }
   };
+
+  const startRef = useRef(handleStart);
+  startRef.current = handleStart;
+  useEffect(() => {
+    if (!autoStart || !built || autoStartedRef.current) return;
+    autoStartedRef.current = true;
+    startRef.current();
+  }, [autoStart, built]);
+
+  if (autoStart) return (
+    <div className="py-2" aria-label="수업 준비">
+      {state.status === "loading" && <p role="status" className="flex items-center gap-2 text-sm text-[var(--lh-ink-secondary)]"><Loader2 aria-hidden className="h-4 w-4 animate-spin" />첫 수업을 준비하고 있어요…</p>}
+      {state.status === "error" && <div role="alert" className="space-y-2">
+        <p>{state.message}</p>
+        <button type="button" onClick={state.limited ? onRequestAuth : () => setAttempt(value => value + 1)} className="min-h-10 text-[var(--lh-primary)] underline underline-offset-4">{state.limited ? "로그인하기" : "다시 시도하기"}</button>
+      </div>}
+      {state.status === "ready" && !isSignedIn && <button type="button" onClick={handleStart} className="min-h-10 text-[var(--lh-primary)] underline underline-offset-4">로그인하고 이어서 배우기</button>}
+      {startError && <div role="alert"><p>{startError}</p><button type="button" onClick={handleStart} className="min-h-10 text-[var(--lh-primary)] underline underline-offset-4">다시 시도하기</button></div>}
+    </div>
+  );
 
   return (
     <section aria-label={`‘${subject}’ 과목 미리보기`} className="w-full overflow-hidden rounded-3xl border border-[var(--lh-line)] bg-[var(--lh-surface)] shadow-[var(--lh-shadow-md)]">
@@ -126,6 +162,7 @@ export const CoursePreviewCard: React.FC<CoursePreviewCardProps> = ({ subject, i
       )}
       {built && (
         <div className="space-y-4 px-4 py-4 sm:px-5">
+          {startError && <p role="alert">{startError}</p>}
           <div className="space-y-1.5">
             <h3 className="text-lg font-medium leading-snug tracking-tight text-[var(--lh-ink)]">{built.course.title}</h3>
             {built.course.summary && <p className="text-base leading-[1.75] text-[var(--lh-ink-secondary)]">{built.course.summary}</p>}

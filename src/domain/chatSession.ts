@@ -64,6 +64,7 @@ export function isChatMessage(value: unknown): value is ChatSessionMessage {
     (value.role === "user" || value.role === "assistant") &&
     nonEmpty(value.text, CHAT_LIMITS.maxTextLength) &&
     (value.studyResultId === undefined || nonEmpty(value.studyResultId, 200)) &&
+    (value.courseId === undefined || nonEmpty(value.courseId, 200)) &&
     date(value.createdAt) &&
     (value.question === undefined || str(value.question, 400)) &&
     (value.conceptName === undefined || str(value.conceptName, 400)) &&
@@ -156,6 +157,7 @@ export function normalizeNewMessage(message: NewChatMessage, now: string): ChatS
   if (!text || (message.role !== "user" && message.role !== "assistant")) return null;
   const result: ChatSessionMessage = { role: message.role, text, createdAt: message.createdAt && date(message.createdAt) ? message.createdAt : now };
   if (message.studyResultId && nonEmpty(message.studyResultId, 200)) result.studyResultId = message.studyResultId;
+  if (message.courseId && nonEmpty(message.courseId, 200)) result.courseId = message.courseId;
   if (message.question) result.question = message.question.slice(0, 400);
   if (message.conceptName) result.conceptName = message.conceptName.slice(0, 400);
   if (message.learningIntent && isLearningIntent(message.learningIntent)) result.learningIntent = { subject: message.learningIntent.subject.trim() };

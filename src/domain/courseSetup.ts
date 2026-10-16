@@ -17,7 +17,7 @@ export const SETUP_REASK = "잘 이해하지 못했어요. 아래에서 골라 �
 export const SETUP_LEVEL_CHECK_NOTE = "알고 있는 만큼 편하게 답해 주세요. 이 답으로 설명의 깊이와 배울 시작점을 정할게요.";
 
 /** "바로 만들어 주세요" 칩. 누르면 남은 질문을 건너뛰고 빈 항목은 기본값을 쓴다. */
-export const SETUP_SKIP_OPTION = { id: "skip", label: "바로 만들어 주세요" } as const;
+export const SETUP_SKIP_OPTION = { id: "skip", label: "바로 배울게요" } as const;
 
 export const EXPERIENCE_OPTIONS: SetupOption[] = [
   { id: "none", label: "처음이에요", short: "처음", value: { experience: "none", level: "beginner" } },

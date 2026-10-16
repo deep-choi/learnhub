@@ -106,6 +106,19 @@ export function renameChatSession(id: string, title: string): boolean {
   return write(sessions);
 }
 
+/** 생성한 과목을 연결해 대화를 다시 열어도 같은 과목에서 이어간다. */
+export function setMessageCourseId(id: string, messageIndex: number, courseId: string): boolean {
+  if (!courseId.trim() || courseId.length > 200 || !Number.isInteger(messageIndex)) return false;
+  const sessions = read();
+  const index = sessions.findIndex(session => session.id === id);
+  const session = sessions[index];
+  if (!session?.messages[messageIndex]) return false;
+  const messages = [...session.messages];
+  messages[messageIndex] = { ...messages[messageIndex], courseId };
+  sessions[index] = { ...session, updatedAt: new Date().toISOString(), messages };
+  return write(sessions);
+}
+
 export function deleteChatSession(id: string): boolean {
   const sessions = read();
   const remaining = sessions.filter((session) => session.id !== id);

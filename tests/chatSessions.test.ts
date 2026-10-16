@@ -8,6 +8,7 @@ import {
   listChatSessions,
   renameChatSession,
   setMessageCoursePreview,
+  setMessageCourseId,
 } from "../src/services/chatSessionStore";
 import { CHAT_LIMITS, chatSessionChars, mergeChatSessions, titleFromFirstMessage, toTutorHistory } from "../src/domain/chatSession";
 import { detectLearningIntent, resolveLearningIntent } from "../src/domain/learningIntent";
@@ -39,6 +40,29 @@ beforeEach(() => {
 const session = (id: string, updatedAt: string, texts: string[] = ["안녕하세요"]): ChatSession => ({
   id, title: id, createdAt: updatedAt, updatedAt,
   messages: texts.map((text, index) => ({ role: index % 2 === 0 ? "user" as const : "assistant" as const, text, createdAt: updatedAt })),
+});
+
+test("started courses remain linked after preview pruning and backup round trips", () => {
+  const chat = createChatSession("생활 과학을 배우고 싶어요")!;
+  appendChatMessage(chat.id, { role: "assistant", text: "이제 함께 배워볼게요." });
+  assert.equal(setMessageCourseId(chat.id, 1, "course-started"), true);
+  for (let index = 0; index < CHAT_LIMITS.maxPreviewsPerSession + 1; index++) {
+    appendChatMessage(chat.id, { role: "assistant", text: `과정 ${index}`, coursePreview: { subject: "과학", data: {} } });
+  }
+  assert.equal(getChatSession(chat.id)?.messages[1].courseId, "course-started");
+  assert.equal(setMessageCourseId(chat.id, 999, "missing"), false);
+  assert.equal(setMessageCourseId(chat.id, 1, ""), false);
+  const setup = { level: "beginner" as const, levelEvidence: "생활 속 과학이 궁금해요" };
+  storage.setItem(LEARNHUB_STORAGE_KEYS.COURSES, JSON.stringify([{ ...course(), setup }]));
+  const backup = createLearningBackup();
+  assert.equal(validateLearningBackup(backup).ok, true);
+  const malformed = structuredClone(backup);
+  malformed.data.courses![0].setup = { levelEvidence: "가".repeat(2401) };
+  assert.equal(validateLearningBackup(malformed).ok, false);
+  storage.clear();
+  importLearningBackup(backup, { strategy: "merge", storage: storage as unknown as Storage });
+  assert.equal(getChatSession(chat.id)?.messages[1].courseId, "course-started");
+  assert.deepEqual(JSON.parse(storage.getItem(LEARNHUB_STORAGE_KEYS.COURSES)!)[0].setup, setup);
 });
 
 test("자유 대화: 만들기·덧붙이기·이름 바꾸기·삭제와 최신순 목록", async () => {

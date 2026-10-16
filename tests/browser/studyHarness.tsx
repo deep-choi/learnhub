@@ -32,6 +32,7 @@ function Fixture() {
         resume={null}
         onResume={() => {}}
         onStartCourse={() => {}}
+        onResumeCourse={() => {}}
         onGuestStartCourse={() => {}}
         onRequestAuth={() => {}}
         onBrowseCourses={() => {}}

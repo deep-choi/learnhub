@@ -12,7 +12,7 @@ import { CoursePreviewCard } from "./chat/CoursePreviewCard";
 import { ModelReasoningPicker } from "./chat/ModelReasoningPicker";
 import { RichLessonRenderer } from "./notion/RichLessonRenderer";
 import { getTutorPersonaRequest } from "../services/tutorPersonaStore";
-import { appendChatMessage, createChatSession, getChatSession, setMessageCoursePreview } from "../services/chatSessionStore";
+import { appendChatMessage, createChatSession, getChatSession, setMessageCoursePreview, setMessageCourseId } from "../services/chatSessionStore";
 import { getLearnerContext } from "../services/learnerContext";
 import { toTutorHistory } from "../domain/chatSession";
 import { detectLearningIntent, resolveLearningIntent } from "../domain/learningIntent";
@@ -29,6 +29,7 @@ import {
   applySetupAnswer,
   initialSetupProgress,
   nextSetupStep,
+  sanitizeCourseSetup,
 } from "../domain/courseSetup";
 import { fetchLevelCheckQuestion, resolveSetupAnswer } from "../services/courseSetup";
 import type { CourseSetup, SetupProgress, SetupStep, SetupStepId } from "../types/courseSetup";
@@ -36,6 +37,8 @@ import type { ChatSetupState } from "../types/chat";
 import { submitContentReport } from "../services/contentReports";
 
 interface ChatMessage {
+  courseId?: string;
+  autoStart?: boolean;
   studyResultId?: string;
   id: string;
   role: "user" | "assistant";
@@ -90,6 +93,7 @@ interface AiChatViewProps {
   onResume: () => void;
   /** 로그인한 사용자가 미리보기 카드에서 과목을 시작합니다. */
   onStartCourse: (course: Course, links: CurriculumConceptLinks) => void;
+  onResumeCourse: (courseId: string) => void;
   /** 로그인 전 사용자가 미리보기 카드에서 시작을 눌렀을 때 */
   onGuestStartCourse: (subject: string, data: Record<string, any>, setup: CourseSetup) => void;
   onRequestAuth: () => void;
@@ -107,6 +111,7 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
   resume,
   onResume,
   onStartCourse,
+  onResumeCourse,
   onGuestStartCourse,
   onRequestAuth,
   onBrowseCourses,
@@ -126,7 +131,8 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
       studyResultId: message.studyResultId,
       question: message.question,
       conceptName: message.conceptName,
-      previewSubject: message.coursePreview?.subject ?? message.learningIntent?.subject,
+      courseId: message.courseId,
+      previewSubject: message.courseId ? undefined : message.coursePreview?.subject ?? message.learningIntent?.subject,
       // 저장된 설정(확인 질문으로 정해진 수준 포함)을 먼저 쓰고, 없는 예전 대화는 안내 문장과 질문·답에서 되살립니다.
       previewSetup: message.coursePreview?.setup ?? (message.learningIntent ? restorePreviewSetup(initial.stored, index) : undefined),
       previewData: message.coursePreview?.data,
@@ -137,6 +143,7 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
   );
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [preparingCourse, setPreparingCourse] = useState(false);
   const [courseMode, setCourseMode] = useState(startInCourseMode);
   /** 로그인 전 체험 대화가 몇 번 남았는지. 첫 답을 받기 전에는 알 수 없습니다. */
   const [trialRemaining, setTrialRemaining] = useState<number | null>(null);
@@ -151,7 +158,7 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const started = messages.length > 0;
-  const study = useStudyWorkspace({ scope: `chat:${sessionId || "draft"}`, busy: loading || !!flow || courseMode, enabled: isSignedIn, onVoiceTurn: async (text) => send(text), extraActions: [
+  const study = useStudyWorkspace({ scope: `chat:${sessionId || "draft"}`, busy: loading || preparingCourse || !!flow || courseMode, enabled: isSignedIn, onVoiceTurn: async (text) => send(text), extraActions: [
     { label: "\uacfc\ubaa9 \ub9cc\ub4e4\uae30", run: () => { setCourseMode(true); inputRef.current?.focus(); } },
     { label: "\ubb38\uc81c \ud480\uae30", run: onPractice },
     { label: "\uacfc\uc815 \ub458\ub7ec\ubcf4\uae30", run: onBrowseCourses },
@@ -209,6 +216,16 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
     if (index >= 0) setMessageCoursePreview(id, index, toChatCoursePreview(subject, data, setup));
   };
 
+  const startPreparedCourse = (message: ChatMessage, course: Course, links: CurriculumConceptLinks) => {
+    onStartCourse(course, links);
+    const id = sessionRef.current;
+    if (id) {
+      const index = findPreviewMessageIndex(getChatSession(id)?.messages ?? [], message.text, message.previewSubject!);
+      if (index >= 0) setMessageCourseId(id, index, course.id);
+    }
+    setMessages(items => items.map(item => item.id === message.id ? { ...item, courseId: course.id, previewSubject: undefined, autoStart: false } : item));
+  };
+
   const addMessages = (...items: ChatMessage[]) => setMessages((previous) => [...previous, ...items]);
 
   /** 안내를 반복하지 않고 질문만 표시합니다. */
@@ -220,9 +237,10 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
 
   const finishSetup = (subject: string, setup: CourseSetup, progress: SetupProgress = initialSetupProgress()) => {
     setFlow(null);
-    // 설정 요약은 카드 위에 보이므로 문장에는 넣지 않습니다. (예전 대화의 요약 문장은 restoreSetup이 계속 읽습니다.)
-    const intro = `‘${subject}’에서 배울 시작점을 바탕으로 학습 과정을 구성할게요. 아래 과정에서 이어서 배울 수 있어요.`;
-    addMessages({ id: nextId(), role: "assistant", text: intro, previewSubject: subject, previewSetup: setup });
+    // 목표·순서는 수업 본문에 녹이고, 여기서는 첫 수업을 준비한다.
+    setPreparingCourse(true);
+    const intro = "이제 함께 배워볼게요.";
+    addMessages({ id: nextId(), role: "assistant", text: intro, previewSubject: subject, previewSetup: setup, autoStart: true });
     persist({ role: "assistant", text: intro, learningIntent: { subject }, setupState: { subject, setup, progress } });
   };
 
@@ -241,10 +259,10 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
         question = await fetchLevelCheckQuestion(subject, setup.experience, setup.levelEvidence);
         setLoading(false);
         if (!question) {
-          const notice = "수준 확인 질문을 준비하지 못했어요. 우선 기초부터 시작하고, 배우면서 이해한 내용을 확인하겠습니다.";
+          const notice = "수업에서 함께 살펴볼게요.";
           addMessages({ id: nextId(), role: "assistant", text: notice });
           persist({ role: "assistant", text: notice });
-          finishSetup(subject, { ...setup, level: "beginner" }, current);
+          finishSetup(subject, setup, current);
           return;
         }
       }
@@ -255,7 +273,7 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
   };
 
   /** 과목 설정 질문을 시작합니다. userText가 있으면 그 말을 먼저 사용자 메시지로 남깁니다. */
-  const beginSetup = async (subject: string, userText?: string) => {
+  const beginSetup = async (subject: string, userText?: string, learningRequest = userText) => {
     const topic = resolveLearningIntent(subject)?.subject ?? subject.trim();
     if (userText) {
       addMessages({ id: nextId(), role: "user", text: userText });
@@ -263,7 +281,8 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
     }
     setLoading(true);
     try {
-      await advanceSetup(topic, {}, initialSetupProgress(), true);
+      const setup = sanitizeCourseSetup(learningRequest ? { levelEvidence: `학습자가 원하는 배움: ${learningRequest.trim().slice(0, 400)}` } : {});
+      await advanceSetup(topic, setup, initialSetupProgress(), true);
     } finally {
       setLoading(false);
     }
@@ -277,7 +296,7 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
     if (!flow) return;
     setLoading(true);
     try {
-      const evidence = flow.step.id === "experience" ? { ...value, levelEvidence: `경험에 대한 자기 보고: ${label.slice(0, 400)}` } : value;
+      const evidence = flow.step.id === "experience" ? { ...value, levelEvidence: [flow.setup.levelEvidence, `경험에 대한 자기 보고: ${label.slice(0, 400)}`].filter(Boolean).join("\n") } : value;
       const applied = applySetupAnswer(flow.setup, flow.progress, flow.step.id, evidence);
       const state = { subject: flow.subject, setup: applied.setup, progress: applied.progress };
       setMessages((previous) => [...markAnswered(previous, flow.step.id, label), { id: nextId(), role: "user", text: label }]);
@@ -311,7 +330,7 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
   const answerWithText = async (text: string) => {
     if (!flow) return;
     setInput("");
-    if (/바로\s*만들/.test(text)) {
+    if (/바로\s*(?:만들|배울|시작)/.test(text)) {
       skipRest();
       return;
     }
@@ -331,7 +350,7 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
 
   const send = async (question: string) => {
     const trimmed = question.trim() || study.defaultQuestion;
-    if (!trimmed || loading || study.working) return;
+    if (!trimmed || loading || preparingCourse || study.working) return;
 
     if (flow) {
       await answerWithText(trimmed);
@@ -398,7 +417,7 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
         { id: nextId(), role: "assistant", text: reply, question: trimmed, conceptName: tangentName || undefined, setupStarted: Boolean(subject) },
       ]);
       persist({ role: "assistant", text: reply, question: trimmed, conceptName: tangentName || undefined });
-      if (subject) await beginSetup(subject);
+      if (subject) await beginSetup(subject, undefined, trimmed);
       return reply;
     } catch (error) {
       const trialOver = !isSignedIn && error instanceof AiResponseError && (error.code === GUEST_TRIAL_EXHAUSTED_CODE || error.code === GUEST_TRIAL_UNAVAILABLE_CODE);
@@ -493,7 +512,7 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
   const sendButton = (
     <button
       type="submit"
-      disabled={(!input.trim() && !study.defaultQuestion) || loading || study.working}
+      disabled={(!input.trim() && !study.defaultQuestion) || loading || preparingCourse || study.working}
       aria-label="보내기"
       className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[var(--lh-primary)] text-white transition hover:bg-[var(--lh-primary-hover)] disabled:opacity-30 cursor-pointer disabled:cursor-default"
     >
@@ -583,12 +602,14 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
                 card={
                   message.previewSubject ? (
                     <CoursePreviewCard
+                      autoStart={message.autoStart}
+                      onPreparingChange={setPreparingCourse}
                       subject={message.previewSubject}
                       setup={message.previewSetup}
                       initialData={message.previewData}
                       onReady={(data, setup) => savePreview(message.text, message.previewSubject!, data, setup)}
                       isSignedIn={isSignedIn}
-                      onStart={onStartCourse}
+                      onStart={(course, links) => startPreparedCourse(message, course, links)}
                       onGuestStart={onGuestStartCourse}
                       onRequestAuth={onRequestAuth}
                     />
@@ -596,6 +617,7 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
                 }
               >
                 <RichLessonRenderer content={message.text} />
+                {message.courseId && <button type="button" onClick={() => onResumeCourse(message.courseId!)} className="mt-3 inline-flex min-h-10 items-center gap-2 text-[var(--lh-primary)] underline underline-offset-4">수업 이어가기 <ArrowRight aria-hidden className="h-4 w-4" /></button>}
                 {study.renderResultLink(message.studyResultId)}
                 {message.setupQuestion && (
                   <div className="mt-3.5 flex flex-wrap gap-2" role="group" aria-label="빠른 답">

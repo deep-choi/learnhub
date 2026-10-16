@@ -13,6 +13,7 @@ import type { KnowledgeGraph } from "../types/knowledgeGraph";
 import { isKnowledgeGraph, mergeKnowledgeGraphs } from "../domain/knowledgeGraph";
 import type { ChatSession } from "../types/chat";
 import { isChatSessionList, mergeChatSessions } from "../domain/chatSession";
+import { sanitizeCourseSetup } from "../domain/courseSetup";
 import type { LearningNote } from "../types/learningNotes";
 import type { LessonProgressState } from "../types/lessonProgress";
 import { isLearningNoteList, mergeNotes } from "../domain/learningNote";
@@ -185,6 +186,11 @@ const isLessonMeta = (value: unknown): boolean => {
 
 const isCourse = (value: unknown): value is Course => {
   if (!isRecord(value) || !isBoundedArray(value.chapters, 100)) return false;
+  if (value.setup !== undefined) {
+    if (!isRecord(value.setup)) return false;
+    const setup = sanitizeCourseSetup(value.setup) as Record<string, unknown>;
+    if (!Object.keys(value.setup).every(key => setup[key] !== undefined && setup[key] === value.setup[key])) return false;
+  }
   return (
     isNonEmptyString(value.id, 200) &&
     isNonEmptyString(value.title, 500) &&

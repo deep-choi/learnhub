@@ -10,6 +10,7 @@ import { completeLesson } from "../services/lessonCompletion";
 import { clearLessonProgress, getLessonProgress, saveLessonProgress } from "../services/lessonProgressStore";
 import { validateLessonPayload } from "../domain/contentValidation";
 import { createFallbackLessonContent } from "../domain/lessonFallback";
+import { lessonLearningContext } from "../domain/lessonContext";
 import { courseIsComplete } from "../domain/assessment";
 import { RichLessonRenderer } from "./notion/RichLessonRenderer";
 import { AgentMessage } from "./chat/AgentMessage";
@@ -158,6 +159,7 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
   chapterTitle,
   onFinishLesson,
   onGoHome,
+  onGoCourse,
   onStartNextLesson,
   onStartAssessment,
   onBackToAssessment,
@@ -272,6 +274,7 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
             level: course.level,
             conceptId: lessonMeta.conceptId,
             conceptName: lessonMeta.conceptName,
+            learningContext: lessonLearningContext(course, lessonMeta),
           }),
           signal: controller.signal,
         });
@@ -328,19 +331,18 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
   const addTutor = (text: string, actions?: FlowAction[]) => appendMessage({ sender: "tutor", text, ...(actions ? { actions } : {}) });
 
   /** 단계 하나를 튜터 메시지로 보여 줍니다. 마지막 단계에는 확인 문제(실기형은 "해봤어요") 제안이 붙습니다. */
-  const stepMessage = (stepContent: LessonContent, index: number, withIntro: boolean): ConversationMessage => {
+  const stepMessage = (stepContent: LessonContent, index: number): ConversationMessage => {
     const total = stepContent.steps.length;
     const i = clampStepIndex(index, total);
-    const intro = `오늘은 **${lessonMeta.conceptName}**${josa(lessonMeta.conceptName, "을/를")} 배워요.`;
-    let text = buildStepText({ index: i, total, step: stepContent.steps[i], intro: withIntro ? intro : undefined });
+    let text = buildStepText({ index: i, step: stepContent.steps[i] });
     if (i === total - 1) text += `\n\n${closingPrompt(isPractical)}`;
     return { sender: "tutor", text, actions: stepActions(i, total, isPractical) };
   };
 
-  const showStep = (index: number, withIntro = false) => {
+  const showStep = (index: number) => {
     if (!content) return;
     const i = clampStepIndex(index, content.steps.length);
-    appendMessage(stepMessage(content, i, withIntro));
+    appendMessage(stepMessage(content, i));
     saveProgress({ stepIndex: i, phase: "steps" });
   };
 
@@ -364,16 +366,16 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
     if (onlyLegacyIntroduction && !lessonMeta.isCompleted && saved?.phase !== "done" && !saved?.checkResult) {
       // 아직 질문하거나 문제를 풀지 않은 이전 도입만 새 단계 형식으로 바꿉니다.
       next = { stepIndex: 0, phase: "steps" };
-      nextMessages = [stepMessage(content, 0, true)];
+      nextMessages = [stepMessage(content, 0)];
     } else if (saved) {
       next = { stepIndex: clampStepIndex(saved.stepIndex, total), phase: saved.phase, ...(saved.checkResult ? { checkResult: saved.checkResult } : {}) };
       // 질문하기 전의 첫 안내는 현재 레슨 데이터로 표시합니다.
       const untouchedOpening = stored.length === 1 && stored[0].sender === "tutor"
         && !!stored[0].actions?.length && next.phase === "steps" && next.stepIndex === 0;
-      if (stored.length === 0 || untouchedOpening) nextMessages = [stepMessage(content, next.stepIndex, true)];
+      if (stored.length === 0 || untouchedOpening) nextMessages = [stepMessage(content, next.stepIndex)];
     } else if (stored.length === 0) {
       next = { stepIndex: 0, phase: "steps" };
-      nextMessages = [stepMessage(content, 0, true)];
+      nextMessages = [stepMessage(content, 0)];
     } else {
       // 단계 대화가 생기기 전에 한 번에 읽던 레슨: 대화는 그대로 두고 확인 단계에서 이어갑니다.
       next = { stepIndex: Math.max(0, total - 1), phase: lessonMeta.isCompleted ? "done" : "check" };
@@ -424,7 +426,7 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
     try {
       const activeIndex = clampStepIndex(progress.stepIndex, content.steps.length);
       const activeStep = content.steps[activeIndex];
-      const currentContext = `${course.summary}\n\n현재 챕터: ${chapterTitle}\n현재 단계 (${activeIndex + 1}/${content.steps.length}): ${activeStep.title}\n${activeStep.content}`;
+      const currentContext = `학습 맥락: ${JSON.stringify(lessonLearningContext(course, lessonMeta))}\n\n현재 챕터: ${chapterTitle}\n현재 단계 (${activeIndex + 1}/${content.steps.length}): ${activeStep.title}\n${activeStep.content}`;
       const lessonContext = currentContext;
       const studied = await study.answer(trimmed, boundedHistory(messages), lessonContext);
       if (studied) {
@@ -751,7 +753,7 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
         addUser(action.label);
         clearLessonProgress(course.id, lessonMeta.id);
         setPracticeOpen(false);
-        showStep(0, true);
+        showStep(0);
         return;
       case "ask":
         addUser(action.label);
@@ -812,8 +814,7 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
     return (
       <div className="flex min-h-[70vh] flex-col items-center justify-center gap-3 text-[var(--lh-ink-secondary)]">
         <Loader2 className="h-6 w-6 animate-spin text-[var(--lh-primary)]" />
-        <span className="text-sm font-medium">AI 학습방을 준비하는 중...</span>
-        <span className="text-xs">레슨 목표와 대화 흐름을 구성하고 있습니다.</span>
+        <span className="text-sm font-medium">수업을 준비하고 있어요…</span>
       </div>
     );
   }
@@ -824,6 +825,7 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
     <div className="flex w-full">
       <div className="flex min-h-[100dvh] min-w-0 flex-1 flex-col pt-4 sm:pt-6">
         <section aria-label={`${lessonMeta.title} 학습 대화`} className="mx-auto flex w-full min-w-0 max-w-[720px] flex-1 flex-col px-5 sm:px-8">
+          {onGoCourse && <div className="mb-3 flex justify-end"><button type="button" onClick={onGoCourse} className="min-h-10 text-sm text-[var(--lh-ink-secondary)] underline-offset-4 hover:underline">전체 과정</button></div>}
           <div className="flex-1">
             {resume && (
               <div className="mb-5">

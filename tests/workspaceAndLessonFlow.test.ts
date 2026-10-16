@@ -29,12 +29,11 @@ test("opening a tab selects it and expands the workspace; closing moves to a nei
   assert.equal(closedLast.collapsed, true);
 });
 
-test("step messages carry the progress label and the last step offers the check (or the practical did-it chip)", () => {
+test("the lesson starts with its content and the last step offers the check (or the practical did-it chip)", () => {
   assert.equal(stepProgressLabel(0, 4), "(1/4)");
-  const first = buildStepText({ index: 0, total: 4, step: { title: "개념", content: "본문" }, intro: "오늘은 ‘X’를 배워요." });
-  assert.ok(first.startsWith("오늘은 ‘X’를 배워요. 4단계로 갈게요. (1/4)"));
-  assert.ok(first.includes("## 개념"));
-  assert.ok(buildStepText({ index: 1, total: 4, step: { title: "예시", content: "본문" } }).startsWith("(2/4)"));
+  const first = buildStepText({ index: 0, step: { title: "개념", content: "젖은 수건은 끓이지 않아도 마르죠." } });
+  assert.equal(first, "젖은 수건은 끓이지 않아도 마르죠.");
+  assert.equal(buildStepText({ index: 1, step: { title: "예시", content: "본문" } }), "## 예시\n\n본문");
   assert.deepEqual(stepActions(0, 4, false).map((a) => a.id), ["next", "easier", "example"]);
   assert.deepEqual(stepActions(3, 4, false).map((a) => a.id), ["check", "skip", "easier", "example"]);
   assert.deepEqual(stepActions(3, 4, true).map((a) => a.id), ["did", "skip", "easier", "example"]);

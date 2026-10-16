@@ -1,8 +1,10 @@
 import type { Chapter, Course, LearningType } from "../../types/learning";
+import type { CourseSetup } from "../../types/courseSetup";
+import { sanitizeCourseSetup } from "../../domain/courseSetup";
 import { normalizeConceptKey } from "./graphBridge";
 import type { ConceptEdge, ConceptNode, CurriculumConceptLinks, KnowledgeGraph } from "./graphTypes";
 
-export interface CurriculumSettings {
+export interface CurriculumSettings extends CourseSetup {
   level: Course["level"];
   goal: string;
   dailyMinutes: number;
@@ -90,6 +92,7 @@ export const buildCourseFromPayload = (
     createdAt: iso,
     updatedAt: iso,
     chapters,
+    ...(settings.levelEvidence || settings.experience ? { setup: sanitizeCourseSetup(settings) } : {}),
   };
   return { course, links: { domain: typeof domainText === "string" ? domainText.trim().slice(0, 30) || undefined : undefined, lessons: linkLessons } };
 };

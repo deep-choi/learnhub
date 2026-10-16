@@ -1,3 +1,5 @@
+import type { CourseSetup } from "./courseSetup";
+
 export type LearningType =
   | "concept" // 개념형
   | "problem_solving" // 문제풀이형
@@ -26,6 +28,8 @@ export interface Chapter {
 }
 
 export interface Course {
+  /** 시작 대화에서 확인한 관심·이해 근거를 이후 수업에도 전달한다. */
+  setup?: CourseSetup;
   id: string;
   title: string;
   subject: string;

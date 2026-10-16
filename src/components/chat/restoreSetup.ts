@@ -80,7 +80,7 @@ function replaySetup(messages: Line[]): Replay | null {
       continue;
     }
     if (!pending) continue;
-    if (message.text === SETUP_SKIP_OPTION.label || /바로\s*만들/u.test(message.text)) return { subject, setup, progress, pending: null };
+    if (message.text === SETUP_SKIP_OPTION.label || /바로\s*(?:만들|배울|시작)/u.test(message.text)) return { subject, setup, progress, pending: null };
     // 못 알아들어 다시 물었던 답은 건너뜁니다. 해석은 저장 당시 AI가 했을 수도 있어서, 다시 묻는 문장이 바로 뒤따랐는지로만 판단합니다.
     if (messages[i + 1]?.role === "assistant" && messages[i + 1].text === SETUP_REASK) continue;
     const option = pending.step.options.find((candidate) => candidate.label === message.text);
