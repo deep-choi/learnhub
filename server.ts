@@ -18,12 +18,15 @@ import { validateLearningBackup } from "./src/services/learningBackup";
 import { assessmentRouter } from "./server/assessment";
 import { coursePrompt, lessonPrompt, graphCurriculumSchema, knowledgeGraphRouter, learningIntentSchema, validCourseRequest, validTutorRequest, validateTutorResponse, normalizeTutorResponse, tutorPrompt } from "./server/knowledgeGraphApi";
 import { PreviewQuota, reserveFirestorePreview } from "./server/previewQuota";
+import { FirestoreGuestTrialStorage, GUEST_TRIAL_LIMIT, GuestTrialExhaustedError, GuestTrialQuota, GuestTrialUnavailableError } from "./server/guestTrial";
 import { installUnhandledRejectionLogger } from "./server/runtimeSafety";
 import { learningSafetyPrompt } from "./server/learningSafety";
 import { personaOutputTokens, personaPrompt, sanitizePersona } from "./server/tutorPersona";
 import { configuredSelectionOrDefault, defaultAiSelectionFor, publicAiAvailability } from "./server/aiAvailability";
 import {
+  getAiModel,
   isAiRuntimeSelection,
+  nearestReasoningEffort,
   type AiRuntimeSelection,
 } from "./src/domain/aiModels";
 
@@ -158,6 +161,18 @@ const previewQuota = new PreviewQuota({
   perIp: positiveEnvInteger("PREVIEW_REQUESTS_PER_IP_PER_DAY", 3), globalLimit: positiveEnvInteger("PREVIEW_GLOBAL_REQUESTS_PER_DAY", 100),
   ...(process.env.NODE_ENV === "production" ? { durableReserve: reserveFirestorePreview } : {}),
 });
+// 로그인 전 "체험 모델" 대화: 기기당 10회, IP·전체 일일 상한으로 키 남용을 막는다.
+const GUEST_TRIAL_OUTPUT_TOKENS = 4_096;
+// AI_USAGE_LIMITS_ENABLED(1인 테스트용 스위치)와 무관하게 항상 적용한다. 인증 없는 공개 엔드포인트라 끄면 서버 키가 그대로 노출된다.
+const guestTrialQuota = new GuestTrialQuota({
+  perDevice: GUEST_TRIAL_LIMIT,
+  perIpPerDay: positiveEnvInteger("GUEST_TRIAL_REQUESTS_PER_IP_PER_DAY", 30),
+  globalPerDay: positiveEnvInteger("GUEST_TRIAL_GLOBAL_REQUESTS_PER_DAY", 1000),
+  ...(process.env.NODE_ENV === "production" ? { storage: new FirestoreGuestTrialStorage() } : {}),
+});
+const guestTrialGateway = new AiGateway({ geminiApiKey: process.env.GEMINI_API_KEY, openAiApiKey: process.env.OPENAI_API_KEY, anthropicApiKey: process.env.ANTHROPIC_API_KEY,
+  policy: new AiAdmissionController({ maxConcurrent: 3, maxRequestsPerClientPerMinute: 12, dailyRequestBudget: 2_000, perClientDailyRequestBudget: 40, dailyOutputTokenBudget: 2_000 * GUEST_TRIAL_OUTPUT_TOKENS, perClientDailyOutputTokenBudget: 40 * GUEST_TRIAL_OUTPUT_TOKENS }) });
+const GUEST_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 const hasOnlyKeys = (value: Record<string, unknown>, allowed: readonly string[]) => Object.keys(value).every((key) => allowed.includes(key));
 const boundedString = (body: Record<string, unknown>, key: string, maxLength: number, required = true): string | null => {
@@ -179,6 +194,13 @@ const isLoopbackRequest = (req: Request) => isAllowedLoopbackRequest({
 const bearerToken = (req: Request) => /^Bearer\s+([^\s]{1,4096})$/i.exec(req.header("authorization") || "")?.[1] || null;
 
 const defaultAiSelection = (): AiRuntimeSelection => defaultAiSelectionFor((provider) => aiGateway.isConfigured(provider));
+
+/** 체험 대화는 기본 모델을 낮은 추론·짧은 출력으로 쓴다. 요청 헤더의 모델 선택은 받지 않는다. */
+const guestTrialSelection = (): AiRuntimeSelection => {
+  const base = defaultAiSelection();
+  const model = getAiModel(base.provider, base.model);
+  return { ...base, reasoningEffort: model ? nearestReasoningEffort("low", model.reasoningEfforts) : base.reasoningEffort, maxOutputTokens: GUEST_TRIAL_OUTPUT_TOKENS };
+};
 
 const aiSelectionFor = (req: Request): AiRuntimeSelection => {
   const provider = req.header("x-learnhub-ai-provider");
@@ -438,6 +460,39 @@ app.post("/api/ai/tutor-chat", async (req, res) => {
   const body = req.body;
   if (!validTutorRequest(body)) return invalidBody(res, "튜터 질문과 레슨 맥락을 확인해 주세요.");
   return runAi(req, res, "tutor-chat", tutorPrompt(body), { responseMimeType: "application/json", responseSchema: body.mode === "free" ? freeTutorSchema : tutorSchema }, personaOutputTokens(sanitizePersona(body.persona)), payload => validateTutorResponse(payload, body.conceptName, { free: body.mode === "free" }));
+});
+
+/** 로그인 전 체험 대화. 기기당 10회까지 서버 키로 답하고, 그 뒤에는 로그인을 안내한다. */
+app.post("/api/ai/guest-tutor-chat", async (req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  const guestId = req.header("x-learnhub-guest-id") || "";
+  const body = req.body;
+  if (!GUEST_ID_PATTERN.test(guestId) || !validTutorRequest(body) || body.mode !== "free") return invalidBody(res, "체험 대화 요청을 확인해 주세요.");
+  let ticket: Awaited<ReturnType<GuestTrialQuota["reserve"]>>;
+  try {
+    ticket = await guestTrialQuota.reserve(guestId, req.ip || req.socket.remoteAddress || "unknown");
+  } catch (error) {
+    if (error instanceof GuestTrialExhaustedError) return res.status(402).json({ error: `로그인 없이 체험할 수 있는 ${GUEST_TRIAL_LIMIT}회를 모두 사용했어요. 로그인하면 계속 대화할 수 있어요.`, code: "GUEST_TRIAL_EXHAUSTED", remaining: 0 });
+    if (error instanceof GuestTrialUnavailableError) return res.status(429).json({ error: "지금은 체험 이용이 많아요. 로그인하면 바로 대화를 이어갈 수 있어요.", code: "GUEST_TRIAL_UNAVAILABLE", remaining: 0 });
+    console.error(JSON.stringify({ event: "guest_trial_error", requestId: res.locals.requestId, code: error instanceof Error ? error.message.slice(0, 120) : "unknown" }));
+    return res.status(503).json({ error: "체험 사용량을 확인하지 못했어요. 잠시 후 다시 시도해 주세요.", code: "GUEST_TRIAL_UNAVAILABLE" });
+  }
+  try {
+    const result = await guestTrialGateway.generateJson<Record<string, unknown>>({
+      endpoint: "tutor-chat", requestId: res.locals.requestId, clientKey: `guest:${ticket.deviceKey}`,
+      prompt: `${learningSafetyPrompt(typeof body.targetAudience === "string" ? body.targetAudience : undefined)}
+${tutorPrompt(body)}`,
+      config: { responseMimeType: "application/json", responseSchema: freeTutorSchema },
+      maxOutputTokens: GUEST_TRIAL_OUTPUT_TOKENS, maxReasoningEffort: "low", selection: guestTrialSelection(),
+      validate: payload => validateTutorResponse(payload, body.conceptName, { free: true }), normalize: normalizeTutorResponse,
+    });
+    return res.json({ ...result.payload, trial: { remaining: ticket.remaining, limit: GUEST_TRIAL_LIMIT } });
+  } catch (error) {
+    // 답을 받지 못한 요청은 체험 횟수에서 빼 준다.
+    await guestTrialQuota.release(ticket).catch(() => console.error(JSON.stringify({ event: "guest_trial_release_failed", requestId: res.locals.requestId })));
+    console.error(JSON.stringify({ event: "ai_error", requestId: res.locals.requestId, endpoint: "guest-tutor-chat", code: error instanceof AiGatewayError ? error.code : "unknown" }));
+    return sendAiError(res, error);
+  }
 });
 
 app.post("/api/ai/generate-practice", async (req, res) => {

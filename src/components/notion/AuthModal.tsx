@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Eye, EyeOff, ShieldCheck, X } from "lucide-react";
+import { ArrowRight, Eye, EyeOff, Loader2, Lock, Mail, User, X } from "lucide-react";
 import {
   getAuthStatus,
   signInWithGoogle,
@@ -10,7 +10,6 @@ import {
   updatePassword,
 } from "../../services/authClient";
 import { AUTH_SERVER_UNREACHABLE_MESSAGE } from "../../services/firebaseClient";
-import { LearnHubLogo } from "../common/LearnHubLogo";
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -40,6 +39,15 @@ const authErrorMessage = (error: unknown, fallback: string): string => {
   if (code === "auth/weak-password" || (/password/iu.test(message) && /weak|least|characters/iu.test(message))) return "더 안전한 비밀번호를 입력해 주세요.";
   return message || fallback;
 };
+
+const GoogleIcon: React.FC = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
+    <path fill="#4285F4" d="M21.81 12.23c0-.71-.06-1.4-.18-2.05h-9.41v3.87h5.38a4.6 4.6 0 0 1-1.99 3.02v2.51h3.23c1.89-1.74 2.97-4.3 2.97-7.35Z" />
+    <path fill="#34A853" d="M12.22 22c2.7 0 4.96-.89 6.62-2.42l-3.23-2.51c-.9.6-2.04.96-3.39.96-2.6 0-4.8-1.76-5.59-4.12H3.29v2.59A10 10 0 0 0 12.22 22Z" />
+    <path fill="#FBBC05" d="M6.63 13.91a6.02 6.02 0 0 1 0-3.82V7.5H3.29a10 10 0 0 0 0 9l3.34-2.59Z" />
+    <path fill="#EA4335" d="M12.22 5.97c1.47 0 2.79.51 3.83 1.5l2.86-2.87A9.61 9.61 0 0 0 12.22 2a10 10 0 0 0-8.93 5.5l3.34 2.59c.79-2.36 2.99-4.12 5.59-4.12Z" />
+  </svg>
+);
 
 export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, initialError, recoveryMode = false, onRecoveryComplete }) => {
   const [mode, setMode] = useState<AuthMode>("login");
@@ -157,63 +165,130 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, initialEr
     }
   };
 
+  const switchMode = (next: AuthMode) => {
+    setMode(next);
+    setPassword("");
+    setPasswordConfirmation("");
+    resetFeedback();
+  };
+
+  const inputClass = "w-full rounded-xl border border-transparent bg-[var(--lh-surface-subtle)] py-2.5 pl-11 pr-4 text-sm outline-none transition-colors focus:border-[var(--lh-primary)] sm:py-3";
+  const labelClass = "ml-1 text-[13px] font-medium uppercase leading-5 tracking-wider text-[var(--lh-ink-secondary)]";
+  const iconClass = "absolute left-4 top-1/2 -translate-y-1/2 text-[var(--lh-ink-tertiary)]";
+  const isEntry = mode === "login" || mode === "signup";
+  const title = mode === "forgot" ? "비밀번호 재설정" : mode === "recovery" ? "새 비밀번호 설정" : "로그인 또는 회원가입";
+  const subtitle = mode === "forgot" ? "가입한 이메일로 재설정 링크를 보내드려요." : mode === "recovery" ? "새로 사용할 비밀번호를 입력해 주세요." : "기록을 저장하고 어디서든 이어서 사용하세요.";
+  const submitLabel = mode === "login" ? "로그인" : mode === "signup" ? "회원가입 완료" : mode === "forgot" ? "재설정 링크 보내기" : "새 비밀번호 저장";
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm" role="presentation">
-      <div className="max-h-[calc(100vh-2rem)] w-full max-w-md overflow-y-auto rounded-[28px] border border-[var(--lh-line)] bg-[var(--lh-surface)] p-6 text-[var(--lh-ink)] shadow-2xl sm:p-8" role="dialog" aria-modal="true" aria-labelledby="learnhub-auth-title">
-        <div className="flex items-start justify-between">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-[var(--lh-line)] bg-[var(--lh-surface-subtle)]"><LearnHubLogo size={22} /></div>
-            <div>
-              <h2 id="learnhub-auth-title" className="text-xl font-medium tracking-tight">{mode === "login" ? "다시 만나서 반가워요" : mode === "signup" ? "학습을 시작해 볼까요?" : mode === "forgot" ? "비밀번호를 다시 설정할까요?" : "새 비밀번호 설정"}</h2>
-              <p className="mt-1 text-xs text-[var(--lh-ink-secondary)]">학습 기록을 안전하게 이어서 사용할 수 있어요.</p>
-            </div>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/25 p-3 backdrop-blur-[2px] sm:p-6"
+      role="presentation"
+      onMouseDown={(event) => { if (event.target === event.currentTarget && !isSubmitting) onClose(); }}
+    >
+      <div className="max-h-[calc(100dvh-24px)] w-full max-w-[440px] overflow-y-auto rounded-[24px] border border-[var(--lh-line)] bg-[var(--lh-surface)] p-5 text-[var(--lh-ink)] shadow-[0_24px_80px_rgba(15,15,15,0.18)] sm:max-h-[calc(100dvh-48px)] sm:p-8" role="dialog" aria-modal="true" aria-labelledby="learnhub-auth-title">
+        <section className="relative w-full">
+          <button type="button" onClick={onClose} disabled={isSubmitting} aria-label="인증 창 닫기" className="absolute -right-1 -top-1 z-10 flex h-9 w-9 cursor-pointer items-center justify-center rounded-full text-[var(--lh-ink-secondary)] transition-colors hover:bg-[var(--lh-surface-subtle)] hover:text-[var(--lh-ink)] disabled:cursor-not-allowed disabled:opacity-50"><X size={19} /></button>
+          <div className="mb-8 text-left">
+            <h1 id="learnhub-auth-title" className="pr-10 text-[26px] font-medium leading-9 tracking-[-0.02em]">{title}</h1>
+            <p className="mt-3 text-base leading-6 text-[var(--lh-ink-secondary)]">{subtitle}</p>
           </div>
-          <button type="button" onClick={onClose} aria-label="인증 창 닫기" className="flex h-10 w-10 items-center justify-center rounded-full text-[var(--lh-ink-secondary)] hover:bg-[var(--lh-surface-subtle)] hover:text-[var(--lh-ink)] cursor-pointer transition"><X className="h-4 w-4" /></button>
-        </div>
 
-        {mode !== "forgot" && mode !== "recovery" && <div className="mt-6 grid grid-cols-2 rounded-full bg-[var(--lh-surface-subtle)] p-1" role="tablist" aria-label="인증 방식">
-          {(["login", "signup"] as const).map((item) => (
-            <button key={item} type="button" role="tab" aria-selected={mode === item} onClick={() => { setMode(item); setPassword(""); setPasswordConfirmation(""); resetFeedback(); }} className={`min-h-10 rounded-full text-sm font-medium transition cursor-pointer ${mode === item ? "bg-[var(--lh-surface)] text-[var(--lh-ink)] shadow-sm" : "text-[var(--lh-ink-secondary)] hover:text-[var(--lh-ink)]"}`}>
-              {item === "login" ? "로그인" : "회원가입"}
-            </button>
-          ))}
-        </div>}
+          {mode === "forgot" && <button type="button" onClick={() => switchMode("login")} className="mb-4 cursor-pointer text-[13px] font-medium text-[var(--lh-primary)] underline">← 로그인으로 돌아가기</button>}
 
-        {mode === "forgot" && <button type="button" onClick={() => { setMode("login"); resetFeedback(); }} className="mt-5 text-xs font-medium text-[var(--lh-primary)] underline">← 로그인으로 돌아가기</button>}
+          <div className="space-y-7">
+            <form onSubmit={handlePasswordAuth} className="space-y-4">
+              {mode === "signup" && (
+                <div className="space-y-2">
+                  <label htmlFor="learnhub-auth-name" className={labelClass}>이름</label>
+                  <div className="relative">
+                    <User size={16} className={iconClass} />
+                    <input id="learnhub-auth-name" type="text" placeholder="홍길동" value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" className={inputClass} />
+                  </div>
+                </div>
+              )}
 
-        {errorMessage && <p role="alert" className="mt-4 rounded-xl border border-[var(--lh-line)] bg-[var(--lh-surface-subtle)] px-4 py-3 text-xs text-[var(--lh-danger)]">{errorMessage}</p>}
-        {successMessage && <p role="status" className="mt-4 rounded-xl border border-[var(--lh-line)] bg-[var(--lh-surface-subtle)] px-4 py-3 text-xs text-[var(--lh-ink)]">{successMessage}</p>}
-        {signupConfirmationPending && <button type="button" disabled={isSubmitting} onClick={async () => { resetFeedback(); setIsSubmitting(true); try { await resendSignUpConfirmation(email.trim()); setSuccessMessage("가입 확인 메일을 다시 보냈습니다."); } catch (error) { setErrorMessage(authErrorMessage(error, "확인 메일을 다시 보내지 못했습니다.")); } finally { setIsSubmitting(false); } }} className="mt-3 text-xs font-medium text-[var(--lh-primary)] underline disabled:opacity-50">확인 메일 다시 보내기</button>}
+              {mode !== "recovery" && (
+                <div className="space-y-2">
+                  <label htmlFor="learnhub-auth-email" className={labelClass}>이메일</label>
+                  <div className="relative">
+                    <Mail size={16} className={iconClass} />
+                    <input id="learnhub-auth-email" ref={emailInputRef} type="email" placeholder="name@example.com" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" required className={inputClass} />
+                  </div>
+                </div>
+              )}
 
-        <form onSubmit={handlePasswordAuth} className="mt-5 space-y-4">
-          {mode === "signup" && <div className="space-y-1.5"><label htmlFor="learnhub-auth-name" className="text-xs font-medium text-[var(--lh-ink-secondary)]">이름</label><input id="learnhub-auth-name" value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" placeholder="학습자 이름" className="min-h-12 w-full rounded-xl border border-[var(--lh-line)] bg-[var(--lh-surface)] px-4 text-sm outline-none transition focus:border-[var(--lh-line-strong)]" /></div>}
-          {mode !== "recovery" && <div className="space-y-1.5"><label htmlFor="learnhub-auth-email" className="text-xs font-medium text-[var(--lh-ink-secondary)]">이메일</label><input id="learnhub-auth-email" ref={emailInputRef} type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" placeholder="you@example.com" required className="min-h-12 w-full rounded-xl border border-[var(--lh-line)] bg-[var(--lh-surface)] px-4 text-sm outline-none transition focus:border-[var(--lh-line-strong)]" /></div>}
-          {mode !== "forgot" && <div className="space-y-1.5"><label htmlFor="learnhub-auth-password" className="text-xs font-medium text-[var(--lh-ink-secondary)]">{mode === "recovery" ? "새 비밀번호" : "비밀번호"}</label><div className="relative"><input id="learnhub-auth-password" type={showPassword ? "text" : "password"} value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={mode === "login" ? "current-password" : "new-password"} placeholder="8자 이상" required minLength={8} className="min-h-12 w-full rounded-xl border border-[var(--lh-line)] bg-[var(--lh-surface)] px-4 pr-12 text-sm outline-none transition focus:border-[var(--lh-line-strong)]" /><button type="button" onClick={() => setShowPassword((visible) => !visible)} aria-label={showPassword ? "비밀번호 숨기기" : "비밀번호 보기"} className="absolute inset-y-0 right-2 flex w-10 items-center justify-center text-[var(--lh-ink-secondary)]">{showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button></div></div>}
-          {mode === "recovery" && <div className="space-y-1.5"><label htmlFor="learnhub-auth-password-confirmation" className="text-xs font-medium text-[var(--lh-ink-secondary)]">새 비밀번호 확인</label><input id="learnhub-auth-password-confirmation" type={showPassword ? "text" : "password"} value={passwordConfirmation} onChange={(event) => setPasswordConfirmation(event.target.value)} autoComplete="new-password" required minLength={8} className="min-h-12 w-full rounded-xl border border-[var(--lh-line)] bg-[var(--lh-surface)] px-4 text-sm outline-none transition focus:border-[var(--lh-line-strong)]" /></div>}
-          {mode === "signup" && (
-            <div className="space-y-1.5">
-              <label className="flex items-start gap-2.5 text-sm text-[var(--lh-ink)] cursor-pointer">
-                <input type="checkbox" checked={ageConfirmed} onChange={(event) => setAgeConfirmed(event.target.checked)} className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--lh-primary)]" />
-                <span>만 14세 이상입니다.</span>
-              </label>
-              <p className="pl-6.5 text-xs leading-5 text-[var(--lh-ink-secondary)]">만 14세 미만은 법정대리인(보호자)의 동의가 필요해요. 보호자가 직접 가입한 뒤 함께 이용해 주세요.</p>
-            </div>
-          )}
-          {mode === "login" && <button type="button" onClick={() => { setMode("forgot"); setPassword(""); resetFeedback(); }} className="text-xs font-medium text-[var(--lh-primary)] underline">비밀번호를 잊으셨나요?</button>}
-          <button type="submit" disabled={isSubmitting} className="flex min-h-12 w-full items-center justify-center rounded-full bg-[var(--lh-primary)] px-6 text-sm font-medium text-white transition hover:bg-[var(--lh-primary-hover)] disabled:opacity-50 shadow-xs cursor-pointer">{isSubmitting ? "처리 중…" : mode === "login" ? "로그인" : mode === "signup" ? "계정 만들기" : mode === "forgot" ? "재설정 링크 보내기" : "새 비밀번호 저장"}</button>
-        </form>
+              {mode !== "forgot" && (
+                <div className="space-y-2">
+                  <label htmlFor="learnhub-auth-password" className={labelClass}>{mode === "recovery" ? "새 비밀번호" : "비밀번호"}</label>
+                  <div className="relative">
+                    <Lock size={16} className={iconClass} />
+                    <input id="learnhub-auth-password" type={showPassword ? "text" : "password"} placeholder="8자 이상" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={mode === "login" ? "current-password" : "new-password"} required minLength={8} className={`${inputClass} pr-12`} />
+                    <button type="button" onClick={() => setShowPassword((visible) => !visible)} aria-label={showPassword ? "비밀번호 숨기기" : "비밀번호 보기"} className="absolute inset-y-0 right-2 flex w-10 cursor-pointer items-center justify-center text-[var(--lh-ink-tertiary)] hover:text-[var(--lh-ink)]">{showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button>
+                  </div>
+                </div>
+              )}
 
-        {(mode === "login" || mode === "signup") && <><div className="my-5 flex items-center gap-3 text-[10px] uppercase tracking-[0.18em] text-[var(--lh-ink-tertiary)]"><span className="h-px flex-1 bg-[var(--lh-line)]" />또는<span className="h-px flex-1 bg-[var(--lh-line)]" /></div>
+              {mode === "recovery" && (
+                <div className="space-y-2">
+                  <label htmlFor="learnhub-auth-password-confirmation" className={labelClass}>새 비밀번호 확인</label>
+                  <div className="relative">
+                    <Lock size={16} className={iconClass} />
+                    <input id="learnhub-auth-password-confirmation" type={showPassword ? "text" : "password"} value={passwordConfirmation} onChange={(event) => setPasswordConfirmation(event.target.value)} autoComplete="new-password" required minLength={8} className={inputClass} />
+                  </div>
+                </div>
+              )}
 
-        <button type="button" onClick={handleGoogleLogin} disabled={isSubmitting} className="flex min-h-12 w-full items-center justify-center gap-3 rounded-full border border-[var(--lh-line)] bg-[var(--lh-surface)] px-5 text-sm font-medium transition hover:bg-[var(--lh-surface-subtle)] disabled:opacity-50 shadow-xs cursor-pointer">
-          <span aria-hidden="true" className="text-base font-medium">G</span> Google로 계속하기
-        </button>
-        <p className="mt-2 text-center text-xs leading-5 text-[var(--lh-ink-tertiary)]">Google로 처음 가입하면 만 14세 이상임을 확인한 것으로 봅니다.</p></>}
+              {mode === "signup" && (
+                <div className="space-y-1.5 pt-1">
+                  <label className="flex cursor-pointer items-start gap-2.5 text-sm text-[var(--lh-ink)]">
+                    <input type="checkbox" checked={ageConfirmed} onChange={(event) => setAgeConfirmed(event.target.checked)} className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--lh-primary)]" />
+                    <span>만 14세 이상입니다.</span>
+                  </label>
+                  <p className="pl-6.5 text-[13px] leading-5 text-[var(--lh-ink-tertiary)]">만 14세 미만은 법정대리인(보호자)의 동의가 필요해요. 보호자가 직접 가입한 뒤 함께 이용해 주세요.</p>
+                </div>
+              )}
 
-        <div className="mt-6 space-y-3 border-t border-[var(--lh-line)] pt-5">
-          <div className="flex items-start gap-2 text-xs leading-relaxed text-[var(--lh-ink-secondary)]"><ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-[var(--lh-primary)]" /><span>로그인하면 학습 과정과 기록이 고객 계정에 연결됩니다. 비밀번호는 LearnHub가 직접 저장하지 않습니다.</span></div>
-          <p className="text-center text-[11px] leading-relaxed text-[var(--lh-ink-tertiary)]">서비스 소개는 로그인 없이 볼 수 있으며, 학습 기능은 계정 로그인 후 이용할 수 있습니다.</p>
-        </div>
+              {mode === "login" && (
+                <div className="flex justify-end">
+                  <button type="button" onClick={() => switchMode("forgot")} className="cursor-pointer text-[13px] font-medium text-[var(--lh-ink-secondary)] transition-colors hover:text-[var(--lh-primary)]">비밀번호를 잊으셨나요?</button>
+                </div>
+              )}
+
+              {errorMessage && <p role="alert" className="ml-1 text-[13px] font-medium leading-5 text-[var(--lh-danger)]">{errorMessage}</p>}
+              {successMessage && <p role="status" className="ml-1 text-[13px] font-medium leading-5 text-[var(--lh-ink)]">{successMessage}</p>}
+              {signupConfirmationPending && (
+                <button type="button" disabled={isSubmitting} onClick={async () => { resetFeedback(); setIsSubmitting(true); try { await resendSignUpConfirmation(email.trim()); setSuccessMessage("가입 확인 메일을 다시 보냈습니다."); } catch (error) { setErrorMessage(authErrorMessage(error, "확인 메일을 다시 보내지 못했습니다.")); } finally { setIsSubmitting(false); } }} className="ml-1 cursor-pointer text-[13px] font-medium text-[var(--lh-primary)] underline disabled:opacity-50">확인 메일 다시 보내기</button>
+              )}
+
+              <button type="submit" disabled={isSubmitting} className="group mt-2 flex w-full cursor-pointer items-center justify-center gap-2 rounded-xl border-none bg-[var(--lh-primary)] py-3 text-sm font-medium text-white transition-all hover:bg-[var(--lh-primary-hover)] disabled:cursor-not-allowed disabled:opacity-70 sm:mt-4 sm:py-3.5">
+                {isSubmitting ? <Loader2 size={18} className="animate-spin" /> : (<>{submitLabel}<ArrowRight size={16} className="transition-transform group-hover:translate-x-1" /></>)}
+              </button>
+
+              {isEntry && (
+                <div className="flex items-center justify-center gap-1.5 pt-1 text-sm leading-5 text-[var(--lh-ink-secondary)]">
+                  <span>{mode === "login" ? "아직 계정이 없으신가요?" : "이미 계정이 있으신가요?"}</span>
+                  <button type="button" onClick={() => switchMode(mode === "login" ? "signup" : "login")} disabled={isSubmitting} className="cursor-pointer font-medium text-[var(--lh-primary)] transition-colors hover:text-[var(--lh-primary-hover)] disabled:cursor-not-allowed disabled:opacity-50">{mode === "login" ? "회원가입" : "로그인"}</button>
+                </div>
+              )}
+            </form>
+
+            {isEntry && (
+              <div className="space-y-5">
+                <div className="relative flex items-center">
+                  <div className="h-px flex-1 bg-[var(--lh-line)]" />
+                  <span className="px-3 text-[13px] font-medium leading-5 text-[var(--lh-ink-tertiary)]">또는</span>
+                  <div className="h-px flex-1 bg-[var(--lh-line)]" />
+                </div>
+                <button type="button" onClick={handleGoogleLogin} disabled={isSubmitting} className="flex h-11 w-full cursor-pointer items-center justify-center gap-3 rounded-xl border border-[var(--lh-line)] bg-[var(--lh-surface)] px-4 text-[15px] font-medium leading-5 shadow-[0_1px_2px_rgba(15,15,15,0.04)] transition-colors hover:border-[var(--lh-line-strong)] hover:bg-[var(--lh-surface-subtle)] disabled:cursor-not-allowed disabled:opacity-60 sm:h-12">
+                  <GoogleIcon />
+                  <span>Google로 계속하기</span>
+                </button>
+                <p className="text-center text-xs leading-5 text-[var(--lh-ink-tertiary)]">Google로 처음 가입하면 만 14세 이상임을 확인한 것으로 봅니다.</p>
+              </div>
+            )}
+          </div>
+        </section>
       </div>
     </div>
   );

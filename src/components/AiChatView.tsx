@@ -3,7 +3,8 @@ import React, { useEffect, useRef, useState } from "react";
 import { ArrowRight, ArrowUp, BookOpen, ListChecks, Loader2, Plus, Sparkles, X } from "lucide-react";
 import type { Course } from "../types/learning";
 import { authorizedFetch } from "../services/authClient";
-import { aiResponseErrorMessage, readAiResponseError } from "../services/aiResponseError";
+import { AiResponseError, aiResponseErrorMessage, readAiResponseError } from "../services/aiResponseError";
+import { GUEST_TRIAL_EXHAUSTED_CODE, GUEST_TRIAL_UNAVAILABLE_CODE, guestTutorFetch, readTrialRemaining } from "../services/guestTrial";
 import { addCuriosity } from "./graph/graphBridge";
 import type { CurriculumConceptLinks, ResumeContext } from "./graph/graphTypes";
 import { AgentMessage } from "./chat/AgentMessage";
@@ -137,6 +138,8 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [courseMode, setCourseMode] = useState(startInCourseMode);
+  /** 로그인 전 체험 대화가 몇 번 남았는지. 첫 답을 받기 전에는 알 수 없습니다. */
+  const [trialRemaining, setTrialRemaining] = useState<number | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [flow, setFlow] = useState<SetupFlow | null>(() =>
     initial.restored
@@ -343,16 +346,13 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
     }
 
     if (!isSignedIn) {
-      // 배우고 싶다는 말이면 로그인 없이 과정 미리보기부터 보여 주고, 일반 대화는 로그인 뒤에 이어갑니다.
+      // 배우고 싶다는 말이면 로그인 없이 과정 미리보기부터 보여 줍니다. 일반 대화는 아래에서 체험 모델이 답합니다.
       const intent = detectLearningIntent(trimmed);
       if (intent) {
         setInput("");
         await beginSetup(intent.subject, trimmed);
-      } else {
-        savePendingChat(trimmed);
-        onRequestAuth();
+        return;
       }
-      return;
     }
 
     const previous = messages;
@@ -362,34 +362,34 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
     setLoading(true);
     persist({ role: "user", text: trimmed });
     try {
-      const studied = await study.answer(trimmed, toTutorHistory(previous));
+      const studied = isSignedIn ? await study.answer(trimmed, toTutorHistory(previous)) : null;
       if (studied) {
         setMessages(items => [...items, { id: nextId(), role: "assistant", text: studied.reply, studyResultId: studied.id }]);
         persist({ role: "assistant", text: studied.reply, studyResultId: studied.id });
         return studied.reply;
       }
-      const response = await authorizedFetch("/api/ai/tutor-chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          courseTitle: "자유 학습",
-          lessonTitle: "AI 학습 대화",
-          conceptName: "사용자 질문",
-          currentStepContent: "특정 레슨에 제한되지 않은 LearnHub 학습 대화입니다. 질문에 직접 답하고 필요한 경우 학습 순서를 제안합니다.",
-          mode: "free",
-          ...(learnerContext ? { learnerContext } : {}),
-          history: toTutorHistory(previous),
-          userQuestion: trimmed,
-          persona: getTutorPersonaRequest(),
-        }),
-      });
-      if (response.status === 401) {
+      const tutorRequest = {
+        courseTitle: "자유 학습",
+        lessonTitle: "AI 학습 대화",
+        conceptName: "사용자 질문",
+        currentStepContent: "특정 레슨에 제한되지 않은 LearnHub 학습 대화입니다. 질문에 직접 답하고 필요한 경우 학습 순서를 제안합니다.",
+        mode: "free",
+        ...(learnerContext ? { learnerContext } : {}),
+        history: toTutorHistory(previous),
+        userQuestion: trimmed,
+        persona: getTutorPersonaRequest(),
+      };
+      const response = isSignedIn
+        ? await authorizedFetch("/api/ai/tutor-chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(tutorRequest) })
+        : await guestTutorFetch(tutorRequest);
+      if (isSignedIn && response.status === 401) {
         savePendingChat(trimmed);
         window.dispatchEvent(new CustomEvent("learnhub:request-auth"));
         throw new Error("auth_required");
       }
       if (!response.ok) throw await readAiResponseError(response);
       const data = await response.json();
+      if (!isSignedIn) setTrialRemaining(readTrialRemaining(data));
       const tangentName = typeof data.tangent?.conceptName === "string" ? data.tangent.conceptName.trim() : "";
       const reply: string = data.reply || "답변을 준비하지 못했습니다.";
       const subject = resolveLearningIntent(trimmed, data.learningIntent)?.subject ?? "";
@@ -401,10 +401,17 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
       if (subject) await beginSetup(subject);
       return reply;
     } catch (error) {
+      const trialOver = !isSignedIn && error instanceof AiResponseError && (error.code === GUEST_TRIAL_EXHAUSTED_CODE || error.code === GUEST_TRIAL_UNAVAILABLE_CODE);
+      if (trialOver) {
+        // 체험을 모두 썼으면 방금 쓴 말을 보관해 두었다가 로그인 뒤 이어서 보냅니다.
+        setTrialRemaining(0);
+        savePendingChat(trimmed);
+      }
       setMessages((items) => [
         ...items,
         { id: nextId(), role: "assistant", text: error instanceof Error && error.message === "auth_required" ? "AI 대화를 계속하려면 로그인해 주세요." : aiResponseErrorMessage(error) },
       ]);
+      if (trialOver) onRequestAuth();
     } finally {
       setLoading(false);
     }
@@ -529,6 +536,11 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
           </>
         )}
       </div>
+      {!isSignedIn && trialRemaining !== null && (
+        <p className="mt-2 px-2 text-center text-xs text-[var(--lh-ink-tertiary)]" aria-live="polite">
+          {trialRemaining > 0 ? `로그인 없이 체험 중이에요 · ${trialRemaining}회 남았어요` : "체험을 모두 사용했어요 · 로그인하면 계속 대화할 수 있어요"}
+        </p>
+      )}
       {study.modal}
     </form>
   );
