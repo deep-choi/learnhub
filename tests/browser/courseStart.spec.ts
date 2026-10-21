@@ -89,6 +89,9 @@ test("guest setup hands off through login and reuses the prepared course", async
   await page.locator("textarea").fill("생활 속 과학을 배우고 싶어요");
   await page.locator("textarea").press("Enter");
   await page.getByRole("button", { name: "처음이에요", exact: true }).click();
+  await expect(page.getByRole("button", { name: "로그인하고 이어서 배우기", exact: true })).toBeVisible();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await page.getByRole("button", { name: "로그인하고 이어서 배우기", exact: true }).click();
   await expect(page.getByRole("dialog", { name: "테스트 로그인" })).toBeVisible();
   const generated = mocked.generations();
   await page.getByRole("button", { name: "테스트 로그인 완료" }).click();

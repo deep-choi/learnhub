@@ -4,7 +4,7 @@ import { ArrowRight, ArrowUp, BookOpen, ListChecks, Loader2, Plus, Sparkles, X }
 import type { Course } from "../types/learning";
 import { authorizedFetch } from "../services/authClient";
 import { AiResponseError, aiResponseErrorMessage, readAiResponseError } from "../services/aiResponseError";
-import { GUEST_TRIAL_EXHAUSTED_CODE, GUEST_TRIAL_UNAVAILABLE_CODE, guestTutorFetch, readTrialRemaining } from "../services/guestTrial";
+import { GUEST_TRIAL_EXHAUSTED_CODE, guestTutorFetch, readTrialRemaining } from "../services/guestTrial";
 import { addCuriosity } from "./graph/graphBridge";
 import type { CurriculumConceptLinks, ResumeContext } from "./graph/graphTypes";
 import { AgentMessage } from "./chat/AgentMessage";
@@ -15,7 +15,7 @@ import { getTutorPersonaRequest } from "../services/tutorPersonaStore";
 import { appendChatMessage, createChatSession, getChatSession, setMessageCoursePreview, setMessageCourseId } from "../services/chatSessionStore";
 import { getLearnerContext } from "../services/learnerContext";
 import { toTutorHistory } from "../domain/chatSession";
-import { detectLearningIntent, resolveLearningIntent } from "../domain/learningIntent";
+import { resolveLearningIntent } from "../domain/learningIntent";
 import type { NewChatMessage } from "../types/chat";
 import { savePendingChat, takePendingChat } from "./chat/pendingChat";
 import { restorePreviewSetup, restoreSetupFlow } from "./chat/restoreSetup";
@@ -364,16 +364,6 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
       return;
     }
 
-    if (!isSignedIn) {
-      // 배우고 싶다는 말이면 로그인 없이 과정 미리보기부터 보여 줍니다. 일반 대화는 아래에서 체험 모델이 답합니다.
-      const intent = detectLearningIntent(trimmed);
-      if (intent) {
-        setInput("");
-        await beginSetup(intent.subject, trimmed);
-        return;
-      }
-    }
-
     const previous = messages;
     const learnerContext = getLearnerContext();
     setMessages((items) => [...items, { id: nextId(), role: "user", text: trimmed }]);
@@ -417,10 +407,10 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
         { id: nextId(), role: "assistant", text: reply, question: trimmed, conceptName: tangentName || undefined, setupStarted: Boolean(subject) },
       ]);
       persist({ role: "assistant", text: reply, question: trimmed, conceptName: tangentName || undefined });
-      if (subject) await beginSetup(subject, undefined, trimmed);
+      if (subject && isSignedIn) await beginSetup(subject, undefined, trimmed);
       return reply;
     } catch (error) {
-      const trialOver = !isSignedIn && error instanceof AiResponseError && (error.code === GUEST_TRIAL_EXHAUSTED_CODE || error.code === GUEST_TRIAL_UNAVAILABLE_CODE);
+      const trialOver = !isSignedIn && error instanceof AiResponseError && error.code === GUEST_TRIAL_EXHAUSTED_CODE;
       if (trialOver) {
         // 체험을 모두 썼으면 방금 쓴 말을 보관해 두었다가 로그인 뒤 이어서 보냅니다.
         setTrialRemaining(0);

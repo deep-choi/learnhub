@@ -71,7 +71,7 @@ export const CoursePreviewCard: React.FC<CoursePreviewCardProps> = ({ subject, i
         const response = isSignedIn ? await authorizedFetch("/api/ai/analyze-subject", init) : await fetch("/api/ai/preview-course", init);
         if (controller.signal.aborted) return;
         if (response.status === 401) {
-          window.dispatchEvent(new CustomEvent("learnhub:request-auth"));
+          if (isSignedIn) window.dispatchEvent(new CustomEvent("learnhub:request-auth"));
           setState({ status: "error", message: "과정을 만들려면 로그인해 주세요.", limited: true });
           return;
         }
@@ -121,10 +121,10 @@ export const CoursePreviewCard: React.FC<CoursePreviewCardProps> = ({ subject, i
   const startRef = useRef(handleStart);
   startRef.current = handleStart;
   useEffect(() => {
-    if (!autoStart || !built || autoStartedRef.current) return;
+    if (!autoStart || !isSignedIn || !built || autoStartedRef.current) return;
     autoStartedRef.current = true;
     startRef.current();
-  }, [autoStart, built]);
+  }, [autoStart, isSignedIn, built]);
 
   if (autoStart) return (
     <div className="py-2" aria-label="수업 준비">

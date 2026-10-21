@@ -494,7 +494,7 @@ app.post("/api/ai/guest-tutor-chat", async (req, res) => {
     ticket = await guestTrialQuota.reserve(guestId, req.ip || req.socket.remoteAddress || "unknown");
   } catch (error) {
     if (error instanceof GuestTrialExhaustedError) return res.status(402).json({ error: `로그인 없이 체험할 수 있는 ${GUEST_TRIAL_LIMIT}회를 모두 사용했어요. 로그인하면 계속 대화할 수 있어요.`, code: "GUEST_TRIAL_EXHAUSTED", remaining: 0 });
-    if (error instanceof GuestTrialUnavailableError) return res.status(429).json({ error: "지금은 체험 이용이 많아요. 로그인하면 바로 대화를 이어갈 수 있어요.", code: "GUEST_TRIAL_UNAVAILABLE", remaining: 0 });
+    if (error instanceof GuestTrialUnavailableError) return res.status(429).json({ error: "지금은 체험 이용이 많아요. 잠시 후 다시 시도해 주세요.", code: "GUEST_TRIAL_UNAVAILABLE" });
     console.error(JSON.stringify({ event: "guest_trial_error", requestId: res.locals.requestId, code: error instanceof Error ? error.message.slice(0, 120) : "unknown" }));
     return res.status(503).json({ error: "체험 사용량을 확인하지 못했어요. 잠시 후 다시 시도해 주세요.", code: "GUEST_TRIAL_UNAVAILABLE" });
   }

@@ -21,6 +21,7 @@ function Fixture() {
   const [course, setCourse] = useState<Course | null>(null);
   const [outline, setOutline] = useState(false);
   const [pending, setPending] = useState<{ subject: string; data: Record<string, any>; setup: CourseSetup } | null>(null);
+  const [authRequested, setAuthRequested] = useState(false);
   configureAuthAdapter({ getAccessToken: async () => signedIn ? "fixture-token" : null, getAuthStatus: () => ({ configured: true, signedIn, provider: "fixture", userId: "fixture-user" }) });
   const start = (created: Course, links: CurriculumConceptLinks) => {
     if (failNextSave.current) { failNextSave.current = false; throw new Error("storage full"); }
@@ -35,10 +36,10 @@ function Fixture() {
       course={course} lessonMeta={course.chapters[0].lessons[0]} chapterTitle={course.chapters[0].title}
       onFinishLesson={() => {}} onGoCourse={() => setOutline(true)} isSignedIn={signedIn}
     /> : <AiChatView
-      isSignedIn={signedIn} sessionId={session} startInCourseMode={!session} resume={null} onResume={() => {}}
+      isSignedIn={signedIn} sessionId={session} startInCourseMode={!session && !new URLSearchParams(location.search).has("chat")} resume={null} onResume={() => {}}
       onStartCourse={start} onResumeCourse={id => setCourse(StorageService.getCourseById(id) ?? null)}
       onGuestStartCourse={(subject, data, setup) => setPending({ subject, data, setup })}
-      onRequestAuth={() => {}} onBrowseCourses={() => {}} onPractice={() => {}}
+      onRequestAuth={() => setAuthRequested(true)} onBrowseCourses={() => {}} onPractice={() => {}}
       onSessionCreated={id => { setSession(id); localStorage.setItem("fixture-session", id); }}
     />}
     {pending && <div role="dialog" aria-label="테스트 로그인"><button onClick={() => {
@@ -47,6 +48,7 @@ function Fixture() {
       setPending(null);
       start(built.course, built.links);
     }}>테스트 로그인 완료</button></div>}
+    {authRequested && <div role="dialog" aria-label="체험 종료 로그인">로그인하기</div>}
   </main>;
 }
 
