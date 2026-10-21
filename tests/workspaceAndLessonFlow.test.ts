@@ -34,10 +34,11 @@ test("the lesson starts with its content and the last step offers the check (or 
   const first = buildStepText({ index: 0, step: { title: "개념", content: "젖은 수건은 끓이지 않아도 마르죠." } });
   assert.equal(first, "젖은 수건은 끓이지 않아도 마르죠.");
   assert.equal(buildStepText({ index: 1, step: { title: "예시", content: "본문" } }), "## 예시\n\n본문");
-  assert.deepEqual(stepActions(0, 4, false).map((a) => a.id), ["next", "easier", "example"]);
-  assert.deepEqual(stepActions(3, 4, false).map((a) => a.id), ["check", "skip", "easier", "example"]);
-  assert.deepEqual(stepActions(3, 4, true).map((a) => a.id), ["did", "skip", "easier", "example"]);
-  assert.equal(stepActions(0, 4, false)[0].label, ACTION_LABEL.next);
+  // 모든 단계를 한 번에 보여 주므로 중간 단계에는 "다음으로" 버튼이 없습니다.
+  assert.deepEqual(stepActions(0, 4, false), []);
+  assert.deepEqual(stepActions(3, 4, false).map((a) => a.id), ["check", "skip"]);
+  assert.deepEqual(stepActions(3, 4, true).map((a) => a.id), ["did", "skip"]);
+  assert.equal(stepActions(0, 1, false)[0].label, ACTION_LABEL.check);
   assert.notEqual(closingPrompt(true), closingPrompt(false));
   assert.deepEqual(checkActions(false).map((a) => a.id), ["check", "skip"]);
   assert.deepEqual(reopenActions().map((a) => a.id), ["restart", "ask", "other"]);

@@ -1,11 +1,11 @@
-import { AI_MODEL_CATALOG, AI_OUTPUT_TOKEN_OPTIONS, DEFAULT_AI_SELECTION, type AiProvider, type AiRuntimeSelection } from "../src/domain/aiModels";
+import { AI_MODEL_CATALOG, AI_OUTPUT_TOKEN_OPTIONS, DEFAULT_AI_SELECTION, DEFAULT_GEMINI_SELECTION, type AiProvider, type AiRuntimeSelection } from "../src/domain/aiModels";
 
 type IsConfigured = (provider: AiProvider) => boolean;
 
-/** 요청에 모델 선택이 없을 때(비로그인 미리보기 포함) 쓰는 기본 모델. 키가 있는 제공자를 고른다. Gemini가 있으면 Gemini다. */
+/** 요청에 모델 선택이 없을 때(비로그인 미리보기 포함) 쓰는 기본 모델. 키가 있는 제공자를 고른다. OpenAI가 있으면 GPT-6 Luna, 없으면 Gemini 3.8 Flash다. */
 export const defaultAiSelectionFor = (isConfigured: IsConfigured): AiRuntimeSelection => {
-  if (isConfigured("gemini")) return { ...DEFAULT_AI_SELECTION };
-  if (isConfigured("openai")) return { provider: "openai", model: "gpt-5.6-terra", reasoningEffort: "medium", maxOutputTokens: 8_192 };
+  if (isConfigured("openai")) return { ...DEFAULT_AI_SELECTION };
+  if (isConfigured("gemini")) return { ...DEFAULT_GEMINI_SELECTION };
   if (isConfigured("anthropic")) return { provider: "anthropic", model: "claude-sonnet-5-5", reasoningEffort: "medium", maxOutputTokens: 8_192 };
   return { ...DEFAULT_AI_SELECTION };
 };
@@ -29,7 +29,7 @@ export const publicAiAvailability = (isConfigured: IsConfigured) => ({
     openai: { configured: isConfigured("openai") },
     gemini: { configured: isConfigured("gemini") },
   },
-  models: AI_MODEL_CATALOG.map((model) => ({ ...model, reasoningEfforts: [...model.reasoningEfforts], available: isConfigured(model.provider) })),
+  models: AI_MODEL_CATALOG.map((model) => ({ ...model, reasoningEfforts: [...model.reasoningEfforts], available: isConfigured(model.provider) && !model.preparing })),
   outputTokenOptions: [...AI_OUTPUT_TOKEN_OPTIONS],
   defaultSelection: defaultAiSelectionFor(isConfigured),
 });

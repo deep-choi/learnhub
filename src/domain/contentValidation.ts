@@ -103,10 +103,9 @@ export function validateLessonPayload(payload: unknown, learningType?: string, o
     }
   });
   if (options.requireLearningArc) {
-    if (payload.steps.length < 3 || payload.steps.length > 5) errors.push("레슨은 3~5개 단계로 구성되어야 합니다.");
-    for (const requiredType of ["concept", "example", "practice"]) {
-      if (!stepTypes.has(requiredType)) errors.push(`${requiredType} 단계가 필요합니다.`);
-    }
+    // 단계 수와 구성은 개념에 맞게 AI가 정합니다. 한 개념은 한 단계에서 끝까지 설명하므로 단계는 적게, 설명 단계 하나는 꼭 있어야 합니다.
+    if (payload.steps.length < 1 || payload.steps.length > 4) errors.push("레슨은 1~4개 단계로 구성되어야 합니다.");
+    if (!stepTypes.has("concept")) errors.push("concept 단계가 필요합니다.");
     payload.steps.forEach((step, index) => {
       if (isRecord(step) && typeof step.content === "string" && step.content.trim().length < 50) {
         errors.push(`단계 ${index + 1} 설명이 너무 짧습니다.`);

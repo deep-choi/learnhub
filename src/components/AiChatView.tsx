@@ -58,6 +58,7 @@ interface ChatMessage {
   setupQuestion?: { stepId: SetupStepId; answered?: string; question: string };
   /** 이 답 뒤로 과목 설정 질문이 시작됐는지. 그러면 같은 일을 하는 버튼은 숨깁니다. */
   setupStarted?: boolean;
+  chips?: string[];
 }
 
 /** 대화로 과목 설정을 묻는 중인 흐름. 한 번에 질문 하나씩 진행합니다. */
@@ -77,7 +78,15 @@ const nextId = () => `m-${Date.now().toString(36)}-${messageSeq++}`;
 
 /** 질문에서 지도에 남길 짧은 이름을 만듭니다. */
 const toConceptName = (question: string): string => {
-  const cleaned = question.replace(/[?？!！.。]+$/g, "").replace(/\s+/g, " ").trim();
+  const firstSentence = question.split(/[.。!！?？\n]/u)[0] ?? question;
+  const cleaned = firstSentence
+    .replace(/^(?:나는|난|저는|전|내가|제가|그럼|그러면|근데|그런데|혹시)\s+/u, "")
+    .replace(/\s*(?:을|를|은|는|이|가)?\s*(?:기초부터\s*|처음부터\s*|쉽게\s*|자세히\s*|깊이\s*있게\s*|정확히\s*)?(?:배우고\s*싶.*|배워\s*보고\s*싶.*|공부하고\s*싶.*|알고\s*싶.*|알아보고\s*싶.*|궁금.*|가르쳐\s*주.*|알려\s*주.*|설명해\s*주.*|무슨\s*뜻.*|무엇인가요.*|뭔가요.*|뭘까요.*|왜\s+.*(?:나요|인가요|끝나나요|시작하나요|될까요|되나요).*)$/u, "")
+    .replace(/\s*(?:에\s*대해서?|에\s*대하여|에\s*관해서?)\s*$/u, "")
+    .replace(/\s*(?:을|를|은|는|이|가)\s*$/u, "")
+    .replace(/[?？!！.。]+$/g, "")
+    .replace(/\s+/g, " ")
+    .trim() || question.replace(/[?？!！.。]+$/g, "").replace(/\s+/g, " ").trim();
   return cleaned.length > 24 ? `${cleaned.slice(0, 23)}…` : cleaned;
 };
 
@@ -404,7 +413,7 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
       const subject = resolveLearningIntent(trimmed, data.learningIntent)?.subject ?? "";
       setMessages((items) => [
         ...items,
-        { id: nextId(), role: "assistant", text: reply, question: trimmed, conceptName: tangentName || undefined, setupStarted: Boolean(subject) },
+        { id: nextId(), role: "assistant", text: reply, question: trimmed, conceptName: tangentName || subject || undefined, chips: Array.isArray(data.suggestionChips) ? data.suggestionChips.filter((c: unknown): c is string => typeof c === "string" && Boolean(c.trim())).slice(0, 4) : undefined, setupStarted: Boolean(subject && isSignedIn) },
       ]);
       persist({ role: "assistant", text: reply, question: trimmed, conceptName: tangentName || undefined });
       if (subject && isSignedIn) await beginSetup(subject, undefined, trimmed);
@@ -634,6 +643,21 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
                     {!message.setupQuestion.answered && !loading && flow?.step.id === message.setupQuestion.stepId && (
                       <button type="button" onClick={skipRest} className="inline-flex min-h-10 items-center rounded-full px-3 text-[15px] text-[var(--lh-ink-tertiary)] underline-offset-2 transition hover:text-[var(--lh-ink)] hover:underline cursor-pointer">{SETUP_SKIP_OPTION.label}</button>
                     )}
+                  </div>
+                )}
+                {message.chips && message.chips.length > 0 && index === messages.length - 1 && !flow && !message.setupStarted && (
+                  <div className="mt-3.5 flex flex-col items-start gap-1.5" role="group" aria-label="이어서 물어보기">
+                    {message.chips.map((chip) => (
+                      <button
+                        key={chip}
+                        type="button"
+                        disabled={loading || preparingCourse}
+                        onClick={() => void send(chip)}
+                        className="inline-flex min-h-8 max-w-full items-center gap-1.5 rounded-xl border border-[var(--lh-line-strong)] bg-[var(--lh-surface-subtle)] px-3 py-1.5 text-left text-[13px] font-medium leading-5 text-[var(--lh-ink-secondary)] transition hover:border-[var(--lh-primary-border)] hover:bg-[var(--lh-primary-subtle)] hover:text-[var(--lh-primary-text)] disabled:opacity-50 cursor-pointer"
+                      >
+                        <span>💬 {chip}</span>
+                      </button>
+                    ))}
                   </div>
                 )}
                 {message.question && !message.setupStarted && (

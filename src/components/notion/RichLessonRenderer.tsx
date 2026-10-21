@@ -133,7 +133,7 @@ export const RichLessonRenderer: React.FC<RichLessonRendererProps> = ({ content,
         pendingMath = null;
         const remainder = line.slice(closeIndex + closing.length).trim();
         if (remainder) {
-          blocks.push(<p key={`${i}-remainder`} className="my-3.5 text-base leading-[1.75] text-[var(--lh-ink)] break-keep">{renderInlineContent(remainder)}</p>);
+          blocks.push(<p key={`${i}-remainder`} className="my-3.5 text-base leading-[1.8] text-[var(--lh-ink)] break-keep">{renderInlineContent(remainder)}</p>);
         }
       } else {
         pendingMath.lines.push(line);

@@ -25,6 +25,10 @@ import { generalLearningSafetyPrompt } from "./learningSafety";
 import { OperationsError } from "./operationsPolicy";
 
 export const AI_TIMEOUT_MS = 20_000;
+/** 커리큘럼과 레슨 본문처럼 길게 쓰는 생성은 20초를 넘기기 쉬워 따로 늘립니다. 함수 기본 제한(60초) 안에 둡니다. */
+export const AI_SLOW_TIMEOUT_MS = 50_000;
+const SLOW_ENDPOINTS = new Set(["analyze-subject", "preview-course", "generate-lesson"]);
+export const aiTimeoutFor = (endpoint: string): number => SLOW_ENDPOINTS.has(endpoint) ? AI_SLOW_TIMEOUT_MS : AI_TIMEOUT_MS;
 export const AI_MAX_RESPONSE_CHARS = 160_000;
 export const AI_MAX_PROMPT_CHARS = 24_000;
 
@@ -347,7 +351,8 @@ export class AiGateway {
     }
 
     const abortController = new AbortController();
-    const timeout = setTimeout(() => abortController.abort(), AI_TIMEOUT_MS);
+    const timeoutMs = aiTimeoutFor(request.endpoint);
+    const timeout = setTimeout(() => abortController.abort(), timeoutMs);
     try {
       await this.beforeGenerate?.(request, selection, reservedOutputTokens);
       let grounding: AiGatewayResult<T>["grounding"];
@@ -365,7 +370,7 @@ export class AiGateway {
             abortSignal: abortController.signal,
             httpOptions: {
               ...request.config.httpOptions,
-              timeout: AI_TIMEOUT_MS,
+              timeout: timeoutMs,
               retryOptions: { attempts: 1 },
             },
           },
@@ -384,7 +389,7 @@ export class AiGateway {
           prompt: request.prompt,
           responseSchema: request.config.responseSchema,
           maxOutputTokens,
-        }, { signal: abortController.signal, timeoutMs: AI_TIMEOUT_MS });
+        }, { signal: abortController.signal, timeoutMs });
         const { inputTokens, outputTokens } = result.usage;
         usage = {
           promptTokenCount: inputTokens,
@@ -440,7 +445,7 @@ export class AiGateway {
       if (request.normalize) payload = request.normalize(payload);
       const validationErrors = request.validate(payload);
       if (validationErrors.length > 0) {
-        console.error(JSON.stringify({ event: "ai_output_rejected", endpoint: request.endpoint, requestId: request.requestId, reason: "schema_validation", responseChars: text.length, shape: outputShape(payload) }));
+        console.error(JSON.stringify({ event: "ai_output_rejected", endpoint: request.endpoint, requestId: request.requestId, reason: "schema_validation", responseChars: text.length, shape: outputShape(payload), validationErrors }));
         status = "invalid_output";
         throw new AiGatewayError("AI_INVALID_OUTPUT", 502);
       }

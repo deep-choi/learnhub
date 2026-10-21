@@ -3,7 +3,7 @@ import { firestore, firebaseAdminAuth, projectId } from "./firebaseRuntime";
 import { defaultOperationsSettings, enforceOperationsPolicy, OperationsError, reserveGlobalAiUsage, validateOperationsSettings, validDocumentId } from "./operationsPolicy";
 import type { AdminAudit, AdminOverview, AdminReport, AdminUser, OperationsSettings } from "../src/types/admin";
 import type { AiGatewayLoggerEvent, AiGatewayRequest } from "./aiGateway";
-import type { AiRuntimeSelection } from "../src/domain/aiModels";
+import { AI_MODEL_CATALOG, type AiRuntimeSelection } from "../src/domain/aiModels";
 
 const policyRef = () => firestore().collection("learnhubConfig").doc("aiQuotaPolicy");
 const controlsRef = (uid: string) => firestore().collection("learnhubUserOperations").doc(uid);
@@ -13,6 +13,8 @@ const stringOrNull = (value: unknown) => typeof value === "string" ? value : nul
 export const settingsFromData = (data?: Record<string, unknown>): OperationsSettings => {
   const defaults = defaultOperationsSettings();
   const merged = Object.fromEntries(Object.entries(defaults).map(([key, value]) => [key, data?.[key] ?? value]));
+  // 목록에서 뺀 모델이 사용 중지 목록에 남아 있어도 설정 전체가 거절되지 않게 걸러 냅니다.
+  if (Array.isArray(merged.disabledModels)) merged.disabledModels = merged.disabledModels.filter((id: unknown) => typeof id !== "string" || AI_MODEL_CATALOG.some((model) => model.id === id));
   return validateOperationsSettings(merged);
 };
 export const getOperationsSettings = async () => settingsFromData((await policyRef().get()).data());

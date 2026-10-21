@@ -19,7 +19,7 @@ import { deleteFirebaseAccountData, FirebaseAiQuotaExceededError, getFirebaseAiU
 import type { LearningType } from "./src/types/learning";
 import { validateLearningBackup } from "./src/services/learningBackup";
 import { assessmentRouter } from "./server/assessment";
-import { coursePrompt, lessonPrompt, graphCurriculumSchema, knowledgeGraphRouter, learningIntentSchema, validCourseRequest, validTutorRequest, validateTutorResponse, normalizeTutorResponse, tutorPrompt } from "./server/knowledgeGraphApi";
+import { coursePrompt, conceptLinksPrompt, conceptLinksSchema, lessonPrompt, graphCurriculumSchema, knowledgeGraphRouter, validConceptLinksRequest, validateConceptLinksPayload, learningIntentSchema, validCourseRequest, validTutorRequest, validateTutorResponse, normalizeTutorResponse, tutorPrompt } from "./server/knowledgeGraphApi";
 import { isLessonLearningContext } from "./src/domain/lessonContext";
 import { PreviewQuota, reserveFirestorePreview } from "./server/previewQuota";
 import { FirestoreGuestTrialStorage, GUEST_TRIAL_LIMIT, GuestTrialExhaustedError, GuestTrialQuota, GuestTrialUnavailableError } from "./server/guestTrial";
@@ -30,6 +30,7 @@ import { configuredSelectionOrDefault, defaultAiSelectionFor, publicAiAvailabili
 import {
   getAiModel,
   isAiRuntimeSelection,
+  migrateAiSelection,
   nearestReasoningEffort,
   type AiRuntimeSelection,
 } from "./src/domain/aiModels";
@@ -223,12 +224,13 @@ const aiSelectionFor = (req: Request): AiRuntimeSelection => {
   const reasoningEffort = req.header("x-learnhub-ai-reasoning");
   const maxOutputTokens = req.header("x-learnhub-ai-max-output-tokens");
   if (!provider && !model && !reasoningEffort && !maxOutputTokens) return defaultAiSelection();
-  const candidate = {
+  // 예전 화면이 목록에서 뺐거나 막아 둔 모델을 보내도 대신 쓸 모델로 옮겨 답합니다.
+  const candidate = migrateAiSelection({
     provider,
     model,
     reasoningEffort,
     maxOutputTokens: Number(maxOutputTokens),
-  };
+  });
   if (!isAiRuntimeSelection(candidate)) throw new AiGatewayError("AI_INVALID_REQUEST", 400);
   // 키가 없는 제공자("준비 중")를 고른 채로 보내면 기본 모델로 답한다.
   return configuredSelectionOrDefault(candidate, (configured) => aiGateway.isConfigured(configured));
@@ -351,7 +353,7 @@ type JsonConfig = Parameters<AiGateway["generateJson"]>[0]["config"];
 const runAi = async <T>(req: Request, res: Response, endpoint: string, prompt: string, config: JsonConfig, maxOutputTokens: number, validate: (payload: unknown) => string[]) => {
   try {
     const selection = aiSelectionFor(req);
-    const maxReasoningEffort = endpoint === "analyze-subject" || endpoint === "tutor-chat" ? "low" as const : undefined;
+    const maxReasoningEffort = endpoint === "analyze-subject" || endpoint === "concept-links" || endpoint === "tutor-chat" ? "low" as const : undefined;
     const reservedOutputTokens = reservedAiOutputTokens(selection, maxOutputTokens, maxReasoningEffort);
     if (typeof res.locals.userId === "string") await reserveFirebaseAiUsage(res.locals.userId, reservedOutputTokens);
     const safePrompt = `${learningSafetyPrompt(typeof req.body?.targetAudience === "string" ? req.body.targetAudience : undefined)}\n${prompt}`;
@@ -374,9 +376,10 @@ const runAi = async <T>(req: Request, res: Response, endpoint: string, prompt: s
 const lessonSchema = {
   type: Type.OBJECT, properties: {
     title: { type: Type.STRING }, steps: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: {
-      type: { type: Type.STRING }, title: { type: Type.STRING }, content: { type: Type.STRING }, codeSnippet: { type: Type.STRING },
+      type: { type: Type.STRING, enum: ["concept", "example", "practice", "summary"] }, title: { type: Type.STRING }, content: { type: Type.STRING }, codeSnippet: { type: Type.STRING },
     }, required: ["type", "title", "content"] } },
-  }, required: ["title", "steps"],
+    suggestionChips: { type: Type.ARRAY, items: { type: Type.STRING } },
+  }, required: ["title", "steps", "suggestionChips"],
 };
 const evaluationSchema = { type: Type.OBJECT, properties: { isCorrect: { type: Type.BOOLEAN }, feedback: { type: Type.STRING }, hint: { type: Type.STRING }, misconceptionTag: { type: Type.STRING }, explanation: { type: Type.STRING }, status: { type: Type.STRING } }, required: ["isCorrect", "feedback"] };
 const tutorSchema = { type: Type.OBJECT, properties: {
@@ -443,7 +446,15 @@ app.post("/api/ai/analyze-subject", async (req, res) => {
   if (!(await requireAiAccess(req, res))) return;
   const body = req.body;
   if (!validCourseRequest(body)) return invalidBody(res, "과목과 학습 설정을 확인해 주세요.");
-  return runAi(req, res, "analyze-subject", coursePrompt(body), { responseMimeType: "application/json", responseSchema: graphCurriculumSchema }, 6144, payload => validateCurriculumPayload(payload, { requireConceptLinks: true }));
+  return runAi(req, res, "analyze-subject", coursePrompt(body), { responseMimeType: "application/json", responseSchema: graphCurriculumSchema }, 6144, payload => validateCurriculumPayload(payload));
+});
+
+/** 과정을 먼저 시작한 뒤 화면이 뒤에서 부르는 개념 연결 채우기. */
+app.post("/api/ai/concept-links", async (req, res) => {
+  if (!(await requireAiAccess(req, res))) return;
+  const body = req.body;
+  if (!validConceptLinksRequest(body)) return invalidBody(res, "개념 연결 요청을 확인해 주세요.");
+  return runAi(req, res, "concept-links", conceptLinksPrompt(body), { responseMimeType: "application/json", responseSchema: conceptLinksSchema }, 3072, validateConceptLinksPayload);
 });
 
 app.post("/api/ai/generate-lesson", async (req, res) => {
@@ -453,7 +464,7 @@ app.post("/api/ai/generate-lesson", async (req, res) => {
   if (!isRecord(body) || !hasOnlyKeys(body, [...fields, "targetAudience", "learningContext"]) || !optionalBoundedString(body, "targetAudience", 80) || (body.learningContext !== undefined && !isLessonLearningContext(body.learningContext)) || fields.some((key) => boundedString(body, key, key === "courseTitle" || key === "lessonTitle" ? 200 : 120) === null) || !isAllowed(body.learningType, LEARNING_TYPES)) return invalidBody(res, "레슨 생성 설정을 확인해 주세요.");
   const learningType = body.learningType as LearningType;
   const prompt = lessonPrompt(body);
-  return runAi(req, res, "generate-lesson", prompt, { responseMimeType: "application/json", responseSchema: lessonSchema }, 4096, (payload) => {
+  return runAi(req, res, "generate-lesson", prompt, { responseMimeType: "application/json", responseSchema: lessonSchema }, 8192, (payload) => {
     const errors = validateLessonPayload(payload, learningType, { requireLearningArc: true });
     return errors;
   });

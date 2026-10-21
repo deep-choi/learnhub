@@ -6,13 +6,15 @@ export interface AiModelDefinition {
   provider: AiProvider;
   label: string;
   lifecycle: "stable" | "preview";
+  /** 비용 때문에 목록에 '준비 중'으로만 보이고 고를 수 없는 모델. */
+  preparing?: boolean;
   reasoningEfforts: AiReasoningEffort[];
   recommendedFor: string;
 }
 
 /**
  * Text/JSON models supported by LearnHub's teaching endpoints.
- * Verified against the vendors' official model pages on 2026-09-15 (Claude models on 2026-10-02).
+ * Verified against the vendors' official model pages on 2026-09-15 (Claude models on 2026-10-02, GPT-6.1 Sol, GPT-6 Luna and Gemini 4 Argon on 2026-10-22).
  * Claude IDs are the exact API aliases; never append date suffixes.
  * Image, audio, realtime, embedding, and agent-only models are intentionally
  * excluded because the current endpoints require structured text output.
@@ -21,21 +23,12 @@ export const AI_MODEL_CATALOG: readonly AiModelDefinition[] = [
   { id: "claude-opus-5-5", provider: "anthropic", label: "Claude Opus 5.5", lifecycle: "stable", reasoningEfforts: ["low", "medium", "high", "xhigh", "max"], recommendedFor: "가장 깊이 있는 설명과 복잡한 추론" },
   { id: "claude-sonnet-5-5", provider: "anthropic", label: "Claude Sonnet 5.5", lifecycle: "stable", reasoningEfforts: ["low", "medium", "high", "xhigh", "max"], recommendedFor: "품질과 속도의 균형" },
   { id: "claude-haiku-4-5", provider: "anthropic", label: "Claude Haiku 4.5", lifecycle: "stable", reasoningEfforts: ["none", "low", "medium", "high"], recommendedFor: "빠르고 가벼운 반복 학습" },
-  { id: "gpt-6-astra", provider: "openai", label: "GPT-6 Astra", lifecycle: "stable", reasoningEfforts: ["low", "medium", "high", "xhigh", "max"], recommendedFor: "최신 최고 성능의 복잡한 학습 설계와 추론" },
-  { id: "gpt-5.6-sol", provider: "openai", label: "GPT-5.6 Sol", lifecycle: "stable", reasoningEfforts: ["none", "low", "medium", "high", "xhigh", "max"], recommendedFor: "가장 복잡한 설명과 정밀한 추론" },
-  { id: "gpt-5.6-terra", provider: "openai", label: "GPT-5.6 Terra", lifecycle: "stable", reasoningEfforts: ["none", "low", "medium", "high", "xhigh", "max"], recommendedFor: "품질과 비용의 균형" },
-  { id: "gpt-5.6-luna", provider: "openai", label: "GPT-5.6 Luna", lifecycle: "stable", reasoningEfforts: ["none", "low", "medium", "high", "xhigh", "max"], recommendedFor: "빠르고 비용 효율적인 반복 학습" },
+  { id: "gpt-6-astra", provider: "openai", label: "GPT-6 Astra", lifecycle: "stable", preparing: true, reasoningEfforts: ["low", "medium", "high", "xhigh", "max"], recommendedFor: "최신 최고 성능의 복잡한 학습 설계와 추론" },
+  { id: "gpt-6.1-sol", provider: "openai", label: "GPT-6.1 Sol", lifecycle: "stable", reasoningEfforts: ["low", "medium", "high", "xhigh", "max"], recommendedFor: "Astra에 가까운 품질을 더 낮은 비용으로" },
+  { id: "gpt-6-luna", provider: "openai", label: "GPT-6 Luna", lifecycle: "stable", reasoningEfforts: ["none", "low", "medium", "high", "xhigh", "max"], recommendedFor: "빠르고 저렴한 반복 학습" },
+  { id: "gemini-4-argon", provider: "gemini", label: "Gemini 4 Argon", lifecycle: "stable", preparing: true, reasoningEfforts: ["low", "medium", "high"], recommendedFor: "최신 최고 성능의 깊은 추론" },
   { id: "gemini-3.8-flash", provider: "gemini", label: "Gemini 3.8 Flash", lifecycle: "stable", reasoningEfforts: ["low", "medium", "high"], recommendedFor: "최신 Flash 품질과 속도" },
-  { id: "gemini-3.7-flash", provider: "gemini", label: "Gemini 3.7 Flash", lifecycle: "stable", reasoningEfforts: ["low", "medium", "high"], recommendedFor: "안정적인 다단계 학습 생성" },
-  { id: "gemini-3.6-flash", provider: "gemini", label: "Gemini 3.6 Flash", lifecycle: "stable", reasoningEfforts: ["minimal", "low", "medium", "high"], recommendedFor: "속도와 범용성의 균형" },
-  { id: "gemini-3.5-flash", provider: "gemini", label: "Gemini 3.5 Flash", lifecycle: "stable", reasoningEfforts: ["minimal", "low", "medium", "high"], recommendedFor: "일상적인 학습 요청" },
-  { id: "gemini-3.5-flash-lite", provider: "gemini", label: "Gemini 3.5 Flash-Lite", lifecycle: "stable", reasoningEfforts: ["minimal", "low", "medium", "high"], recommendedFor: "높은 처리량과 낮은 비용" },
-  { id: "gemini-3.1-flash-lite", provider: "gemini", label: "Gemini 3.1 Flash-Lite", lifecycle: "stable", reasoningEfforts: ["minimal", "low", "medium", "high"], recommendedFor: "간단한 질문과 빠른 응답" },
-  { id: "gemini-3.1-pro-preview", provider: "gemini", label: "Gemini 3.1 Pro Preview", lifecycle: "preview", reasoningEfforts: ["low", "medium", "high"], recommendedFor: "복잡한 추론 실험" },
-  { id: "gemini-3-flash-preview", provider: "gemini", label: "Gemini 3 Flash Preview", lifecycle: "preview", reasoningEfforts: ["minimal", "low", "medium", "high"], recommendedFor: "Gemini 3 preview 호환" },
-  { id: "gemini-2.5-pro", provider: "gemini", label: "Gemini 2.5 Pro", lifecycle: "stable", reasoningEfforts: ["low", "medium", "high"], recommendedFor: "2.5 계열 고난도 추론" },
-  { id: "gemini-2.5-flash", provider: "gemini", label: "Gemini 2.5 Flash", lifecycle: "stable", reasoningEfforts: ["none", "low", "medium", "high"], recommendedFor: "thinking budget 호환 작업" },
-  { id: "gemini-2.5-flash-lite", provider: "gemini", label: "Gemini 2.5 Flash-Lite", lifecycle: "stable", reasoningEfforts: ["none", "low", "medium", "high"], recommendedFor: "2.5 계열 저비용 작업" },
+  { id: "gemini-3.1-pro-preview", provider: "gemini", label: "Gemini 3.1 Pro Preview", lifecycle: "preview", reasoningEfforts: ["low", "medium", "high"], recommendedFor: "복잡한 추론" },
 ] as const;
 
 export const AI_OUTPUT_TOKEN_OPTIONS = [4_096, 8_192, 16_384] as const;
@@ -48,10 +41,40 @@ export interface AiRuntimeSelection {
 }
 
 export const DEFAULT_AI_SELECTION: AiRuntimeSelection = {
+  provider: "openai",
+  model: "gpt-6-luna",
+  reasoningEffort: "medium",
+  maxOutputTokens: 8_192,
+};
+
+/** 서버에 OpenAI 키가 없고 Gemini 키만 있을 때 쓰는 기본 모델. */
+export const DEFAULT_GEMINI_SELECTION: AiRuntimeSelection = {
   provider: "gemini",
   model: "gemini-3.8-flash",
   reasoningEffort: "medium",
   maxOutputTokens: 8_192,
+};
+
+/**
+ * 목록에서 뺐거나 '준비 중'으로 막아 둔 모델 → 대신 쓸 모델.
+ * 저장해 둔 선택이나 예전 화면의 요청이 오류 없이 이어지게 합니다.
+ */
+export const AI_MODEL_REPLACEMENTS: Readonly<Record<string, string>> = {
+  "gpt-6-astra": "gpt-6.1-sol",
+  "gpt-6-sol": "gpt-6.1-sol",
+  "gpt-5.6-sol": "gpt-6.1-sol",
+  "gpt-5.6-terra": "gpt-6-luna",
+  "gpt-5.6-luna": "gpt-6-luna",
+  "gemini-4-argon": "gemini-3.1-pro-preview",
+  "gemini-2.5-pro": "gemini-3.1-pro-preview",
+  "gemini-3.7-flash": "gemini-3.8-flash",
+  "gemini-3.6-flash": "gemini-3.8-flash",
+  "gemini-3.5-flash": "gemini-3.8-flash",
+  "gemini-3.5-flash-lite": "gemini-3.8-flash",
+  "gemini-3.1-flash-lite": "gemini-3.8-flash",
+  "gemini-3-flash-preview": "gemini-3.8-flash",
+  "gemini-2.5-flash": "gemini-3.8-flash",
+  "gemini-2.5-flash-lite": "gemini-3.8-flash",
 };
 
 export const getAiModel = (provider: AiProvider, model: string): AiModelDefinition | null =>
@@ -78,14 +101,27 @@ export const isAiRuntimeSelection = (value: unknown): value is AiRuntimeSelectio
   const model = getAiModel(candidate.provider, candidate.model);
   return Boolean(
     model &&
+    !model.preparing &&
     model.reasoningEfforts.includes(candidate.reasoningEffort) &&
     typeof candidate.maxOutputTokens === "number" &&
     AI_OUTPUT_TOKEN_OPTIONS.includes(candidate.maxOutputTokens as (typeof AI_OUTPUT_TOKEN_OPTIONS)[number]),
   );
 };
 
+/** 뺐거나 막아 둔 모델을 고른 선택은 대신 쓸 모델로 옮기고, 그 모델이 지원하는 가장 가까운 추론 단계로 맞춥니다. */
+export const migrateAiSelection = (value: unknown): unknown => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const candidate = value as Record<string, unknown>;
+  const replacement = typeof candidate.model === "string" ? AI_MODEL_REPLACEMENTS[candidate.model] : undefined;
+  const model = replacement && isAiProvider(candidate.provider) ? getAiModel(candidate.provider, replacement) : null;
+  if (!model) return value;
+  const reasoningEffort = isAiReasoningEffort(candidate.reasoningEffort) ? nearestReasoningEffort(candidate.reasoningEffort, model.reasoningEfforts) : candidate.reasoningEffort;
+  return { ...candidate, model: model.id, reasoningEffort };
+};
+
 export const normalizeAiSelection = (value: unknown): AiRuntimeSelection => {
-  if (isAiRuntimeSelection(value)) return { ...value };
+  const migrated = migrateAiSelection(value);
+  if (isAiRuntimeSelection(migrated)) return { ...migrated };
   return { ...DEFAULT_AI_SELECTION };
 };
 

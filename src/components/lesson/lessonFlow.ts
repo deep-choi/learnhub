@@ -62,13 +62,16 @@ export const closingPrompt = (practical: boolean): string =>
     ? "여기까지 잘 따라오셨어요. 직접 해보셨다면 알려 주세요. 해본 느낌을 한 줄 남기면 지도에도 기록돼요."
     : "잘 따라오셨어요. 이해했는지 짧게 확인해 볼까요?";
 
-/** 단계 메시지에 붙는 빠른 답. 마지막 단계에는 "다음으로" 대신 확인 문제(실기형은 해봤어요)를 권합니다. */
+/** 추천 요청으로 세로 목록에 보이는 칩. 나머지(확인 문제 등)는 가로 버튼입니다. */
+export const isSuggestionAction = (action: FlowAction): boolean => action.id === "easier" || action.id === "example";
+
+/**
+ * 단계 메시지에 붙는 빠른 답. 레슨은 모든 단계를 한 번에 이어서 보여 주므로 "다음으로" 버튼은 없고,
+ * 마지막 단계에만 확인 문제(실기형은 해봤어요)를 붙입니다. 추천 요청은 AI가 수업 내용에 맞춰 만든 것을 따로 보여 줍니다.
+ */
 export function stepActions(index: number, total: number, practical: boolean): FlowAction[] {
-  const depth: FlowAction[] = [{ id: "easier", label: ACTION_LABEL.easier }, { id: "example", label: ACTION_LABEL.example }];
-  if (index < total - 1) return [{ id: "next", label: ACTION_LABEL.next }, ...depth];
-  return practical
-    ? [{ id: "did", label: ACTION_LABEL.did }, { id: "skip", label: ACTION_LABEL.practicalSkip }, ...depth]
-    : [{ id: "check", label: ACTION_LABEL.check }, { id: "skip", label: ACTION_LABEL.skip }, ...depth];
+  if (index < total - 1) return [];
+  return checkActions(practical);
 }
 
 /** 확인 단계로 돌아왔을 때(이어서 갈게요 등) 다시 보여 주는 칩 */

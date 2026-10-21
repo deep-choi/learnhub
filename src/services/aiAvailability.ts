@@ -44,7 +44,7 @@ export const parseAiAvailability = (value: unknown): AiAvailability | null => {
     availableKeys.add(`${provider}:${id}`);
   }
   const models = AI_PROVIDER_ORDER.flatMap((provider) => AI_MODEL_CATALOG.filter((model) => model.provider === provider))
-    .map((model) => ({ ...model, reasoningEfforts: [...model.reasoningEfforts], available: availableKeys.has(`${model.provider}:${model.id}`) }));
+    .map((model) => ({ ...model, reasoningEfforts: [...model.reasoningEfforts], available: !model.preparing && availableKeys.has(`${model.provider}:${model.id}`) }));
   return {
     providers,
     models,

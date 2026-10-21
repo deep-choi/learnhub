@@ -11,6 +11,7 @@ import { LearningRecordsView } from "./components/LearningRecordsView";
 import { LearningConversationView } from "./components/LearningConversationView";
 import { KnowledgeMapView } from "./components/notion/KnowledgeMapView";
 import { getResumeContext, mergeCourseLinks } from "./components/graph/graphBridge";
+import { fillConceptLinks, hasConceptLinks } from "./services/conceptLinks";
 import { CloudSnapshotRequestError } from "./services/cloudSync";
 import { clearPendingPreview, readPendingPreview, savePendingPreview } from "./components/graph/pendingPreview";
 import { buildCourseFromPayload } from "./components/graph/courseFromPayload";
@@ -395,6 +396,8 @@ export default function App() {
     if (!existing) StorageService.addCourse(newCourse);
     if (!StorageService.getCourseById(newCourse.id)) throw new Error("course_save_failed");
     if (links) mergeCourseLinks(newCourse, links);
+    // 개요만으로 먼저 수업을 열고, 개념 연결은 뒤에서 채웁니다.
+    if (!existing && !hasConceptLinks(links)) void fillConceptLinks(newCourse, links?.domain);
     if (!existing) trackLearningEvent("course_created", { courseId: newCourse.id, sample: false, source: "chat" });
     reloadData();
     if (newCourse.chapters[0]?.lessons[0]) {

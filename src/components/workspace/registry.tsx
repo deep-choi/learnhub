@@ -9,7 +9,7 @@ import type { PaneDefinition } from "./types";
  * `+` 메뉴, 탭, 레이아웃 기억에 자동으로 들어갑니다. 첫 항목이 기본으로 열리는 탭입니다.
  */
 export const PANE_REGISTRY: PaneDefinition[] = [
-  { id: "graph", title: "그래프 뷰", icon: Network, description: "지금 배우는 개념과 이어진 지도", render: (context) => <GraphPane context={context} /> },
+  { id: "graph", title: "그래프 뷰", icon: Network, description: "지금까지 배운 개념 전체 지도", render: (context) => <GraphPane context={context} /> },
   { id: "notes", title: "메모", icon: FileText, description: "배운 것을 마크다운으로 적는 메모장", render: (context) => <NotesPane context={context} /> },
 ];
 

@@ -1,18 +1,18 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { FileText, Maximize2 } from "lucide-react";
 import { GraphCanvas } from "../graph/GraphCanvas";
-import { getLocalGraph } from "../graph/graphBridge";
 import { STATE_LABEL } from "../graph/graphStyle";
 import { getConceptIdsWithNotes } from "../../services/noteStore";
 import { LEARNHUB_DATA_CHANGED_EVENT } from "../../services/storage";
 import type { PaneContext } from "./types";
 
-/** 그래프 뷰 패널: 지금 레슨 개념 중심의 로컬 그래프. 노드를 누르면 상세, 메모가 있는 노드에는 표시가 붙습니다. */
+/** 그래프 뷰 패널: 지금까지 배운 모든 개념을 보여 주고 지금 레슨 개념에 초점을 둡니다. 노드를 누르면 상세, 메모가 있는 노드에는 표시가 붙습니다. */
 export const GraphPane: React.FC<{ context: PaneContext }> = ({ context }) => {
   const { graph, currentConceptId, nextIds, pulseId, onOpenNotes, onOpenMap } = context;
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [marked, setMarked] = useState<Set<string>>(() => new Set(getConceptIdsWithNotes({ includeLinked: false })));
-  const local = useMemo(() => getLocalGraph(graph, currentConceptId, 2), [graph, currentConceptId]);
+  // 과목끼리 이어진 선이 없어도 예전에 배운 개념이 사라지지 않도록 전체 지도를 그립니다.
+  const local = useMemo(() => ({ ...graph, edges: graph.edges.filter((edge) => !edge.disputed) }), [graph]);
   const selected = selectedId ? local.nodes.find((node) => node.id === selectedId) ?? null : null;
   const focusName = graph.nodes.find((node) => node.id === currentConceptId)?.name;
 
@@ -38,7 +38,7 @@ export const GraphPane: React.FC<{ context: PaneContext }> = ({ context }) => {
         selectedId={selectedId}
         markedIds={marked}
         onSelect={(id) => setSelectedId(id)}
-        ariaLabel={`${focusName ?? "지금 배우는 개념"}과 이어진 개념 지도. 개념 ${local.nodes.length}개.`}
+        ariaLabel={`${focusName ? `${focusName}에 초점을 둔 ` : ""}전체 개념 지도. 개념 ${local.nodes.length}개.`}
         className="absolute inset-0 h-full w-full"
       />
       {onOpenMap && (

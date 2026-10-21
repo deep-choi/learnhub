@@ -74,6 +74,8 @@ export interface LessonContent {
   courseId: string;
   title: string;
   steps: LessonStep[];
+  /** AI가 수업 내용에 맞춰 만든 이어서 물어볼 요청. 본문 아래 세로 목록으로 보입니다. */
+  suggestionChips?: string[];
 }
 
 export interface UserSkill {

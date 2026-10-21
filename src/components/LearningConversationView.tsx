@@ -9,7 +9,6 @@ import { notifyLearningDataChanged, StorageService } from "../services/storage";
 import { completeLesson } from "../services/lessonCompletion";
 import { clearLessonProgress, getLessonProgress, saveLessonProgress } from "../services/lessonProgressStore";
 import { validateLessonPayload } from "../domain/contentValidation";
-import { createFallbackLessonContent } from "../domain/lessonFallback";
 import { lessonLearningContext } from "../domain/lessonContext";
 import { courseIsComplete } from "../domain/assessment";
 import { RichLessonRenderer } from "./notion/RichLessonRenderer";
@@ -32,6 +31,7 @@ import {
   clampStepIndex,
   closingPrompt,
   reopenActions,
+  isSuggestionAction,
   stepActions,
   stepProgressLabel,
   type FlowAction,
@@ -171,6 +171,9 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
   const [content, setContent] = useState<LessonContent | null>(null);
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [isLoadingContent, setIsLoadingContent] = useState(true);
+  // 수업 생성에 실패하면 틀에 찍은 대체 수업 대신 솔직하게 알리고 다시 시도하게 합니다.
+  const [loadError, setLoadError] = useState("");
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [input, setInput] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [isCompleted, setIsCompleted] = useState(lessonMeta.isCompleted);
@@ -255,6 +258,7 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
 
     const loadContent = async () => {
       setIsLoadingContent(true);
+      setLoadError("");
       const cached = StorageService.getCachedLessonContent(lessonMeta.id);
       if (isUsableContent(cached, course, lessonMeta)) {
         if (!cancelled) setContent(cached!);
@@ -297,12 +301,16 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
             content: typeof step.content === "string" ? step.content : "",
             codeSnippet: typeof step.codeSnippet === "string" ? step.codeSnippet : undefined,
           })),
+          suggestionChips: Array.isArray(data.suggestionChips)
+            ? data.suggestionChips.filter((chip: unknown): chip is string => typeof chip === "string" && Boolean(chip.trim())).map((chip: string) => chip.trim().slice(0, 200)).slice(0, 4)
+            : undefined,
         };
         StorageService.cacheLessonContent(lessonMeta.id, loaded);
         if (!cancelled) setContent(loaded);
       } catch (error) {
         if (cancelled) return;
-        setContent(createFallbackLessonContent(course, lessonMeta, chapterTitle));
+        setContent(null);
+        setLoadError(error instanceof Error && error.message === "auth_required" ? "로그인하면 수업을 이어서 볼 수 있어요." : "수업 내용을 만들지 못했어요. 잠시 후 다시 시도해 주세요.");
       } finally {
         if (!cancelled) setIsLoadingContent(false);
       }
@@ -313,7 +321,7 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
       cancelled = true;
       controller.abort();
     };
-  }, [chapterTitle, course, lessonMeta]);
+  }, [chapterTitle, course, lessonMeta, loadAttempt]);
 
   const saveProgress = (next: FlowProgress) => {
     setProgress(next);
@@ -334,10 +342,19 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
   const stepMessage = (stepContent: LessonContent, index: number): ConversationMessage => {
     const total = stepContent.steps.length;
     const i = clampStepIndex(index, total);
-    let text = buildStepText({ index: i, step: stepContent.steps[i] });
-    if (i === total - 1) text += `\n\n${closingPrompt(isPractical)}`;
-    return { sender: "tutor", text, actions: stepActions(i, total, isPractical) };
+    // 본문은 학습자에게 던지는 질문으로 끝나므로 고정된 마무리 문장을 덧붙이지 않습니다.
+    const text = buildStepText({ index: i, step: stepContent.steps[i] });
+    // 마지막 단계 아래에는 AI가 수업 내용에 맞춰 만든 추천 요청을 세로로 보여 줍니다.
+    const chips = i === total - 1 && stepContent.suggestionChips?.length ? stepContent.suggestionChips : undefined;
+    return { sender: "tutor", text, actions: stepActions(i, total, isPractical), ...(chips ? { chips } : {}) };
   };
+
+  /** 질문에 답한 뒤에도 레슨을 마칠 길이 남도록, 아직 끝나지 않은 레슨이면 확인 문제 버튼을 붙입니다. */
+  const completionActions = (): FlowAction[] | undefined => (progress.phase === "done" ? undefined : checkActions(isPractical));
+
+  /** 레슨을 열면 모든 단계를 이어서 보여 줍니다. from부터 마지막 단계까지의 메시지입니다. */
+  const stepMessagesFrom = (stepContent: LessonContent, from: number): ConversationMessage[] =>
+    stepContent.steps.slice(Math.max(0, from)).map((_, offset) => stepMessage(stepContent, Math.max(0, from) + offset));
 
   const showStep = (index: number) => {
     if (!content) return;
@@ -365,17 +382,23 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
 
     if (onlyLegacyIntroduction && !lessonMeta.isCompleted && saved?.phase !== "done" && !saved?.checkResult) {
       // 아직 질문하거나 문제를 풀지 않은 이전 도입만 새 단계 형식으로 바꿉니다.
-      next = { stepIndex: 0, phase: "steps" };
-      nextMessages = [stepMessage(content, 0)];
+      next = { stepIndex: Math.max(0, total - 1), phase: "steps" };
+      nextMessages = stepMessagesFrom(content, 0);
     } else if (saved) {
       next = { stepIndex: clampStepIndex(saved.stepIndex, total), phase: saved.phase, ...(saved.checkResult ? { checkResult: saved.checkResult } : {}) };
-      // 질문하기 전의 첫 안내는 현재 레슨 데이터로 표시합니다.
-      const untouchedOpening = stored.length === 1 && stored[0].sender === "tutor"
-        && !!stored[0].actions?.length && next.phase === "steps" && next.stepIndex === 0;
-      if (stored.length === 0 || untouchedOpening) nextMessages = [stepMessage(content, next.stepIndex)];
+      // 아직 질문하지 않은 단계 안내는 현재 레슨 데이터로 다시 그립니다.
+      const untouched = stored.every((message) => message.sender === "tutor") && next.phase === "steps";
+      if (stored.length === 0 || untouched) {
+        nextMessages = stepMessagesFrom(content, 0);
+        next = { ...next, stepIndex: Math.max(0, total - 1) };
+      } else if (next.phase === "steps" && next.stepIndex < total - 1) {
+        // 예전처럼 한 단계씩 보던 레슨: 남은 단계를 이어서 붙입니다.
+        nextMessages = [...stored, ...stepMessagesFrom(content, next.stepIndex + 1)];
+        next = { ...next, stepIndex: total - 1 };
+      }
     } else if (stored.length === 0) {
-      next = { stepIndex: 0, phase: "steps" };
-      nextMessages = [stepMessage(content, 0)];
+      next = { stepIndex: Math.max(0, total - 1), phase: "steps" };
+      nextMessages = stepMessagesFrom(content, 0);
     } else {
       // 단계 대화가 생기기 전에 한 번에 읽던 레슨: 대화는 그대로 두고 확인 단계에서 이어갑니다.
       next = { stepIndex: Math.max(0, total - 1), phase: lessonMeta.isCompleted ? "done" : "check" };
@@ -389,7 +412,7 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
     if (!(last?.sender === "tutor" && last.actions?.length)) {
       if (next.phase === "done") nextMessages = [...nextMessages, { sender: "tutor", text: "이미 마친 레슨이에요. 어떻게 할까요?", actions: reopenActions() }];
       else if (next.phase === "check") nextMessages = [...nextMessages, { sender: "tutor", text: closingPrompt(isPractical), actions: checkActions(isPractical) }];
-      else nextMessages = [...nextMessages, { sender: "tutor", text: `이어서 진행할게요. ${stepProgressLabel(next.stepIndex, total)} 이 단계를 이해하셨나요?`, actions: stepActions(next.stepIndex, total, isPractical) }];
+      else nextMessages = [...nextMessages, { sender: "tutor", text: closingPrompt(isPractical), actions: stepActions(total - 1, total, isPractical) }];
     }
 
     setMessages(nextMessages);
@@ -430,7 +453,7 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
       const lessonContext = currentContext;
       const studied = await study.answer(trimmed, boundedHistory(messages), lessonContext);
       if (studied) {
-        appendMessage({ sender: "tutor", text: studied.reply, studyResultId: studied.id, actions: [{ id: "continue", label: ACTION_LABEL.continue }] });
+        appendMessage({ sender: "tutor", text: studied.reply, studyResultId: studied.id, actions: completionActions() });
         return studied.reply;
       }
       const response = await authorizedFetch("/api/ai/tutor-chat", {
@@ -460,9 +483,9 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
       appendMessage({
         sender: "tutor",
         text: data.reply || "질문을 다시 설명해 주세요.",
-        chips: Array.isArray(data.suggestionChips) ? data.suggestionChips.slice(0, 3) : [],
-        // 질문에 답한 뒤에는 원래 하던 단계로 돌아올 수 있게 합니다.
-        actions: [{ id: "continue", label: ACTION_LABEL.continue }],
+        // 답 아래에는 이어서 물어볼 만한 요청을 세로로 보여 주고, 레슨을 마칠 버튼은 계속 남겨 둡니다.
+        chips: Array.isArray(data.suggestionChips) ? data.suggestionChips.filter((chip: unknown): chip is string => typeof chip === "string" && Boolean(chip.trim())).slice(0, 4) : [],
+        actions: completionActions(),
         ...(tangent && tangent.conceptName ? { tangent } : {}),
       });
       const learned = typeof data.learnedConcept === "string" ? data.learnedConcept : data.learnedConcept?.conceptName;
@@ -722,7 +745,7 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
         } else if (progress.phase === "check") {
           addTutor("좋아요. 확인 문제를 풀어 볼까요?", checkActions(isPractical));
         } else {
-          addTutor(`좋아요, 이어갈게요. ${stepProgressLabel(progress.stepIndex, total)} 이 단계를 이해하셨나요?`, stepActions(progress.stepIndex, total, isPractical));
+          addTutor(closingPrompt(isPractical), stepActions(total - 1, total, isPractical));
         }
         return;
       case "check":
@@ -810,6 +833,18 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
     onOpenMap: onOpenKnowledgeMap,
   };
 
+  if (!isLoadingContent && !content && loadError) {
+    return (
+      <div role="alert" className="flex min-h-[70vh] flex-col items-center justify-center gap-3 px-6 text-center text-[var(--lh-ink-secondary)]">
+        <p className="text-[15px] text-[var(--lh-ink)]">{loadError}</p>
+        <div className="flex flex-wrap justify-center gap-2">
+          <button type="button" onClick={() => setLoadAttempt((value) => value + 1)} className="min-h-10 rounded-full bg-[var(--lh-primary)] px-5 text-sm font-medium text-white transition hover:bg-[var(--lh-primary-hover)] cursor-pointer">다시 시도하기</button>
+          {onGoCourse && <button type="button" onClick={onGoCourse} className="min-h-10 rounded-full border border-[var(--lh-line)] px-5 text-sm text-[var(--lh-ink-secondary)] transition hover:bg-[var(--lh-surface-subtle)] cursor-pointer">전체 과정</button>}
+        </div>
+      </div>
+    );
+  }
+
   if (isLoadingContent || !content) {
     return (
       <div className="flex min-h-[70vh] flex-col items-center justify-center gap-3 text-[var(--lh-ink-secondary)]">
@@ -860,20 +895,28 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
                         </button>
                       </div>
                     )}
-                    {index === lastIndex && !isSending && !dismissedPrompts.has(index) && !practiceOpen && index > 0 && PRACTICE_OFFER.test(message.text) && (
+                    {/* 이미 확인 문제 버튼이 붙은 안내(마지막 단계 등)에는 같은 역할의 제안 버튼을 또 달지 않습니다. */}
+                    {index === lastIndex && !isSending && !dismissedPrompts.has(index) && !practiceOpen && index > 0 && !message.actions?.length && PRACTICE_OFFER.test(message.text) && (
                       <div className="mt-4 flex flex-wrap gap-2">
                         <button type="button" onClick={() => { setDismissedPrompts((previous) => new Set(previous).add(index)); startCheck(); }} className="min-h-10 rounded-full bg-[var(--lh-primary)] px-4 text-sm font-medium text-white transition hover:bg-[var(--lh-primary-hover)] cursor-pointer">좋아요, 풀어볼게요</button>
                         <button type="button" onClick={() => setDismissedPrompts((previous) => new Set(previous).add(index))} className="min-h-10 rounded-full border border-[var(--lh-line-strong)] bg-[var(--lh-surface)] px-4 text-sm font-medium text-[var(--lh-ink-secondary)] transition hover:bg-[var(--lh-surface-subtle)] cursor-pointer">괜찮아요, 넘길게요</button>
                       </div>
                     )}
                     {message.chips && message.chips.length > 0 && index === lastIndex && (
-                      <div className="mt-4 flex flex-wrap gap-2">
-                        {message.chips.map((chip) => <button type="button" key={chip} onClick={() => void sendQuestion(chip)} disabled={isSending} className="min-h-9 rounded-full border border-[var(--lh-primary-border)] bg-[var(--lh-primary-subtle)] px-3.5 text-sm font-medium text-[var(--lh-primary-text)] transition hover:bg-[var(--lh-primary)] hover:text-white disabled:opacity-40 cursor-pointer">{chip}</button>)}
+                      <div className="mt-4 flex flex-col items-start gap-1.5" role="group" aria-label="이어서 물어보기">
+                        {message.chips.map((chip) => <button type="button" key={chip} onClick={() => void sendQuestion(chip)} disabled={isSending} className="min-h-8 max-w-full rounded-xl border border-[var(--lh-primary-border)] bg-[var(--lh-primary-subtle)] px-3 py-1.5 text-left text-[13px] font-medium leading-5 text-[var(--lh-primary-text)] transition hover:bg-[var(--lh-primary)] hover:text-white disabled:opacity-40 cursor-pointer">{chip}</button>)}
                       </div>
                     )}
-                    {message.actions && message.actions.length > 0 && index === lastIndex && !isSending && (
+                    {message.actions && message.actions.some(isSuggestionAction) && index === lastIndex && !isSending && (
+                      <div className="mt-4 flex flex-col items-start gap-1.5" role="group" aria-label="이어서 물어보기">
+                        {message.actions.filter(isSuggestionAction).map((action) => (
+                          <button type="button" key={`${action.id}-${action.label}`} onClick={() => handleAction(action)} className="min-h-8 max-w-full rounded-xl border border-[var(--lh-primary-border)] bg-[var(--lh-primary-subtle)] px-3 py-1.5 text-left text-[13px] font-medium leading-5 text-[var(--lh-primary-text)] transition hover:bg-[var(--lh-primary)] hover:text-white cursor-pointer">{action.label}</button>
+                        ))}
+                      </div>
+                    )}
+                    {message.actions && message.actions.some((action) => !isSuggestionAction(action)) && index === lastIndex && !isSending && (
                       <div className="mt-4 flex flex-wrap gap-2" role="group" aria-label="빠른 답">
-                        {message.actions.map((action, actionIndex) => (
+                        {message.actions.filter((action) => !isSuggestionAction(action)).map((action, actionIndex) => (
                           <button
                             type="button"
                             key={`${action.id}-${action.label}`}

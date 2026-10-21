@@ -10,11 +10,24 @@ const save = (graph: KnowledgeGraph): KnowledgeGraph => {
   catch { throw new Error("개념 지도를 저장하지 못했습니다. 저장 공간을 확인해 주세요."); }
   notifyLearningDataChanged(); return graph;
 };
+/** 동기화·복원처럼 지도를 거치지 않고 저장된 과목도 지도에 보이도록, 빠진 레슨 개념이 있는 과목을 합칩니다. */
+const withSavedCourses = (graph: KnowledgeGraph): KnowledgeGraph => {
+  const missing = StorageService.getCourses().filter(course => course.chapters.some(chapter => chapter.lessons.some(lesson => normalizeConceptKey(lesson.conceptName || "") && !findMatchingConcept(graph, lesson.conceptName))));
+  let healed = graph;
+  for (const course of missing) {
+    try { healed = mergeCourseGraph(healed, course); } catch { /* 합칠 수 없는 과목은 건너뜁니다. */ }
+  }
+  // 합친 게 없으면 저장하지 않아야 변경 이벤트 → 다시 읽기가 반복되지 않습니다.
+  if (healed === graph) return graph;
+  try { return save(healed); } catch { return healed; }
+};
 export function getKnowledgeGraph(): KnowledgeGraph {
   if (typeof localStorage === "undefined") return emptyKnowledgeGraph();
   const raw = localStorage.getItem(LEARNHUB_STORAGE_KEYS.KNOWLEDGE_GRAPH);
   if (raw !== null) {
-    try { const parsed: unknown = JSON.parse(raw); if (isKnowledgeGraph(parsed)) return parsed; } catch { /* keep damaged data for recovery */ }
+    let parsed: unknown;
+    try { parsed = JSON.parse(raw); } catch { /* keep damaged data for recovery */ }
+    if (isKnowledgeGraph(parsed)) return withSavedCourses(parsed);
     throw new Error("저장된 개념 지도를 읽을 수 없습니다. 백업을 확인해 주세요.");
   }
   let graph = emptyKnowledgeGraph();
