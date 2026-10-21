@@ -1,6 +1,7 @@
-import {StrictMode} from 'react';
+import {StrictMode, Suspense, lazy} from 'react';
 import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
+const AdminPage = lazy(() => import('./components/admin/AdminPage'));
 import './index.css';
 import { clearAuthAdapter, configureAuthAdapter } from './services/authClient';
 import { initializeFirebaseAuth, LEARNHUB_AUTH_CHANGED_EVENT } from './services/firebaseClient';
@@ -8,7 +9,9 @@ import { fetchAiAvailability } from './services/aiAvailability';
 
 const renderApp = () => createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    <Suspense fallback={<div style={{padding:32}}>불러오는 중…</div>}>
+      {window.location.pathname.replace(/\/+$/u, '') === '/admin' ? <AdminPage /> : <App />}
+    </Suspense>
   </StrictMode>,
 );
 

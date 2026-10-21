@@ -10,6 +10,9 @@ import { validateCurriculumPayload, validateLessonPayload } from "./src/domain/c
 import { AiGateway, AiGatewayError, reservedAiOutputTokens } from "./server/aiGateway";
 import { AiAdmissionController, isAllowedLoopbackRequest } from "./server/aiPolicy";
 import { aiUsageLimitsEnabled } from "./server/aiUsageLimits";
+import { createAdminRouter } from "./server/admin";
+import { authorizeAiOperation, getOperationsSettings, recordAiOperation } from "./server/adminStore";
+import { OperationsError } from "./server/operationsPolicy";
 import { configureFirebaseAuth, isAuthConfigured, verifyAccessToken } from "./server/auth";
 import { configureFirebaseCloudStore, createContentReport, getLearningSnapshot, putLearningSnapshot } from "./server/cloudStore";
 import { deleteFirebaseAccountData, FirebaseAiQuotaExceededError, getFirebaseAiUsage, getFirebasePublicConfig, reserveFirebaseAiUsage } from "./server/firebaseProvider";
@@ -140,12 +143,21 @@ const aiPolicy = new AiAdmissionController({
   usageLimitsEnabled: aiUsageLimitsEnabled(),
   maxConcurrent: positiveEnvInteger("AI_MAX_CONCURRENT", 4),
   maxRequestsPerClientPerMinute: positiveEnvInteger("AI_REQUESTS_PER_USER_PER_MINUTE", 12),
-  dailyRequestBudget: positiveEnvInteger("AI_GLOBAL_REQUESTS_PER_DAY", 10_000),
-  dailyOutputTokenBudget: positiveEnvInteger("AI_GLOBAL_RESERVED_OUTPUT_TOKENS_PER_DAY", 1_000_000),
-  perClientDailyRequestBudget: positiveEnvInteger("AI_REQUESTS_PER_USER_PER_DAY", 100),
-  perClientDailyOutputTokenBudget: positiveEnvInteger("AI_RESERVED_OUTPUT_TOKENS_PER_USER_PER_DAY", 100_000),
+  // Durable account/global quotas below are authoritative; keep only concurrency and burst limits here.
+  dailyRequestBudget: Number.MAX_SAFE_INTEGER,
+  dailyOutputTokenBudget: Number.MAX_SAFE_INTEGER,
+  perClientDailyRequestBudget: Number.MAX_SAFE_INTEGER,
+  perClientDailyOutputTokenBudget: Number.MAX_SAFE_INTEGER,
 });
+const operationsHooks = {
+  beforeGenerate: authorizeAiOperation,
+  logger: async (event: Parameters<typeof recordAiOperation>[0]) => {
+    console.info(JSON.stringify(event));
+    await recordAiOperation(event).catch(() => console.warn(JSON.stringify({ event: "ai_metrics_write_failed" })));
+  },
+};
 const aiGateway = new AiGateway({
+  ...operationsHooks,
   geminiApiKey: process.env.GEMINI_API_KEY,
   openAiApiKey: process.env.OPENAI_API_KEY,
   anthropicApiKey: process.env.ANTHROPIC_API_KEY,
@@ -156,6 +168,7 @@ const previewProxyHops = Number(process.env.PREVIEW_TRUSTED_PROXY_HOPS || 0);
 if (!Number.isInteger(previewProxyHops) || previewProxyHops < 0 || previewProxyHops > 5) throw new Error("PREVIEW_TRUSTED_PROXY_HOPS 설정을 확인해 주세요.");
 app.set("trust proxy", previewProxyHops);
 const previewGateway = new AiGateway({ geminiApiKey: process.env.GEMINI_API_KEY, openAiApiKey: process.env.OPENAI_API_KEY, anthropicApiKey: process.env.ANTHROPIC_API_KEY,
+  ...operationsHooks,
   policy: new AiAdmissionController({ usageLimitsEnabled: aiUsageLimitsEnabled(), maxConcurrent: 2, dailyRequestBudget: 100, perClientDailyRequestBudget: 3, dailyOutputTokenBudget: 260000, perClientDailyOutputTokenBudget: 7800 }) });
 const previewQuota = new PreviewQuota({
   usageLimitsEnabled: aiUsageLimitsEnabled(),
@@ -172,6 +185,7 @@ const guestTrialQuota = new GuestTrialQuota({
   ...(process.env.NODE_ENV === "production" ? { storage: new FirestoreGuestTrialStorage() } : {}),
 });
 const guestTrialGateway = new AiGateway({ geminiApiKey: process.env.GEMINI_API_KEY, openAiApiKey: process.env.OPENAI_API_KEY, anthropicApiKey: process.env.ANTHROPIC_API_KEY,
+  ...operationsHooks,
   policy: new AiAdmissionController({ maxConcurrent: 3, maxRequestsPerClientPerMinute: 12, dailyRequestBudget: 2_000, perClientDailyRequestBudget: 40, dailyOutputTokenBudget: 2_000 * GUEST_TRIAL_OUTPUT_TOKENS, perClientDailyOutputTokenBudget: 40 * GUEST_TRIAL_OUTPUT_TOKENS }) });
 const GUEST_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
@@ -228,6 +242,7 @@ app.get("/api/public-config", (_req, res) => {
   if (!firebaseConfig) return res.status(503).json({ error: "Firebase 공개 설정이 아직 준비되지 않았습니다.", code: "PUBLIC_CONFIG_NOT_CONFIGURED" });
   return res.json({ firebaseConfig, ai: aiAvailability() });
 });
+app.use("/api/admin", createAdminRouter());
 
 const requireAiAccess = async (req: Request, res: Response): Promise<boolean> => {
   // Allow non-production loopback requests (guest / trial demo mode)
@@ -289,17 +304,21 @@ app.get("/api/ai/config", async (req, res) => {
     }
   }
   const ai = aiAvailability();
+  let operations: Awaited<ReturnType<typeof getOperationsSettings>>;
+  try { operations = await getOperationsSettings(); }
+  catch { return res.status(503).json({ error: "AI 운영 설정을 확인하지 못했습니다.", code: "OPERATIONS_UNAVAILABLE" }); }
   return res.json({
     providers: ai.providers,
-    models: ai.models,
+    models: ai.models.filter(model => !operations.disabledModels.includes(model.id)),
+    aiPaused: operations.aiPaused,
     outputTokenOptions: ai.outputTokenOptions,
     limits: {
-      enabled: quota.limits.enabled,
+      enabled: operations.limitsEnabled,
       requestsPerMinute: quota.limits.requestsPerMinute,
       requestsPerDay: durableUsage?.requestLimit ?? quota.limits.requestsPerDay,
       reservedOutputTokensPerDay: durableUsage?.outputTokenLimit ?? quota.limits.reservedOutputTokensPerDay,
-      globalRequestsPerDay: quota.limits.globalRequestsPerDay,
-      globalReservedOutputTokensPerDay: quota.limits.globalReservedOutputTokensPerDay,
+      globalRequestsPerDay: operations.globalRequestLimit,
+      globalReservedOutputTokensPerDay: operations.globalOutputTokenLimit,
     },
     usage: {
       day: durableUsage?.usageDay ?? (quota.dayKey || new Date().toISOString().slice(0, 10)),
@@ -312,6 +331,7 @@ app.get("/api/ai/config", async (req, res) => {
 });
 
 const sendAiError = (res: Response, error: unknown) => {
+  if (error instanceof OperationsError) return res.status(error.status).json({ error: error.message, code: error.code });
   if (error instanceof AiGatewayError) {
     const messages: Record<string, string> = {
       AI_NOT_CONFIGURED: "AI 기능이 아직 설정되지 않았습니다.",

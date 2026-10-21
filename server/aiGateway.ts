@@ -22,6 +22,7 @@ import {
   type ClaudeFailureKind,
 } from "./anthropicProvider";
 import { generalLearningSafetyPrompt } from "./learningSafety";
+import { OperationsError } from "./operationsPolicy";
 
 export const AI_TIMEOUT_MS = 20_000;
 export const AI_MAX_RESPONSE_CHARS = 160_000;
@@ -245,7 +246,8 @@ export class AiGateway {
   private readonly anthropicApiKey: string | null;
   private anthropicClient: AnthropicClientLike | null;
   private readonly policy: AiAdmissionController;
-  private readonly logger: (event: AiGatewayLoggerEvent) => void;
+  private readonly logger: (event: AiGatewayLoggerEvent) => unknown;
+  private readonly beforeGenerate?: (request: AiGatewayRequest<unknown>, selection: AiRuntimeSelection, tokens: number) => Promise<void>;
 
   constructor(options: {
     /** Backward-compatible alias for geminiApiKey. */
@@ -258,7 +260,8 @@ export class AiGateway {
     /** Tests inject a mock; otherwise the SDK client is created on first use, only when the key exists. */
     anthropicClient?: AnthropicClientLike | null;
     policy?: AiAdmissionController;
-    logger?: (event: AiGatewayLoggerEvent) => void;
+    logger?: (event: AiGatewayLoggerEvent) => unknown;
+    beforeGenerate?: (request: AiGatewayRequest<unknown>, selection: AiRuntimeSelection, tokens: number) => Promise<void>;
   } = {}) {
     const geminiApiKey = (options.geminiApiKey || options.apiKey)?.trim();
     this.geminiClient = options.client === undefined
@@ -279,6 +282,7 @@ export class AiGateway {
     this.anthropicClient = options.anthropicClient ?? null;
     this.policy = options.policy ?? new AiAdmissionController();
     this.logger = options.logger ?? ((event) => console.info(JSON.stringify(event)));
+    this.beforeGenerate = options.beforeGenerate;
   }
 
   isConfigured(provider?: AiRuntimeSelection["provider"]): boolean {
@@ -322,12 +326,12 @@ export class AiGateway {
       !model.reasoningEfforts.includes(selection.reasoningEffort)
     ) {
       status = "invalid_input";
-      this.log(request, selection, startedAt, status, usage);
+      await this.log(request, selection, startedAt, status, usage);
       throw new AiGatewayError("AI_INVALID_REQUEST", 400);
     }
 
     if (!this.isConfigured(selection.provider)) {
-      this.log(request, selection, startedAt, status, usage);
+      await this.log(request, selection, startedAt, status, usage);
       throw new AiGatewayError("AI_NOT_CONFIGURED", 503);
     }
 
@@ -338,13 +342,14 @@ export class AiGateway {
     if (!admission.lease) {
       status = "admission_rejected";
       admissionReason = admission.reason;
-      this.log(request, selection, startedAt, status, usage, admissionReason);
+      await this.log(request, selection, startedAt, status, usage, admissionReason);
       throw new AiGatewayError("AI_ADMISSION_REJECTED", 429, admissionReason);
     }
 
     const abortController = new AbortController();
     const timeout = setTimeout(() => abortController.abort(), AI_TIMEOUT_MS);
     try {
+      await this.beforeGenerate?.(request, selection, reservedOutputTokens);
       let grounding: AiGatewayResult<T>["grounding"];
       let text = "";
       let finishReason: string | undefined;
@@ -442,6 +447,11 @@ export class AiGateway {
       status = "success";
       return { payload: payload as T, usage: usage || emptyUsage(), selection, ...(grounding ? { grounding } : {}) };
     } catch (error) {
+      if (error instanceof OperationsError) {
+        status = "admission_rejected";
+        admissionReason = error.code;
+        throw error;
+      }
       if (error instanceof AiGatewayError) throw error;
       if (error instanceof AnthropicProviderError) {
         const failure = CLAUDE_FAILURES[error.kind];
@@ -454,7 +464,7 @@ export class AiGateway {
     } finally {
       clearTimeout(timeout);
       admission.lease.release();
-      this.log(request, selection, startedAt, status, usage, admissionReason);
+      await this.log(request, selection, startedAt, status, usage, admissionReason);
     }
   }
 
@@ -466,7 +476,7 @@ export class AiGateway {
     usage: AiUsageMetadata | null,
     admissionReason?: string,
   ) {
-    this.logger({
+    return this.logger({
       event: "ai_request",
       requestId: request.requestId,
       endpoint: request.endpoint,

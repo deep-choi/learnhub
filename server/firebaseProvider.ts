@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { getApps, initializeApp } from "firebase-admin/app";
 import { getAuth as getAdminAuth } from "firebase-admin/auth";
-import { getFirestore, type DocumentReference, type Firestore } from "firebase-admin/firestore";
+import { type DocumentReference } from "firebase-admin/firestore";
+import { firebaseAdminApp, firestore, projectId } from "./firebaseRuntime";
 import { withCloudStoreErrors } from "./cloudErrors";
 import { aiUsageLimitsEnabled } from "./aiUsageLimits";
 
@@ -35,17 +35,6 @@ export class FirebaseAiQuotaExceededError extends Error {
   }
 }
 
-const projectId = (): string => {
-  let runtimeProjectId = "";
-  try {
-    const firebaseConfig = JSON.parse(process.env.FIREBASE_CONFIG || "") as { projectId?: unknown };
-    runtimeProjectId = typeof firebaseConfig.projectId === "string" ? firebaseConfig.projectId : "";
-  } catch {
-    runtimeProjectId = "";
-  }
-  return (process.env.LEARNHUB_FB_PROJECT_ID || runtimeProjectId || process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || "").trim();
-};
-
 export const getFirebasePublicConfig = (): FirebasePublicConfig | null => {
   const config: FirebasePublicConfig = {
     apiKey: (process.env.LEARNHUB_FB_WEB_API_KEY || "").trim(),
@@ -67,14 +56,12 @@ export const getFirebasePublicConfig = (): FirebasePublicConfig | null => {
 
 export const isFirebaseConfigured = (): boolean => projectId().length > 0;
 
-const firebaseAdminApp = () => getApps()[0] || initializeApp({ ...(projectId() ? { projectId: projectId() } : {}) });
-const firestore = (): Firestore => getFirestore(firebaseAdminApp());
 const userRef = (userId: string): DocumentReference => firestore().collection("learnhubUsers").doc(userId);
 
 export const verifyFirebaseAccessToken = async (token: string): Promise<{ id: string } | null> => {
   if (!isFirebaseConfigured() || typeof token !== "string" || token.trim().length === 0) return null;
   try {
-    const decoded = await getAdminAuth(firebaseAdminApp()).verifyIdToken(token);
+    const decoded = await getAdminAuth(firebaseAdminApp()).verifyIdToken(token, true);
     return decoded.uid ? { id: decoded.uid } : null;
   } catch {
     return null;
@@ -93,6 +80,8 @@ export const createFirebaseContentReport = async (
     lessonId: payload.lessonId ?? null,
     stepId: payload.stepId ?? null,
     createdAt: new Date().toISOString(),
+    status: "received",
+    revision: 0,
   });
   return { id: reportRef.id, status: "received" };
 };
@@ -212,10 +201,12 @@ const quotaPolicyRef = () => firestore().collection("learnhubConfig").doc("aiQuo
 const readLimit = (value: unknown, fallback: number): number =>
   Number.isInteger(value) && Number(value) > 0 ? Number(value) : fallback;
 const readEnvironmentQuotaPolicy = () => ({
+  limitsEnabled: aiUsageLimitsEnabled(),
   requestLimit: positiveLimit("AI_REQUESTS_PER_USER_PER_DAY", 100),
   outputTokenLimit: positiveLimit("AI_RESERVED_OUTPUT_TOKENS_PER_USER_PER_DAY", 100_000),
 });
-const policyFromSnapshot = (value: { get: (field: string) => unknown }, fallback: { requestLimit: number; outputTokenLimit: number }) => ({
+const policyFromSnapshot = (value: { get: (field: string) => unknown }, fallback: { limitsEnabled: boolean; requestLimit: number; outputTokenLimit: number }) => ({
+  limitsEnabled: typeof value.get("limitsEnabled") === "boolean" ? value.get("limitsEnabled") as boolean : fallback.limitsEnabled,
   requestLimit: readLimit(value.get("requestLimit"), fallback.requestLimit),
   outputTokenLimit: readLimit(value.get("outputTokenLimit"), fallback.outputTokenLimit),
 });
@@ -251,7 +242,7 @@ export const reserveFirebaseAiUsage = async (userId: string, requestedTokens: nu
     const policy = policySnapshot.exists ? policyFromSnapshot(policySnapshot, envPolicy) : envPolicy;
     const requests = Number(snapshot.get("requests") || 0);
     const reservedOutputTokens = Number(snapshot.get("reservedOutputTokens") || 0);
-    if (aiUsageLimitsEnabled() && (requests + 1 > policy.requestLimit || reservedOutputTokens + requestedTokens > policy.outputTokenLimit)) {
+    if (policy.limitsEnabled && (requests + 1 > policy.requestLimit || reservedOutputTokens + requestedTokens > policy.outputTokenLimit)) {
       throw new FirebaseAiQuotaExceededError();
     }
     const usage = {
@@ -268,5 +259,6 @@ export const reserveFirebaseAiUsage = async (userId: string, requestedTokens: nu
 
 export const deleteFirebaseAccountData = async (userId: string): Promise<void> => {
   await firestore().recursiveDelete(userRef(userId));
+  await firestore().collection("learnhubUserOperations").doc(userId).delete();
   await getAdminAuth(firebaseAdminApp()).deleteUser(userId);
 };

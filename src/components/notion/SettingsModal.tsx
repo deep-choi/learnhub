@@ -18,6 +18,7 @@ import { ThemeMode, getStoredTheme, setTheme, THEME_CHANGED_EVENT } from "../../
 import { deleteAccount, signOut as authClientSignOut } from "../../services/authClient";
 import { downloadLearningBackup } from "../../services/learningBackup";
 import { authorizedFetch } from "../../services/authClient";
+import { adminRequest } from "../../services/adminClient";
 import {
   AI_MODEL_CATALOG,
   AI_OUTPUT_TOKEN_OPTIONS,
@@ -124,6 +125,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [aiConfiguration, setAiConfiguration] = useState<AiPublicConfiguration | null>(null);
   const [aiSettingsStatus, setAiSettingsStatus] = useState<"idle" | "loading" | "saved" | "error">("idle");
   const [aiSettingsError, setAiSettingsError] = useState("");
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setIsAdmin(false);
+    if (isOpen && userAccount && !userAccount.isGuest) {
+      void adminRequest("session").then(() => { if (!cancelled) setIsAdmin(true); }).catch(() => {});
+    }
+    return () => { cancelled = true; };
+  }, [isOpen, userAccount?.email, userAccount?.isGuest]);
 
   useEffect(() => {
     const handleThemeChange = (e: Event) => {
@@ -444,6 +455,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
                 {!isGuest && (
                   <>
+                    {isAdmin && <Section title="운영"><Row label="관리자 페이지"><a href="/admin" className={secondaryButton}><ShieldCheck className="h-4 w-4" />운영 콘솔 열기</a></Row></Section>}
                     <Section title="동기화">
                       <Row
                         label="온라인 자동 저장"

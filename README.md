@@ -36,6 +36,8 @@ Firebase 로그인 공급자 구성, Firestore 보호 규칙, 배포와 컷오�
 
 GPT/Gemini 모델, 추론 수준, 요청당 출력 한도와 서버 quota 설정은 [AI 운영 가이드](docs/AI_OPERATIONS.md)를 참고하세요. 브라우저에는 API key를 전달하지 않으며, 사용자가 고른 설정만 계정 snapshot에 동기화합니다.
 
+운영자 전용 `/admin`의 권한 부여·사용법·배포 확인은 [관리자 운영 가이드](docs/ADMIN_OPERATIONS.md)를 참고하세요. 결제·환불 탭은 미연동 상태이며, [결제·환불 검토](docs/BILLING_AND_REFUNDS.md)에 연동 범위를 정리했습니다.
+
 회원가입 약관과 개인정보 처리방침을 공개하기 전에 운영자가 확정해야 하는 값은 [법적 운영 정보 체크리스트](docs/LEGAL_INFORMATION_REQUIRED.md)에 정리되어 있습니다.
 
 임시 배포 주소에서는 `SEO_INDEXABLE=false`를 유지합니다. 정식 도메인과 공개 문서가 준비된 뒤 `APP_URL`을 정식 HTTPS 주소로 바꾸고 `SEO_INDEXABLE=true`로 전환하면 canonical, robots, sitemap이 같은 주소를 사용합니다.

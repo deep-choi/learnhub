@@ -45,7 +45,7 @@ LearnHub는 Google Gemini와 OpenAI GPT를 하나의 서버 gateway에서 사용
 - `AI_GLOBAL_REQUESTS_PER_DAY`
 - `AI_GLOBAL_RESERVED_OUTPUT_TOKENS_PER_DAY`
 
-인증된 사용자별 일일 요청·token 한도는 Firestore의 UID별 `aiUsage/{UTC-day}` 문서에서 transaction으로 원자적으로 예약하므로 Functions 재시작 후에도 유지된다. 전역 요청 동시성·일일 한도는 서버 프로세스에서 유지하므로 서버 재시작, 여러 인스턴스, 공급자 dashboard의 rate limit·결제 한도까지 통합하지 않는다. 수평 확장 전에는 전역 한도도 Firestore 등 공유 quota store로 옮긴다.
+인증된 사용자별 일일 요청·token 한도는 Firestore의 UID별 `aiUsage/{UTC-day}` 문서에서 transaction으로 예약한다. 관리자 운영 기능 도입 이후 전체 일일 한도도 `learnhubOperationsDays/{UTC-day}`의 transaction으로 공유하므로 재시작·다중 인스턴스에 걸쳐 유지된다. 동시성·분당 제한은 서버 프로세스 기준이다. `/admin`에서 생성 중지, 모델 중지, 일일 한도를 변경할 수 있다. 설정과 예약량은 실제 공급자 결제 한도나 청구액을 뜻하지 않는다. 자세한 적용 범위와 검증은 [관리자 운영 가이드](ADMIN_OPERATIONS.md)를 참고한다.
 
 `GET /api/ai/config`는 로그인 사용자에게 다음 정보만 반환한다.
 
@@ -72,4 +72,4 @@ Claude Haiku 4.5는 출력 한도에 추론 예산을 더해 요청하므로, �
 2. 같은 학생 질문 세트로 모델별 정확성, 힌트 품질, 오답 교정, 지연시간, 실제 token·비용을 비교한다.
 3. 모델별 모든 reasoning 수준에서 과정·레슨·튜터·복습·평가 JSON validation을 통과하는지 확인한다.
 4. 429, timeout, invalid JSON, provider 중단 상태에서 사용자 메시지와 fallback을 따로 확인한다.
-5. 서버 재시작과 다중 인스턴스 환경에서는 외부 quota store 적용 전 한도 수치가 전역 보장이 아님을 운영 문서에 유지한다.
+5. 전체/사용자별 일일 예약은 Firestore에서, 동시성·분당 제한은 프로세스에서 적용됨을 확인한다. 실제 청구 한도와 공급자 설정은 별도로 검증한다.
