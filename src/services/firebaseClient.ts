@@ -138,7 +138,7 @@ export const createFirebaseAuthAdapter = async (
   }
 
   const adapter: AuthClientAdapter = {
-    getAccessToken: async () => auth.currentUser?.getIdToken() || null,
+    getAccessToken: async (forceRefresh = false) => auth.currentUser?.getIdToken(forceRefresh) || null,
     getAuthStatus: () => statusFor(currentUser),
     requestMagicLink: async (email: string) => {
       await sendSignInLinkToEmail(auth, email, getEmailActionSettings(window.location.origin));

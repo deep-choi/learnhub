@@ -19,7 +19,7 @@ if (!email || !email.includes("@") || args.some((arg, i) => arg !== "--email" &&
     if (revoke) delete claims.admin; else claims.admin = true;
     await auth.setCustomUserClaims(user.uid, claims);
     if (revoke) await auth.revokeRefreshTokens(user.uid);
-    console.log(`${projectId()}: ${email} 관리자 권한 ${revoke ? "해제" : "부여"} 완료. 다시 로그인하면 반영됩니다.`);
+    console.log(`${projectId()}: ${email} 관리자 권한 ${revoke ? "해제" : "부여"} 완료. ${revoke ? "기존 세션은 만료되어 다시 로그인이 필요합니다." : "관리자 페이지에서 새로고침하면 반영됩니다."}`);
     if (revoke && (process.env.LEARNHUB_ADMIN_UIDS || "").split(",").map(value => value.trim()).includes(user.uid)) {
       console.log("이 UID는 LEARNHUB_ADMIN_UIDS에도 있습니다. 서버 allowlist에서도 제거해야 접근이 차단됩니다.");
     }

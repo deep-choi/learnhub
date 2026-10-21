@@ -1,6 +1,7 @@
 import test, { beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { clearAuthAdapter, configureAuthAdapter, authorizedFetch } from "../src/services/authClient";
+import { adminRequest } from "../src/services/adminClient";
 
 const originalFetch = globalThis.fetch;
 const originalWindow = globalThis.window;
@@ -65,4 +66,39 @@ test("authorizedFetch sends the validated AI preference only to AI mutation rout
   assert.equal(requests[0].headers.get("x-learnhub-ai-reasoning"), "medium");
   assert.equal(requests[0].headers.get("x-learnhub-ai-max-output-tokens"), "8192");
   assert.equal(requests[1].headers.get("x-learnhub-ai-provider"), null);
+});
+
+test("admin entry renews cached claims before authorization; subsequent data reads reuse the refreshed session", async () => {
+  let token = "cached-user-token";
+  const refreshes: boolean[] = [];
+  configureAuthAdapter({
+    getAccessToken: async (forceRefresh = false) => {
+      refreshes.push(forceRefresh);
+      if (forceRefresh) token = "renewed-admin-token";
+      return token;
+    },
+    getAuthStatus: () => ({ configured: true, signedIn: true, provider: "email", userId: "owner" }),
+  });
+  let requests = 0;
+  globalThis.fetch = (async (_input, init) => {
+    requests++;
+    assert.equal(new Headers(init?.headers).get("Authorization"), "Bearer renewed-admin-token");
+    return Response.json({ uid: "owner" });
+  }) as typeof fetch;
+  await adminRequest("session");
+  await adminRequest("settings");
+  assert.equal(requests, 2);
+  assert.equal(refreshes.filter(Boolean).length, 1);
+});
+
+test("changing accounts during an administrator token refresh stops the outgoing request", async () => {
+  let uid = "owner";
+  configureAuthAdapter({
+    getAccessToken: async (forceRefresh = false) => { if (forceRefresh) uid = "other-user"; return "other-user-token"; },
+    getAuthStatus: () => ({ configured: true, signedIn: true, provider: "email", userId: uid }),
+  });
+  let requests = 0;
+  globalThis.fetch = (async () => { requests++; return Response.json({}); }) as typeof fetch;
+  await assert.rejects(() => adminRequest("session"), /계정이 바뀌어/u);
+  assert.equal(requests, 0);
 });

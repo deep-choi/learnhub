@@ -1,4 +1,4 @@
-import { authorizedFetchForUser, getAuthStatus } from "./authClient";
+import { authorizedFetchForUser, getAccessToken, getAuthStatus } from "./authClient";
 
 export class AdminRequestError extends Error {
   constructor(public readonly status: number, public readonly code: string, message: string) { super(message); }
@@ -6,6 +6,10 @@ export class AdminRequestError extends Error {
 export const adminRequest = async <T>(path: string, body?: unknown, method = body === undefined ? "GET" : "PUT"): Promise<T> => {
   const uid = getAuthStatus().userId;
   if (!uid) throw new AdminRequestError(401, "AUTH_REQUIRED", "로그인이 필요합니다.");
+  // Newly granted/revoked administrator claims must not wait for the cached token to expire.
+  if (path === "session" && !(await getAccessToken(true))) {
+    throw new AdminRequestError(401, "AUTH_REFRESH_FAILED", "권한 정보를 갱신하지 못했습니다. 다시 로그인해 주세요.");
+  }
   const response = await authorizedFetchForUser(`/api/admin/${path}`, {
     method, cache: "no-store", headers: { "Content-Type": "application/json" },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),

@@ -14,7 +14,7 @@
 npm run admin:access -- --email "실제로그인이메일"
 ```
 
-기존 custom claim은 보존한다. 권한 변경 후 LearnHub에서 로그아웃하고 다시 로그인한다. ADC가 없다면 Google Cloud SDK에서 `gcloud auth application-default login`으로 운영 계정 인증이 필요하다. Firebase CLI 로그인만으로 Admin SDK의 ADC가 준비되는 것은 아니다.
+기존 custom claim은 보존한다. 권한 변경 후 `/admin`을 새로고침하거나 ‘다시 확인’을 누르면 최신 토큰으로 권한을 재확인한다. ADC가 없다면 Google Cloud SDK에서 `gcloud auth application-default login`으로 운영 계정 인증이 필요하다. Firebase CLI 로그인만으로 Admin SDK의 ADC가 준비되는 것은 아니다.
 
 권한 해제:
 

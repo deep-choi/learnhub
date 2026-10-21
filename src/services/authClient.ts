@@ -11,7 +11,7 @@ export interface AuthStatus {
 }
 
 export interface AuthClientAdapter {
-  getAccessToken: () => Promise<string | null>;
+  getAccessToken: (forceRefresh?: boolean) => Promise<string | null>;
   getAuthStatus?: () => AuthStatus;
   requestMagicLink?: (email: string) => Promise<void>;
   signInWithGoogle?: () => Promise<void>;
@@ -34,10 +34,10 @@ export const configureAuthAdapter = (nextAdapter: AuthClientAdapter | null): voi
   adapter = nextAdapter;
 };
 
-export const getAccessToken = async (): Promise<string | null> => {
+export const getAccessToken = async (forceRefresh = false): Promise<string | null> => {
   if (!adapter) return null;
   try {
-    const token = await adapter.getAccessToken();
+    const token = await adapter.getAccessToken(forceRefresh);
     return typeof token === "string" && token.trim().length > 0 ? token : null;
   } catch {
     return null;
