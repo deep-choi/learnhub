@@ -8,7 +8,7 @@ import {
   UserSkill,
 } from "../types/learning";
 import { isAssessmentSession, type AssessmentSession } from "../domain/assessment";
-import { isAiRuntimeSelection, type AiRuntimeSelection } from "../domain/aiModels";
+import { isAiRuntimeSelection, migrateAiSelection, type AiRuntimeSelection } from "../domain/aiModels";
 import type { KnowledgeGraph } from "../types/knowledgeGraph";
 import { isKnowledgeGraph, mergeKnowledgeGraphs } from "../domain/knowledgeGraph";
 import type { ChatSession } from "../types/chat";
@@ -415,7 +415,11 @@ const setDataField = (data: LearningBackupData, key: string, value: unknown) => 
   if (key === LEARNHUB_STORAGE_KEYS.REVIEWS && isBoundedArray(value) && value.every(isReview)) data.reviews = value;
   if (key === LEARNHUB_STORAGE_KEYS.MISTAKES && isBoundedArray(value) && value.every(isMistake)) data.mistakes = value;
   if (key === LEARNHUB_STORAGE_KEYS.QUIZ_ATTEMPTS && isBoundedArray(value) && value.every((item) => isNonEmptyString(item, 500))) data.quizAttempts = value;
-  if (key === LEARNHUB_STORAGE_KEYS.AI_PREFERENCES && isAiRuntimeSelection(value)) data.aiPreferences = value;
+  if (key === LEARNHUB_STORAGE_KEYS.AI_PREFERENCES) {
+    // 목록에서 뺀 모델을 고른 설정은 대신 쓸 모델로 옮겨서 내보냅니다.
+    const migrated = migrateAiSelection(value);
+    if (isAiRuntimeSelection(migrated)) data.aiPreferences = migrated;
+  }
   if (key === LEARNHUB_STORAGE_KEYS.KNOWLEDGE_GRAPH && isKnowledgeGraph(value)) data.knowledgeGraph = value;
   if (key === LEARNHUB_STORAGE_KEYS.CHAT_SESSIONS && isChatSessionList(value)) data.chatSessions = value;
   if (key === LEARNHUB_STORAGE_KEYS.LEARNING_NOTES && isLearningNoteList(value)) data.learningNotes = value;
@@ -527,7 +531,8 @@ export const validateLearningBackup = (input: unknown): BackupValidationResult =
   if (data.reviews !== undefined && (!isBoundedArray(data.reviews) || !data.reviews.every(isReview))) errors.push("복습 데이터가 올바르지 않습니다.");
   if (data.mistakes !== undefined && (!isBoundedArray(data.mistakes) || !data.mistakes.every(isMistake))) errors.push("오답 데이터가 올바르지 않습니다.");
   if (data.quizAttempts !== undefined && (!isBoundedArray(data.quizAttempts) || !data.quizAttempts.every((item) => isNonEmptyString(item, 500)))) errors.push("퀴즈 시도 데이터가 올바르지 않습니다.");
-  if (data.aiPreferences !== undefined && !isAiRuntimeSelection(data.aiPreferences)) errors.push("AI 설정 데이터가 올바르지 않습니다.");
+  // AI 설정은 읽을 때 현재 모델 목록에 맞춰 옮기거나 기본값으로 바꿉니다. 모델 목록이 바뀌었다고 학습 기록 전체를 거절하지 않도록 모양만 확인합니다.
+  if (data.aiPreferences !== undefined && !isRecord(data.aiPreferences)) errors.push("AI 설정 데이터가 올바르지 않습니다.");
   if (data.knowledgeGraph !== undefined && !isKnowledgeGraph(data.knowledgeGraph)) errors.push("개념 지도 데이터가 올바르지 않습니다.");
   if (data.studyLibrary !== undefined && !isStudyLibrary(data.studyLibrary)) errors.push("자료함 형식이 올바르지 않습니다.");
   if (data.chatSessions !== undefined && !isChatSessionList(data.chatSessions)) errors.push("대화 기록 데이터가 올바르지 않습니다.");
