@@ -12,3 +12,6 @@ functions/server.cjs.map
 
 test-results/
 playwright-report/
+
+# Local screenshots and run outputs
+artifacts/
