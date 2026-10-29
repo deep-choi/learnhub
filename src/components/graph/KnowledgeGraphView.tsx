@@ -106,7 +106,7 @@ export const KnowledgeGraphView: React.FC<KnowledgeGraphViewProps> = ({ courses,
     }
     return [...groups.values()].map(({ other, edges }) => {
       const relations = [...new Set(edges.map((edge) =>
-        edge.kind === "curiosity" ? "궁금해서 이어짐" : edge.kind === "prerequisite" ? (edge.to === selected.id ? "먼저 알면 좋아요" : "다음에 이어져요") : "관련 있어요"))];
+        edge.kind === "curiosity" ? (edge.from === selected.id ? "대화에서 뻗어 나간 가지" : "여기서 뻗어 나왔어요") : edge.kind === "prerequisite" ? (edge.to === selected.id ? "먼저 알면 좋아요" : "다음에 이어져요") : "관련 있어요"))];
       return { other, edges, relation: relations.join(" · "), disputed: edges.every((edge) => edge.disputed) };
     });
   }, [selected, graph.edges, nodeById]);

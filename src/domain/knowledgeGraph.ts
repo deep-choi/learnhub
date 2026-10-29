@@ -166,3 +166,27 @@ export function isKnowledgeGraph(value: unknown): value is KnowledgeGraph {
   const p = value.lastPosition;
   return p === undefined || (obj(p) && str(p.courseId, 200) && str(p.lessonId, 200) && str(p.conceptId) && ids.has(p.conceptId) && date(p.at) && value.nodes.some(n => n.id === p.conceptId && n.courseRefs.some((r: { courseId: string; lessonId?: string }) => r.courseId === p.courseId && r.lessonId === p.lessonId)));
 }
+
+/**
+ * 대화하다 곁가지로 뻗어 나간 개념들(2차, 3차…)을 최근 것부터 돌려줍니다.
+ * 튜터에게 넘겨서, 새 곁가지가 이 중 어느 가지에서 또 뻗었는지 고르게 합니다.
+ */
+export function getBranchConcepts(graph: KnowledgeGraph, conceptId: string, limit = 12): ConceptNode[] {
+  const root = findMatchingConcept(graph, conceptId);
+  if (!root) return [];
+  const seen = new Set([root.id]);
+  const found: ConceptNode[] = [];
+  let frontier = [root.id];
+  while (frontier.length) {
+    const next: string[] = [];
+    for (const edge of graph.edges) {
+      if (edge.kind !== "curiosity" || edge.disputed || !frontier.includes(edge.from) || seen.has(edge.to)) continue;
+      const node = graph.nodes.find(n => n.id === edge.to);
+      if (!node) continue;
+      seen.add(node.id); found.push(node); next.push(node.id);
+    }
+    frontier = next;
+  }
+  const at = (node: ConceptNode) => Date.parse(node.updatedAt || node.createdAt) || 0;
+  return found.sort((a, b) => at(b) - at(a)).slice(0, Math.max(0, limit));
+}

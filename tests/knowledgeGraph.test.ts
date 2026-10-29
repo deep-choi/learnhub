@@ -199,3 +199,19 @@ test("cloud 503 errors carry status and code for both GET and PUT", async t => {
   await assert.rejects(getLearningSnapshot(), check);
   await assert.rejects(putLearningSnapshot(createLearningBackup(), null), check);
 });
+
+test("chat branches are listed newest first across levels, skipping disputed links", async () => {
+  const { getBranchConcepts } = await import("../src/domain/knowledgeGraph");
+  mergeCourseIntoGraph(course());
+  const af = addCuriosity("통분", "최소공배수", "통분할 때 왜 최소공배수를 써요?");
+  addCuriosity(af.id, "소인수분해", "최소공배수는 어떻게 구해요?");
+  const odd = addCuriosity("통분", "약분", "약분은 통분과 반대인가요?");
+  let graph = getKnowledgeGraph();
+  assert.deepEqual(new Set(getBranchConcepts(graph, "통분").map((n) => n.name)), new Set(["최소공배수", "소인수분해", "약분"]));
+  assert.deepEqual(getBranchConcepts(graph, "분수 곱셈"), []);
+  const edge = graph.edges.find((e) => e.kind === "curiosity" && e.to === odd.id)!;
+  disputeEdge(edge.id, true);
+  graph = getKnowledgeGraph();
+  assert.equal(getBranchConcepts(graph, "통분").some((n) => n.id === odd.id), false);
+  assert.equal(getBranchConcepts(graph, "통분", 1).length, 1);
+});

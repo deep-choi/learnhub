@@ -3,7 +3,7 @@ import { Minus, Plus, Maximize2 } from "lucide-react";
 import { createSimulation, seedPositions, type SimNode, type Simulation } from "./forceLayout";
 import { domainStroke, getPalette, nodeFill, stateAlpha } from "./graphStyle";
 import { computeRadialLayout, type RadialCluster, type RadialLabelSide } from "./radialLayout";
-import { computeTreeLayout, type TreeLayoutLane } from "./treeLayout";
+import { computeTreeLayout, isBranchEdge, type TreeLayoutLane } from "./treeLayout";
 import type { ConceptNode, KnowledgeGraph } from "./graphTypes";
 
 export type GraphLayoutMode = "tree" | "radial";
@@ -521,9 +521,13 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
         const pa = tree.positions.get(edge.from);
         const pb = tree.positions.get(edge.to);
         if (!pa || !pb) continue;
-        // 뼈대는 같은 과목 안의 "먼저 알면 좋아요" 연결뿐입니다. 나머지는 선택했을 때만 점선으로 보입니다.
+        // 뼈대는 같은 과목 안의 가지 연결("먼저 알면 좋아요"와 대화에서 뻗은 곁가지)뿐입니다. 나머지는 선택했을 때만 점선으로 보입니다.
         const sameCluster = metaById.get(edge.from)?.domain === metaById.get(edge.to)?.domain;
-        const backbone = edge.kind === "prerequisite" && !edge.disputed && sameCluster && (tree.mode === "radial" || pb.x > pa.x);
+        const backbone = isBranchEdge(edge) && !edge.disputed && sameCluster && (tree.mode === "radial" || pb.x > pa.x);
+        // 곁가지는 순서가 아니라 뻗어 나간 관계라서 화살표 없이 가지로만 그립니다.
+        const arrow = backbone && edge.kind === "prerequisite";
+        // 곁가지는 분야에서 뻗은 가지와 같은 색으로 이어 그려, 한 나무가 계속 자라는 것처럼 보이게 합니다.
+        const branchColor = backbone && !arrow ? domainStroke(metaById.get(edge.from)!.domain, palette.isDark) : palette.edge;
         if (!backbone && !active) continue;
         if (tree.mode === "tree" && backbone) {
           // 트리: 이름이 끝난 곳에서 출발해 다음 개념으로 부드럽게 휘어 들어갑니다.
@@ -535,10 +539,11 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
           ctx.moveTo(sx, a.y);
           ctx.bezierCurveTo(sx + bend, a.y, ex - bend, b.y, ex, b.y);
           ctx.lineWidth = (active ? 1.6 : 1.1) / view.k;
-          ctx.strokeStyle = active ? palette.edgeActive : palette.edge;
+          ctx.strokeStyle = active ? palette.edgeActive : branchColor;
           ctx.globalAlpha = hovered && !active ? 0.2 : 1;
           ctx.setLineDash([]);
           ctx.stroke();
+          if (!arrow) continue;
           ctx.beginPath();
           ctx.moveTo(ex, b.y);
           ctx.lineTo(ex - treeHead, b.y - treeHead * 0.5);
@@ -560,13 +565,13 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
         const tipY = b.y - uy * (b.r + border);
         ctx.beginPath();
         ctx.moveTo(a.x + ux * (a.r + border), a.y + uy * (a.r + border));
-        ctx.lineTo(backbone ? tipX - ux * head * 0.9 : tipX, backbone ? tipY - uy * head * 0.9 : tipY);
+        ctx.lineTo(arrow ? tipX - ux * head * 0.9 : tipX, arrow ? tipY - uy * head * 0.9 : tipY);
         ctx.lineWidth = (active ? 1.6 : 1.1) / view.k;
-        ctx.strokeStyle = edge.disputed ? palette.danger : active ? palette.edgeActive : palette.edge;
+        ctx.strokeStyle = edge.disputed ? palette.danger : active ? palette.edgeActive : branchColor;
         ctx.globalAlpha = hovered && !active ? 0.2 : backbone ? 1 : 0.6;
         ctx.setLineDash(backbone ? [] : [4 / view.k, 3 / view.k]);
         ctx.stroke();
-        if (backbone) {
+        if (arrow) {
           ctx.setLineDash([]);
           ctx.beginPath();
           ctx.moveTo(tipX, tipY);

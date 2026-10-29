@@ -105,3 +105,17 @@ test("concepts without any anchor stack right under the column instead of spread
   // a, lonely 두 개가 첫 열에 있으므로 띠 높이는 두 줄 정도여야 합니다(목록 순서 13번째라고 13줄이 되면 안 됨).
   assert.ok(lane.bottom - lane.top <= options.laneHeader + options.rowGap + options.radius * 2 + 1e-6);
 });
+
+test("branches grown in chat sit one column deeper each time, like 2nd and 3rd levels", () => {
+  const branch = (from: string, to: string): TreeLayoutEdge => ({ from, to, kind: "curiosity" });
+  const layout = computeTreeLayout(
+    [node("lesson"), node("other"), node("af"), node("single"), node("dof")],
+    [branch("lesson", "af"), branch("af", "single"), branch("lesson", "dof")],
+    options,
+  );
+  const column = (id: string) => layout.positions.get(id)!.column;
+  assert.deepEqual([column("lesson"), column("other"), column("af"), column("dof"), column("single")], [0, 0, 1, 1, 2]);
+  // 가지는 뻗어 나온 개념 가까이에 붙습니다.
+  const y = (id: string) => layout.positions.get(id)!.y;
+  assert.ok(Math.abs(y("single") - y("af")) < Math.abs(y("single") - y("other")));
+});

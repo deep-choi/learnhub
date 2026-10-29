@@ -16,7 +16,7 @@ import { buildLearnerContext } from "../src/domain/learnerContext";
 import { buildSidebarCourses, lessonConversationKey } from "../src/services/sidebarData";
 import { LEARNHUB_STORAGE_KEYS } from "../src/services/storage";
 import { createLearningBackup, importLearningBackup, validateLearningBackup } from "../src/services/learningBackup";
-import { validTutorRequest, validateTutorResponse, tutorPrompt } from "../server/knowledgeGraphApi";
+import { validTutorRequest, validateTutorResponse, normalizeTutorResponse, tutorPrompt, TUTOR_BRANCH_LIMIT } from "../server/knowledgeGraphApi";
 import type { ChatSession } from "../src/types/chat";
 import type { KnowledgeGraph } from "../src/types/knowledgeGraph";
 import type { Course } from "../src/types/learning";
@@ -362,4 +362,24 @@ test("coursePreview: 전체 글자 수에 포함되고, 백업·병합에서 보
   storage.setItem(LEARNHUB_STORAGE_KEYS.CHAT_SESSIONS, JSON.stringify([session("legacy", "2026-10-01T00:00:00.000Z")]));
   assert.equal(getChatSession("legacy")?.messages.length, 1);
   assert.equal(validateLearningBackup(createLearningBackup(storage as unknown as Storage)).ok, true);
+});
+
+test("tutor-chat: 대화로 펼친 곁가지를 받아 새 곁가지가 어느 가지에서 뻗었는지 고르게 합니다", () => {
+  const base = { courseTitle: "사진 촬영 기초", lessonTitle: "초점 조절", conceptName: "초점 조절", currentStepContent: "초점", userQuestion: "싱글 AF는 언제 써요?" };
+  assert.ok(validTutorRequest({ ...base, branchConcepts: ["AF 모드"] }));
+  assert.equal(validTutorRequest({ ...base, branchConcepts: Array(TUTOR_BRANCH_LIMIT + 1).fill("가지") }), false, "개수 상한");
+  assert.equal(validTutorRequest({ ...base, branchConcepts: ["가".repeat(81)] }), false, "길이 상한");
+  assert.equal(validTutorRequest({ ...base, branchConcepts: "AF 모드" }), false);
+
+  assert.match(tutorPrompt({ ...base, branchConcepts: ["AF 모드"] }), /parentConceptName/);
+  assert.doesNotMatch(tutorPrompt(base), /parentConceptName/, "펼친 가지가 없으면 묻지 않습니다");
+
+  const tangent = { conceptName: "싱글 AF", question: "싱글 AF는 언제 써요?" };
+  assert.deepEqual(validateTutorResponse({ reply: "좋아요", tangent: { ...tangent, parentConceptName: "AF 모드" } }, "초점 조절"), []);
+  assert.notEqual(validateTutorResponse({ reply: "좋아요", tangent: { ...tangent, parentConceptName: 3 } }, "초점 조절").length, 0);
+  // 비었거나 자기 자신을 가리키는 부모는 지우고 곁가지는 살립니다.
+  for (const parentConceptName of ["", "싱글 AF", null]) {
+    const normalized = normalizeTutorResponse({ reply: "좋아요", tangent: { ...tangent, parentConceptName } }) as { tangent: Record<string, unknown> };
+    assert.deepEqual(normalized.tangent, tangent);
+  }
 });

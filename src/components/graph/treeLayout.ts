@@ -2,9 +2,10 @@
  * 전체 지도용 왼쪽→오른쪽 계층 배치.
  *
  * - 분야(domain)마다 가로 띠(lane)를 하나씩 쓰고, 위에서 아래로 쌓습니다.
- * - 띠 안에서는 "먼저 알면 좋아요"(prerequisite) 연결의 가장 긴 경로로 열(단계)을 정합니다.
- *   선수 개념이 둘 이상이어도 가장 깊은 쪽 다음 열에 놓으므로 화살표는 항상 오른쪽을 향합니다.
- * - 선수 연결이 없는 개념은 관련 개념이 있으면 그 옆(같은 열)에, 없으면 첫 열에 둡니다.
+ * - 띠 안에서는 가지 연결의 가장 긴 경로로 열(단계)을 정합니다. 가지 연결은 "먼저 알면 좋아요"(prerequisite)와
+ *   대화하다 뻗어 나간 곁가지(curiosity)입니다. 곁가지에서 또 뻗으면 2차, 3차처럼 한 열씩 깊어집니다.
+ *   부모가 둘 이상이어도 가장 깊은 쪽 다음 열에 놓으므로 화살표는 항상 오른쪽을 향합니다.
+ * - 가지 연결이 없는 개념은 관련 개념이 있으면 그 옆(같은 열)에, 없으면 첫 열에 둡니다.
  * - 같은 열 안에서는 선수 개념들의 평균 높이에 맞추고, 겹치면 아래로 밀어 냅니다(간단한 tidy tree).
  *
  * 순수 함수라서 화면 없이 테스트할 수 있습니다. 글자 폭은 measure로 받아 씁니다.
@@ -65,6 +66,9 @@ export interface TreeLayoutResult {
   bounds: { minX: number; minY: number; maxX: number; maxY: number };
 }
 
+/** 다음 열로 이어지는 연결인지. 관련(related) 연결은 같은 열에 둡니다. */
+export const isBranchEdge = (edge: Pick<TreeLayoutEdge, "kind">) => edge.kind === "prerequisite" || edge.kind === "curiosity";
+
 const truncateToWidth = (text: string, maxWidth: number, measure: (text: string) => number) => {
   if (measure(text) <= maxWidth) return text;
   let end = text.length;
@@ -100,19 +104,19 @@ export const computeTreeLayout = (
     const live = edges.filter((edge) => !edge.disputed && ids.has(edge.from) && ids.has(edge.to) && edge.from !== edge.to);
     const parents = new Map<string, string[]>();
     for (const edge of live) {
-      if (edge.kind !== "prerequisite") continue;
+      if (!isBranchEdge(edge)) continue;
       if (!parents.has(edge.to)) parents.set(edge.to, []);
       parents.get(edge.to)!.push(edge.from);
     }
-    const hasPrerequisite = new Set<string>();
+    const hasBranch = new Set<string>();
     for (const edge of live) {
-      if (edge.kind === "prerequisite") {
-        hasPrerequisite.add(edge.from);
-        hasPrerequisite.add(edge.to);
+      if (isBranchEdge(edge)) {
+        hasBranch.add(edge.from);
+        hasBranch.add(edge.to);
       }
     }
 
-    // 1) 열: 선수 연결의 가장 긴 경로. 순환이 있으면 그 연결은 건너뜁니다.
+    // 1) 열: 가지 연결의 가장 긴 경로. 순환이 있으면 그 연결은 건너뜁니다.
     const column = new Map<string, number>();
     const visiting = new Set<string>();
     const columnOf = (id: string): number => {
@@ -126,8 +130,8 @@ export const computeTreeLayout = (
       column.set(id, value);
       return value;
     };
-    for (const node of laneNodes) if (hasPrerequisite.has(node.id)) columnOf(node.id);
-    // 선수 연결이 없는 개념: 관련 개념이 이미 자리 잡았으면 그 열, 아니면 첫 열
+    for (const node of laneNodes) if (hasBranch.has(node.id)) columnOf(node.id);
+    // 가지 연결이 없는 개념: 관련 개념이 이미 자리 잡았으면 그 열, 아니면 첫 열
     for (const node of laneNodes) {
       if (column.has(node.id)) continue;
       const anchor = live
@@ -156,7 +160,7 @@ export const computeTreeLayout = (
       cursor += columnWidth[c] + columnGap;
     }
 
-    // 3) 높이: 선수 개념들의 평균 높이를 목표로 하고, 겹치면 순서를 지킨 채 밀어 냅니다.
+    // 3) 높이: 부모 개념들의 평균 높이를 목표로 하고, 겹치면 순서를 지킨 채 밀어 냅니다.
     const y = new Map<string, number>();
     for (let c = 0; c < columnCount; c += 1) {
       const inColumn = laneNodes.filter((node) => column.get(node.id) === c);
@@ -168,7 +172,7 @@ export const computeTreeLayout = (
         const relatedPlaced = placedParents.length
           ? []
           : live
-              .filter((edge) => edge.kind !== "prerequisite" && (edge.from === node.id || edge.to === node.id))
+              .filter((edge) => !isBranchEdge(edge) && (edge.from === node.id || edge.to === node.id))
               .map((edge) => (edge.from === node.id ? edge.to : edge.from))
               .filter((other) => y.has(other));
         const anchors = placedParents.length ? placedParents : relatedPlaced;

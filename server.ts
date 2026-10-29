@@ -384,7 +384,7 @@ const lessonSchema = {
 const evaluationSchema = { type: Type.OBJECT, properties: { isCorrect: { type: Type.BOOLEAN }, feedback: { type: Type.STRING }, hint: { type: Type.STRING }, misconceptionTag: { type: Type.STRING }, explanation: { type: Type.STRING }, status: { type: Type.STRING } }, required: ["isCorrect", "feedback"] };
 const tutorSchema = { type: Type.OBJECT, properties: {
   reply: { type: Type.STRING }, suggestionChips: { type: Type.ARRAY, items: { type: Type.STRING } },
-  tangent: { type: Type.OBJECT, properties: { conceptName: { type: Type.STRING }, question: { type: Type.STRING } }, required: ["conceptName", "question"] },
+  tangent: { type: Type.OBJECT, properties: { conceptName: { type: Type.STRING }, question: { type: Type.STRING }, parentConceptName: { type: Type.STRING } }, required: ["conceptName", "question"] },
   learnedConcept: { type: Type.STRING },
 }, required: ["reply"] };
 const freeTutorSchema = { ...tutorSchema, properties: { ...tutorSchema.properties, learningIntent: learningIntentSchema } };

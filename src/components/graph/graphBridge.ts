@@ -18,7 +18,7 @@ import {
 import { emptyKnowledgeGraph } from "../../domain/knowledgeGraph";
 import type { ConceptNode, CurriculumConceptLinks, ExplanationDepth, KnowledgeGraph, LearningPosition, ResumeContext } from "./graphTypes";
 
-export { findMatchingConcept, getLocalGraph, normalizeConceptKey, recommendNextSteps } from "../../domain/knowledgeGraph";
+export { findMatchingConcept, getBranchConcepts, getLocalGraph, normalizeConceptKey, recommendNextSteps } from "../../domain/knowledgeGraph";
 
 const attempt = <T>(label: string, action: () => T, fallback: T): T => {
   try {

@@ -19,7 +19,7 @@ import { PaneWorkspace } from "./workspace/PaneWorkspace";
 import type { PaneContext } from "./workspace/types";
 import { ResumeBanner } from "./graph/ResumeBanner";
 import { useKnowledgeGraph } from "./graph/useKnowledgeGraph";
-import { addCuriosity, findMatchingConcept, getResumeContext, markPracticalDone, normalizeConceptKey, recommendNextSteps, setDepthReached, setLastPosition } from "./graph/graphBridge";
+import { addCuriosity, findMatchingConcept, getBranchConcepts, getResumeContext, markPracticalDone, normalizeConceptKey, recommendNextSteps, setDepthReached, setLastPosition } from "./graph/graphBridge";
 import { stepTitle, templateNudge, type NudgeText } from "./graph/nextStepText";
 import { josa } from "./graph/korean";
 import type { ConceptNode, ExplanationDepth, NextStep, ResumeContext } from "./graph/graphTypes";
@@ -61,8 +61,10 @@ interface ConversationMessage {
   chips?: string[];
   /** 이 메시지 아래에 보여 주는 빠른 답. 마지막 메시지의 것만 눌러 볼 수 있습니다. */
   actions?: FlowAction[];
-  /** 지금 개념에서 벗어난 곁가지 질문. "나중에 볼래요"로 저장할 수 있습니다. */
-  tangent?: { conceptName: string; question: string; saved?: boolean };
+  /** 지금 개념에서 벗어난 곁가지 질문. "지도에 펼치기"로 지도에 가지를 이어 붙입니다. */
+  tangent?: { conceptName: string; question: string; saved?: boolean;
+    /** 이미 펼친 곁가지 중 이 곁가지가 뻗어 나온 개념. 없으면 레슨 개념에서 바로 뻗습니다. */
+    parentConceptName?: string };
 }
 
 interface FlowProgress {
@@ -199,6 +201,12 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
   const graph = useKnowledgeGraph();
   // 같은 개념이 다른 이름으로 합쳐져 있을 수 있어서, 지도에 있는 노드의 id를 우선 씁니다.
   const currentConceptId = findMatchingConcept(graph, lessonMeta.conceptName || lessonMeta.title)?.id ?? normalizeConceptKey(lessonMeta.conceptName || lessonMeta.title);
+  // 이 레슨 개념에서 대화로 이미 펼친 곁가지들(2차, 3차…). 새 곁가지를 어느 가지에 이을지 튜터가 고릅니다.
+  const branches = useMemo(() => getBranchConcepts(graph, currentConceptId), [graph, currentConceptId]);
+  const branchParent = (name?: string) => {
+    const match = name ? findMatchingConcept(graph, name) : undefined;
+    return match && branches.some((node) => node.id === match.id) ? match : undefined;
+  };
   const [pulseId, setPulseId] = useState<string | null>(null);
   const [resume, setResume] = useState<ResumeContext | null>(null);
   const [keepGoing, setKeepGoing] = useState(false);
@@ -467,6 +475,7 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
           history: boundedHistory(messages),
           userQuestion: trimmed,
           ...(depth ? { depth } : {}),
+          ...(branches.length ? { branchConcepts: branches.map((node) => node.name.slice(0, 80)) } : {}),
           persona: getTutorPersonaRequest(),
         }),
       });
@@ -478,7 +487,11 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
       const data = await response.json();
       if (depth) setDepthReached(currentConceptId, depth);
       const tangent = data.tangent && typeof data.tangent.conceptName === "string" && typeof data.tangent.question === "string"
-        ? { conceptName: data.tangent.conceptName.trim().slice(0, 40), question: data.tangent.question.trim().slice(0, 200) }
+        ? {
+            conceptName: data.tangent.conceptName.trim().slice(0, 40),
+            question: data.tangent.question.trim().slice(0, 200),
+            ...(typeof data.tangent.parentConceptName === "string" && data.tangent.parentConceptName.trim() ? { parentConceptName: data.tangent.parentConceptName.trim().slice(0, 80) } : {}),
+          }
         : undefined;
       appendMessage({
         sender: "tutor",
@@ -808,7 +821,7 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
   const saveTangent = (index: number) => {
     const tangent = messages[index]?.tangent;
     if (!tangent || tangent.saved) return;
-    addCuriosity(currentConceptId, tangent.conceptName, tangent.question);
+    addCuriosity(branchParent(tangent.parentConceptName)?.id ?? currentConceptId, tangent.conceptName, tangent.question);
     setMessages((previous) => {
       const next = previous.map((message, i) => (i === index && message.tangent ? { ...message, tangent: { ...message.tangent, saved: true } } : message));
       saveConversation(historyKey, next);
@@ -883,7 +896,7 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
                     {message.tangent && (
                       <div className="mt-4 rounded-2xl border border-[var(--lh-line)] bg-[var(--lh-surface-subtle)] p-4">
                         <p className="text-[15px] leading-6 text-[var(--lh-ink)]">
-                          좋은 곁가지 질문이에요. ‘{message.tangent.conceptName}’{josa(message.tangent.conceptName, "은/는")} 지도에 <strong className="font-medium">궁금해요</strong>로 남겨 두고 나중에 이어서 볼 수 있어요.
+                          좋은 곁가지 질문이에요. ‘{message.tangent.conceptName}’{josa(message.tangent.conceptName, "은/는")} ‘{branchParent(message.tangent.parentConceptName)?.name ?? (lessonMeta.conceptName || lessonMeta.title)}’에서 뻗어 나온 개념이에요. 지도에 가지로 이어 둘 수 있어요.
                         </p>
                         <button
                           type="button"
@@ -891,7 +904,7 @@ export const LearningConversationView: React.FC<LearningConversationViewProps> =
                           disabled={message.tangent.saved}
                           className="mt-3 inline-flex min-h-10 items-center gap-2 rounded-full border border-[var(--lh-primary-border)] bg-[var(--lh-surface)] px-4 text-sm font-medium text-[var(--lh-primary-text)] transition hover:bg-[var(--lh-primary-subtle)] disabled:cursor-default disabled:opacity-70 cursor-pointer"
                         >
-                          {message.tangent.saved ? "지도에 저장했어요" : "나중에 볼래요"}
+                          {message.tangent.saved ? "지도에 펼쳤어요" : "지도에 펼치기"}
                         </button>
                       </div>
                     )}
