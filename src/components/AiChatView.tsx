@@ -1,6 +1,6 @@
 import { useStudyWorkspace } from "./study/useStudyWorkspace";
 import React, { useEffect, useRef, useState } from "react";
-import { ArrowRight, ArrowUp, BookOpen, ListChecks, Loader2, Plus, Sparkles, X } from "lucide-react";
+import { ArrowRight, ArrowUp, BookOpen, Flag, ListChecks, Loader2, Plus, Sparkles, X } from "lucide-react";
 import type { Course } from "../types/learning";
 import { authorizedFetch } from "../services/authClient";
 import { AiResponseError, aiResponseErrorMessage, readAiResponseError } from "../services/aiResponseError";
@@ -75,6 +75,13 @@ interface SetupFlow {
 
 let messageSeq = 0;
 const nextId = () => `m-${Date.now().toString(36)}-${messageSeq++}`;
+
+/** 이어서 나온 튜터 답변 묶음의 글을 모읍니다. 신고 버튼은 묶음 끝에 한 번만 두고, 묶음 전체를 함께 보냅니다. */
+const assistantGroupText = (messages: ChatMessage[], lastIndex: number): string => {
+  let start = lastIndex;
+  while (start > 0 && messages[start - 1].role === "assistant") start -= 1;
+  return messages.slice(start, lastIndex + 1).map((message) => message.text).join("\n\n");
+};
 
 /** 마우스로 쓰는 화면에서만 첫 입력칸에 바로 커서를 둡니다. 터치 화면에서는 누르지도 않았는데 입력창이 강조되고 키보드가 올라올 수 있습니다. */
 const canAutoFocusInput = () =>
@@ -689,16 +696,18 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
                     </button>
                   </div>
                 )}
-                <button type="button" className="mt-2 text-xs text-[var(--lh-ink-tertiary)] hover:text-[var(--lh-danger)]" onClick={async (event) => {
-                  const button = event.currentTarget;
-                  const reason = window.prompt("신고 사유를 입력해 주세요. 이 응답의 일부와 사유를 운영자에게 보냅니다.");
-                  if (!reason?.trim()) return;
-                  button.disabled = true;
-                  try {
-                    const result = await submitContentReport({ category: "other", description: `사유: ${reason.trim().slice(0, 450)}\n신고 응답: ${message.text.slice(0, 500)}` });
-                    window.alert(result.status === "received" ? "신고를 접수했습니다. 운영자가 검토합니다." : result.savedLocally ? "신고 초안을 기기에 저장했습니다. 로그인과 연결을 확인한 뒤 다시 신고해 주세요." : "신고를 접수하지 못했습니다. 다시 시도해 주세요.");
-                  } finally { button.disabled = false; }
-                }}>응답 신고</button>
+                {messages[index + 1]?.role !== "assistant" && (
+                  <button type="button" aria-label="이 답변 신고하기" title="이 답변 신고하기" className="-ml-1.5 mt-1 flex w-fit min-h-7! items-center gap-1 rounded-full px-1.5 text-xs! text-[var(--lh-ink-tertiary)] transition hover:bg-[var(--lh-surface-subtle)] hover:text-[var(--lh-danger)] disabled:opacity-50 cursor-pointer" onClick={async (event) => {
+                    const button = event.currentTarget;
+                    const reason = window.prompt("신고 사유를 입력해 주세요. 이 응답의 일부와 사유를 운영자에게 보냅니다.");
+                    if (!reason?.trim()) return;
+                    button.disabled = true;
+                    try {
+                      const result = await submitContentReport({ category: "other", description: `사유: ${reason.trim().slice(0, 450)}\n신고 응답: ${assistantGroupText(messages, index).slice(0, 1500)}` });
+                      window.alert(result.status === "received" ? "신고를 접수했습니다. 운영자가 검토합니다." : result.savedLocally ? "신고 초안을 기기에 저장했습니다. 로그인과 연결을 확인한 뒤 다시 신고해 주세요." : "신고를 접수하지 못했습니다. 다시 시도해 주세요.");
+                    } finally { button.disabled = false; }
+                  }}><Flag aria-hidden className="h-3 w-3" />신고</button>
+                )}
               </AgentMessage>
             ),
           )}
