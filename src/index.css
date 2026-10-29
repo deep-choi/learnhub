@@ -168,6 +168,110 @@ summary:focus-visible,
 
 ::selection { background: var(--lh-ink); color: #ffffff; }
 
+/* Keep the answer row as the touch target; the native radio must not inherit
+   the 44px minimum height intended for text inputs. */
+.lh-assessment-question {
+  padding: clamp(20px, 4vw, 32px);
+  border: 1px solid var(--lh-line);
+  border-radius: 24px;
+  background: var(--lh-surface);
+}
+
+.lh-assessment-question-header { margin-bottom: 24px; }
+.lh-assessment-type {
+  display: inline-block;
+  margin-bottom: 10px;
+  color: var(--lh-primary-text);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.lh-assessment-prompt {
+  margin: 0;
+  font-size: clamp(19px, 2.5vw, 22px);
+  line-height: 1.6;
+  letter-spacing: -0.025em;
+  overflow-wrap: anywhere;
+  outline: none;
+}
+
+.lh-assessment-prompt p {
+  margin: 0;
+  font-size: inherit;
+  line-height: inherit;
+}
+.lh-assessment-prompt p + p { margin-top: 12px; }
+
+.lh-assessment-options {
+  display: grid;
+  min-width: 0;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.lh-assessment-option {
+  position: relative;
+  display: flex;
+  min-height: 56px;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border: 1px solid var(--lh-line);
+  border-radius: 14px;
+  background: var(--lh-surface);
+  cursor: pointer;
+  transition: border-color 150ms ease, background-color 150ms ease;
+}
+.lh-assessment-option:hover {
+  border-color: var(--lh-line-strong);
+  background: var(--lh-surface-subtle);
+}
+.lh-assessment-option[data-selected="true"] {
+  border-color: var(--lh-primary);
+  background: var(--lh-primary-subtle);
+}
+.lh-assessment-option:has(input:focus-visible) {
+  outline: 2px solid var(--lh-focus);
+  outline-offset: 3px;
+}
+.lh-assessment-option input[type="radio"] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  opacity: 0;
+}
+.lh-assessment-option-number {
+  display: flex;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--lh-line);
+  border-radius: 50%;
+  color: var(--lh-ink-secondary);
+  font-size: 13px;
+  line-height: 1;
+}
+.lh-assessment-option[data-selected="true"] .lh-assessment-option-number {
+  border-color: var(--lh-primary);
+  background: var(--lh-primary);
+  color: #ffffff;
+}
+.lh-assessment-option-text {
+  min-width: 0;
+  flex: 1;
+  color: var(--lh-ink);
+  font-size: 14px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
 .lh-page-grid {
   width: min(100%, 1120px);
   margin-inline: auto;

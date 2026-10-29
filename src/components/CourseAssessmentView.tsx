@@ -167,13 +167,19 @@ export const CourseAssessmentView: React.FC<CourseAssessmentViewProps> = ({ cour
         <div className="flex items-center justify-between gap-3 text-sm"><span>{session.index + 1} / {session.questions.length} 문제</span><span className="text-[var(--lh-ink-secondary)]">{answered}개 답변 완료</span></div>
         <div role="progressbar" aria-label="답변 진행률" aria-valuenow={answered} aria-valuemin={0} aria-valuemax={session.questions.length} className="h-1.5 overflow-hidden rounded-full bg-[var(--lh-surface-strong)]"><div className="h-full rounded-full bg-[var(--lh-primary)] transition-all" style={{ width: `${answered / session.questions.length * 100}%` }} /></div>
       </div>
-      <section className="space-y-6 rounded-3xl border border-[var(--lh-line)] bg-[var(--lh-surface)] p-5 sm:p-8">
-        <span className="text-xs text-[var(--lh-primary)]">{typeLabels[question.type]}</span>
-        <h1 ref={heading} tabIndex={-1} className="text-xl font-medium leading-relaxed outline-none"><RichLessonRenderer content={question.question} /></h1>
-        {question.type === "multiple_choice" ? <fieldset className="space-y-3"><legend className="sr-only">답 선택</legend>{question.options?.map((option, i) => <label key={option} className={`flex min-h-14 cursor-pointer items-start gap-3 rounded-2xl border p-4 text-sm transition ${session.answers[question.id] === option ? "border-[var(--lh-primary)] bg-[var(--lh-primary-subtle)]" : "border-[var(--lh-line)] hover:bg-[var(--lh-surface-subtle)]"}`}>
-          <input type="radio" name={question.id} className="mt-1 accent-[var(--lh-primary)]" checked={session.answers[question.id] === option} onChange={() => persist({ ...session, answers: { ...session.answers, [question.id]: option } })} />
-          <span className="min-w-0 flex-1"><span className="mr-2 text-[var(--lh-ink-tertiary)]">{i + 1}.</span>{option}</span>
-        </label>)}</fieldset> : <div className="space-y-2"><label htmlFor="assessment-answer" className="text-sm text-[var(--lh-ink-secondary)]">생각한 이유나 풀이 과정을 적어주세요.</label><textarea id="assessment-answer" rows={6} maxLength={2000} value={session.answers[question.id] || ""} onChange={(e) => persist({ ...session, answers: { ...session.answers, [question.id]: e.target.value } })} placeholder="완벽한 문장보다 내 생각을 편하게 써보세요." className="w-full resize-y rounded-2xl border border-[var(--lh-line)] bg-[var(--lh-surface-subtle)] p-4 text-base leading-relaxed focus:outline-2 focus:outline-[var(--lh-primary)]" /><p className="text-right text-xs text-[var(--lh-ink-tertiary)]">{session.answers[question.id]?.length || 0} / 2000</p></div>}
+      <section className="lh-assessment-question">
+        <header className="lh-assessment-question-header">
+          <span className="lh-assessment-type">{typeLabels[question.type]}</span>
+          <h1 ref={heading} tabIndex={-1} className="lh-assessment-prompt"><RichLessonRenderer content={question.question} /></h1>
+        </header>
+        {question.type === "multiple_choice" ? <fieldset className="lh-assessment-options"><legend className="sr-only">답 선택</legend>{question.options?.map((option, i) => {
+          const selected = session.answers[question.id] === option;
+          return <label key={option} className="lh-assessment-option" data-selected={selected}>
+            <input type="radio" name={question.id} checked={selected} onChange={() => persist({ ...session, answers: { ...session.answers, [question.id]: option } })} />
+            <span className="lh-assessment-option-number" aria-hidden="true">{selected ? <Check size={16} strokeWidth={2} /> : i + 1}</span>
+            <span className="lh-assessment-option-text"><span className="sr-only">{i + 1}번. </span>{option}</span>
+          </label>;
+        })}</fieldset> : <div className="space-y-2"><label htmlFor="assessment-answer" className="text-sm text-[var(--lh-ink-secondary)]">생각한 이유나 풀이 과정을 적어주세요.</label><textarea id="assessment-answer" rows={6} maxLength={2000} value={session.answers[question.id] || ""} onChange={(e) => persist({ ...session, answers: { ...session.answers, [question.id]: e.target.value } })} placeholder="완벽한 문장보다 내 생각을 편하게 써보세요." className="w-full resize-y rounded-2xl border border-[var(--lh-line)] bg-[var(--lh-surface-subtle)] p-4 text-base leading-relaxed focus:outline-2 focus:outline-[var(--lh-primary)]" /><p className="text-right text-xs text-[var(--lh-ink-tertiary)]">{session.answers[question.id]?.length || 0} / 2000</p></div>}
       </section>
       {showUnanswered && answered < session.questions.length && <p role="status" className="text-sm text-[var(--lh-primary)]">아직 {session.questions.length - answered}문제가 남았어요. 답하지 않은 문제로 이동했어요.</p>}
       <div className="flex items-center justify-between gap-3"><button className={secondary} disabled={session.index === 0} onClick={() => persist({ ...session, index: session.index - 1 })}><ArrowLeft size={16} />이전</button>

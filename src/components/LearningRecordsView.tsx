@@ -22,7 +22,6 @@ const allLessons = (course: Course) => course.chapters.flatMap((chapter) => chap
 const studiedLessons = (course: Course) => allLessons(course).filter((lesson) => lesson.isCompleted);
 
 export const LearningRecordsView: React.FC<LearningRecordsViewProps> = ({
-  skills,
   courses,
   onSelectView,
   onDataChanged,
@@ -63,8 +62,6 @@ export const LearningRecordsView: React.FC<LearningRecordsViewProps> = ({
   }
 
   const openMistakes = mistakes.filter((item) => !item.isResolved).length;
-  const completedLessons = courses.reduce((count, course) => count + studiedLessons(course).length, 0);
-  const solvedCount = skills.reduce((sum, skill) => sum + skill.correctCount + skill.wrongCount, 0);
   const tabs: Array<{ id: RecordsTab; label: string; count?: number }> = [
     { id: "practice", label: "문제 풀기" },
     { id: "mistakes", label: "오답 기록", count: openMistakes },
@@ -73,12 +70,7 @@ export const LearningRecordsView: React.FC<LearningRecordsViewProps> = ({
   return (
     <div className="mx-auto max-w-5xl space-y-6 px-4 py-8 pb-24 text-sm text-[var(--lh-ink)] sm:px-8 sm:py-10">
       <header className="space-y-6">
-        <div className="space-y-2">
-          <h1 className="text-3xl font-medium tracking-[-0.03em] sm:text-4xl">학습 기록</h1>
-          <p className="text-[var(--lh-ink-secondary)]">
-            레슨 {completedLessons}개 완료 · 개념 {skills.length}개 · 문제 {solvedCount}개 풀이
-          </p>
-        </div>
+        <h1 className="text-3xl font-medium tracking-[-0.03em] sm:text-4xl">학습 기록</h1>
         {/* 페이지 내용을 바꾸는 탭은 밑줄, 그 안의 거르기는 알약 모양으로 구분합니다. */}
         <div className="flex gap-6 border-b border-[var(--lh-line)]" role="tablist" aria-label="학습 기록 보기">
           {tabs.map((tab) => (

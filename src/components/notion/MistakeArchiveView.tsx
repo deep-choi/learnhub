@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { ArrowRight, Check, Printer, Trash2 } from "lucide-react";
+import { ArrowRight, Check, ChevronDown, Printer, Trash2 } from "lucide-react";
 import { Course, MistakeItem } from "../../types/learning";
 import { StorageService } from "../../services/storage";
 import { NotionPageView } from "./Sidebar";
@@ -184,15 +184,18 @@ export const MistakeArchiveView: React.FC<MistakeArchiveViewProps> = ({
           ))}
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <select
-            value={filterTag}
-            onChange={(e) => setFilterTag(e.target.value)}
-            aria-label="틀린 이유로 거르기"
-            className="min-h-9 rounded-full border border-[var(--lh-line)] bg-[var(--lh-surface)] px-3.5 text-xs text-[var(--lh-ink-secondary)] cursor-pointer"
-          >
-            <option value="all">모든 이유</option>
-            {Object.entries(TAG_LABELS).map(([tag, label]) => <option key={tag} value={tag}>{label}</option>)}
-          </select>
+          <div className="relative inline-flex">
+            <select
+              value={filterTag}
+              onChange={(e) => setFilterTag(e.target.value)}
+              aria-label="틀린 이유로 거르기"
+              className="min-h-9 appearance-none rounded-full border border-[var(--lh-line)] bg-[var(--lh-surface)] pl-3.5 pr-10 text-xs text-[var(--lh-ink-secondary)] cursor-pointer"
+            >
+              <option value="all">모든 이유</option>
+              {Object.entries(TAG_LABELS).map(([tag, label]) => <option key={tag} value={tag}>{label}</option>)}
+            </select>
+            <ChevronDown size={14} aria-hidden="true" className="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-[var(--lh-ink-secondary)]" />
+          </div>
           <button
             type="button"
             disabled={!filteredItems.length}
