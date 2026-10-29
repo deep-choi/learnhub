@@ -26,6 +26,7 @@ import {
   AI_PROVIDER_ORDER,
   REASONING_EFFORT_LABELS,
   nearestReasoningEffort,
+  selectableReasoningEfforts,
   type AiProvider,
   type AiRuntimeSelection,
 } from "../../domain/aiModels";
@@ -264,7 +265,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     const models = allModels.filter((model) => model.provider === provider);
     const model = models.find((candidate) => candidate.available) || models[0];
     if (!model) return;
-    const reasoningEffort = model.reasoningEfforts.includes("medium") ? "medium" : model.reasoningEfforts[0];
+    const efforts = selectableReasoningEfforts(model.reasoningEfforts);
+    const reasoningEffort = efforts.includes("medium") ? "medium" : efforts[0];
     setAiSelection((current) => ({ ...current, provider, model: model.id, reasoningEffort }));
     resetAiStatus();
   };
@@ -273,7 +275,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     const model = availableModels.find((candidate) => candidate.id === modelId);
     if (!model) return;
     // 입력바와 같은 규칙: 지금 단계를 지원하지 않으면 가장 가까운 지원 단계로 맞춥니다.
-    const reasoningEffort = nearestReasoningEffort(aiSelection.reasoningEffort, model.reasoningEfforts);
+    const reasoningEffort = nearestReasoningEffort(aiSelection.reasoningEffort, selectableReasoningEfforts(model.reasoningEfforts));
     setAiSelection((current) => ({ ...current, model: model.id, reasoningEffort }));
     resetAiStatus();
   };
@@ -573,7 +575,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       높을수록 복잡한 문제에 유리하지만 응답이 느려지고 토큰을 더 씁니다.
                     </div>
                     <div role="radiogroup" aria-label="추론 수준" className="mt-3 flex rounded-lg border border-[var(--lh-line)] bg-[var(--lh-surface-subtle)] p-0.5">
-                      {(selectedModel?.reasoningEfforts || []).map((effort) => {
+                      {selectableReasoningEfforts(selectedModel?.reasoningEfforts || []).map((effort) => {
                         const selected = aiSelection.reasoningEffort === effort;
                         return (
                           <button

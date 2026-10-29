@@ -1,13 +1,12 @@
 import React, { useEffect, useId, useRef, useState } from "react";
-import { Check, ChevronDown, ChevronLeft, ChevronRight, Clock } from "lucide-react";
+import { Check, ChevronDown, ChevronLeft, ChevronRight } from "lucide-react";
 import {
   AI_PROVIDER_LABELS,
   REASONING_EFFORT_LABELS,
   getAiModel,
   groupModelsByProvider,
-  isCostlyReasoningEffort,
+  selectableReasoningEfforts,
   selectionForModel,
-  sortReasoningEfforts,
   type AiReasoningEffort,
   type AiRuntimeSelection,
 } from "../../domain/aiModels";
@@ -15,7 +14,6 @@ import { getAiPreferences, saveAiPreferences } from "../../services/aiPreference
 import { fetchAiAvailability, type AiAvailability } from "../../services/aiAvailability";
 import { LEARNHUB_DATA_CHANGED_EVENT } from "../../services/storage";
 
-export const REASONING_COST_HINT = "답이 더 느리고 하루 사용량을 더 써요";
 export const PREPARING_LABEL = "준비 중";
 
 /** 서버에 키가 없는 제공자의 모델에 붙는 작은 표시. */
@@ -241,7 +239,7 @@ export const ModelReasoningPicker: React.FC<ModelReasoningPickerProps> = ({ dire
 
   const model = getAiModel(selection.provider, selection.model);
   const modelAvailable = availability.models.some((item) => item.available && item.provider === selection.provider && item.id === selection.model);
-  const efforts = sortReasoningEfforts(model?.reasoningEfforts ?? []);
+  const efforts = selectableReasoningEfforts(model?.reasoningEfforts ?? []);
   const effortLabel = REASONING_EFFORT_LABELS[selection.reasoningEffort];
   const modelLabel = model?.label ?? selection.model;
   const statusLabel = modelAvailable ? effortLabel : PREPARING_LABEL;
@@ -339,11 +337,6 @@ export const ModelReasoningPicker: React.FC<ModelReasoningPickerProps> = ({ dire
                     <span className="font-medium text-[var(--lh-ink)]">{effortLabel}</span>
                   </div>
                   <ReasoningSlider efforts={efforts} value={selection.reasoningEffort} onChange={(reasoningEffort) => save({ ...selection, reasoningEffort })} />
-                  {isCostlyReasoningEffort(selection.reasoningEffort) && (
-                    <p className="mt-2 flex items-center gap-1.5 px-2 text-xs text-[var(--lh-ink-secondary)]">
-                      <Clock aria-hidden className="h-3.5 w-3.5 shrink-0" /> {REASONING_COST_HINT}
-                    </p>
-                  )}
                 </div>
               )}
               {error && <p role="alert" className="px-3 pb-1 text-xs text-[var(--lh-danger)]">{error}</p>}

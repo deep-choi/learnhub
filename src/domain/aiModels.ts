@@ -121,8 +121,11 @@ export const migrateAiSelection = (value: unknown): unknown => {
 
 export const normalizeAiSelection = (value: unknown): AiRuntimeSelection => {
   const migrated = migrateAiSelection(value);
-  if (isAiRuntimeSelection(migrated)) return { ...migrated };
-  return { ...DEFAULT_AI_SELECTION };
+  if (!isAiRuntimeSelection(migrated)) return { ...DEFAULT_AI_SELECTION };
+  // 예전에 저장한 끄기·최대 같은 단계는 지금 고를 수 있는 가장 가까운 단계로 옮깁니다.
+  const model = getAiModel(migrated.provider, migrated.model);
+  const reasoningEffort = model ? nearestReasoningEffort(migrated.reasoningEffort, selectableReasoningEfforts(model.reasoningEfforts)) : migrated.reasoningEffort;
+  return { ...migrated, reasoningEffort };
 };
 
 export const REASONING_EFFORT_LABELS: Record<AiReasoningEffort, string> = {
@@ -141,9 +144,14 @@ const EFFORT_ORDER: readonly AiReasoningEffort[] = ["none", "minimal", "low", "m
 export const sortReasoningEfforts = (efforts: readonly AiReasoningEffort[]): AiReasoningEffort[] =>
   [...efforts].sort((a, b) => EFFORT_ORDER.indexOf(a) - EFFORT_ORDER.indexOf(b));
 
-/** "높음" 이상이면 답이 느려지고 하루 사용량을 더 쓴다는 안내를 보여 준다. */
-export const isCostlyReasoningEffort = (effort: AiReasoningEffort): boolean =>
-  EFFORT_ORDER.indexOf(effort) >= EFFORT_ORDER.indexOf("high");
+/** 사용자가 고를 수 있는 추론 단계. 끄기·최소·최대는 화면에 보이지 않습니다. */
+const SELECTABLE_EFFORTS: readonly AiReasoningEffort[] = ["low", "medium", "high", "xhigh"];
+
+/** 모델이 지원하는 단계 중 사용자가 고를 수 있는 것만 낮은 순서로 돌려준다. 하나도 없으면 지원 단계를 그대로 쓴다. */
+export const selectableReasoningEfforts = (supported: readonly AiReasoningEffort[]): AiReasoningEffort[] => {
+  const selectable = supported.filter((effort) => SELECTABLE_EFFORTS.includes(effort));
+  return sortReasoningEfforts(selectable.length > 0 ? selectable : supported);
+};
 
 /** 지원하는 단계 중 `effort`에 가장 가까운 것(같은 거리면 낮은 쪽). 지원 목록이 비면 그대로 돌려준다. */
 export const nearestReasoningEffort = (effort: AiReasoningEffort, supported: readonly AiReasoningEffort[]): AiReasoningEffort => {
@@ -156,9 +164,9 @@ export const nearestReasoningEffort = (effort: AiReasoningEffort, supported: rea
   })[0];
 };
 
-/** 모델을 바꿀 때의 새 선택. 지금 추론 단계를 지원하지 않으면 가장 가까운 지원 단계로 맞춘다. 알 수 없는 모델이면 null. */
+/** 모델을 바꿀 때의 새 선택. 지금 추론 단계를 고를 수 없으면 가장 가까운 단계로 맞춘다. 알 수 없는 모델이면 null. */
 export const selectionForModel = (current: AiRuntimeSelection, provider: AiProvider, modelId: string): AiRuntimeSelection | null => {
   const model = getAiModel(provider, modelId);
   if (!model) return null;
-  return { ...current, provider, model: model.id, reasoningEffort: nearestReasoningEffort(current.reasoningEffort, model.reasoningEfforts) };
+  return { ...current, provider, model: model.id, reasoningEffort: nearestReasoningEffort(current.reasoningEffort, selectableReasoningEfforts(model.reasoningEfforts)) };
 };

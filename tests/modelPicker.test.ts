@@ -15,8 +15,9 @@ import {
   groupModelsByProvider,
   isAiProvider,
   isAiRuntimeSelection,
-  isCostlyReasoningEffort,
   nearestReasoningEffort,
+  normalizeAiSelection,
+  selectableReasoningEfforts,
   selectionForModel,
   sortReasoningEfforts,
   type AiRuntimeSelection,
@@ -29,9 +30,13 @@ import { PreviewQuota } from "../server/previewQuota";
 import { AiGateway, type AiGatewayRequest, type AiGatewayResult } from "../server/aiGateway";
 import { ModelList, ModelSummary } from "../src/components/chat/ModelReasoningPicker";
 
-test("reasoning labels are Korean and the cost hint starts at 높음", () => {
+test("reasoning labels are Korean and only 낮음–매우 높음 can be picked", () => {
   assert.deepEqual(REASONING_EFFORT_LABELS, { none: "끄기", minimal: "최소", low: "낮음", medium: "중간", high: "높음", xhigh: "매우 높음", max: "최대" });
-  assert.deepEqual(["none", "minimal", "low", "medium", "high", "xhigh", "max"].map((effort) => isCostlyReasoningEffort(effort as never)), [false, false, false, false, true, true, true]);
+  assert.deepEqual(selectableReasoningEfforts(["none", "low", "medium", "high", "xhigh", "max"]), ["low", "medium", "high", "xhigh"]);
+  assert.deepEqual(selectableReasoningEfforts(["high", "low", "medium"]), ["low", "medium", "high"]);
+  assert.deepEqual(selectableReasoningEfforts(["none"]), ["none"], "a model without selectable levels keeps what it supports");
+  assert.equal(normalizeAiSelection({ ...DEFAULT_AI_SELECTION, reasoningEffort: "none" }).reasoningEffort, "low", "saved 끄기 moves to 낮음");
+  assert.equal(normalizeAiSelection({ ...DEFAULT_AI_SELECTION, reasoningEffort: "max" }).reasoningEffort, "xhigh", "saved 최대 moves to 매우 높음");
   assert.deepEqual(sortReasoningEfforts(["high", "none", "medium", "max"]), ["none", "medium", "high", "max"]);
 });
 
