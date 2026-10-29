@@ -579,7 +579,8 @@ export default function App() {
       {/* 2. Main Workspace Canvas Area */}
       <div className="relative flex flex-1 flex-col overflow-hidden">
         {/* Scrollable Viewport */}
-        <main id="learning-main" className={`flex-1 overflow-y-auto ${activeView.type === "ai-chat" || activeView.type === "lesson" ? "bg-[var(--lh-chat-bg)]" : "bg-[var(--lh-canvas)]"}`}>
+        {/* 스크롤바 자리를 늘 비워 둬서 내용 길이에 따라 화면이 좌우로 밀리지 않게 합니다. */}
+        <main id="learning-main" className={`flex-1 overflow-y-auto [scrollbar-gutter:stable] ${activeView.type === "ai-chat" || activeView.type === "lesson" ? "bg-[var(--lh-chat-bg)]" : "bg-[var(--lh-canvas)]"}`}>
           {activeView.type === "courses" && (
             <CoursesView
               key={activeView.roadmapId || "all"}
@@ -679,11 +680,11 @@ export default function App() {
 
           {activeView.type === "records" && (
             <LearningRecordsView
+              key={userAccount.id}
               skills={skills}
-              progress={progress}
               courses={courses}
-              reviews={reviews}
               onSelectView={(view) => handleSelectView(view, "records")}
+              onDataChanged={reloadData}
             />
           )}
 

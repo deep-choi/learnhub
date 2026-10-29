@@ -33,6 +33,8 @@ export interface AssessmentSession {
   index: number;
   stage: "solving" | "results";
   createdAt: string;
+  /** 학습 기록에서 고른 개념으로 만든 연습이면 그 레슨 범위를 남깁니다. 없으면 과목 전체 평가입니다. */
+  lessonIds?: string[];
 }
 
 export const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -52,8 +54,10 @@ export const nextUnfinishedLesson = (course: Course) => {
   return null;
 };
 /** Bound the total context while retaining a piece of every completed lesson. */
-export const buildAssessmentSources = (course: Course, read: (id: string) => LessonContent | null): AssessmentSource[] => {
-  const lessons = course.chapters.flatMap((chapter) => chapter.lessons).filter((lesson) => lesson.isCompleted);
+export const buildAssessmentSources = (course: Course, read: (id: string) => LessonContent | null, lessonIds?: string[]): AssessmentSource[] => {
+  const scope = lessonIds ? new Set(lessonIds) : null;
+  const lessons = course.chapters.flatMap((chapter) => chapter.lessons)
+    .filter((lesson) => lesson.isCompleted && (!scope || scope.has(lesson.id)));
   const perLesson = Math.max(40, Math.min(900, Math.floor(9_000 / Math.max(1, lessons.length))));
   return lessons.map((lesson) => {
     const cached = read(lesson.id);
@@ -99,7 +103,9 @@ export const isAssessmentSession = (value: unknown, expectedCourseId?: string): 
     !isRecord(value.answers) || !isRecord(value.grades) || !Number.isInteger(value.index) ||
     (value.index as number) < 0 || (value.index as number) >= value.questions.length ||
     !["solving", "results"].includes(value.stage as string) || typeof value.createdAt !== "string" ||
-    !Number.isFinite(Date.parse(value.createdAt))) return false;
+    !Number.isFinite(Date.parse(value.createdAt)) ||
+    (value.lessonIds !== undefined && (!Array.isArray(value.lessonIds) || !value.lessonIds.length || value.lessonIds.length > 100 ||
+      value.lessonIds.some((id) => typeof id !== "string" || !id || id.length > 200)))) return false;
   const ids = new Set(value.questions.map((question) => question.id));
   return !Object.entries(value.answers).some(([id, answer]) => !ids.has(id) || typeof answer !== "string" || answer.length > 2_000) &&
     !Object.entries(value.grades).some(([id, grade]) => !ids.has(id) || !validGrade(grade) || grade.questionId !== id);

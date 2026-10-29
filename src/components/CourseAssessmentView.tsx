@@ -1,11 +1,12 @@
 import React, { useEffect, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, Check, CheckCircle2, Loader2, RotateCcw, Sparkles } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, CheckCircle2, Loader2, Printer, RotateCcw, Sparkles } from "lucide-react";
 import type { Course } from "../types/learning";
 import { StorageService } from "../services/storage";
 import { assessmentRequest, loadAssessment, recordAssessmentGrade, saveAssessment } from "../services/assessment";
 import { assessmentScore, batchTypes, buildAssessmentSources, courseIsComplete, validateAssessmentGrades, validateAssessmentQuestions,
   type AssessmentConfig, type AssessmentGrade, type AssessmentQuestion, type AssessmentSession, type AssessmentType } from "../domain/assessment";
 import { RichLessonRenderer } from "./notion/RichLessonRenderer";
+import { AssessmentPrintSheet, type PrintMode } from "./AssessmentPrintSheet";
 
 const primary = "inline-flex min-h-12 items-center justify-center gap-2 rounded-full bg-[var(--lh-primary)] px-6 text-sm font-medium text-white transition hover:bg-[var(--lh-primary-hover)] disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer";
 const secondary = "inline-flex min-h-11 items-center justify-center gap-2 rounded-full border border-[var(--lh-line)] bg-[var(--lh-surface)] px-5 text-sm transition hover:bg-[var(--lh-surface-subtle)] disabled:opacity-40 cursor-pointer";
@@ -17,17 +18,27 @@ interface CourseAssessmentViewProps {
   onBack: () => void;
   onReviewLesson: (lessonId: string) => void;
   onDataChanged: () => void;
+  /** 학습 기록에서 고른 레슨만으로 문제를 만듭니다. 주면 과목을 다 마치지 않아도 풀 수 있습니다. */
+  practiceLessonIds?: string[];
+  /** 저장된 풀이가 있어도 문제 설정 화면부터 엽니다. */
+  startInSetup?: boolean;
+  /** 설정 화면에서 시험지 인쇄를 주 버튼으로 보여 줍니다. */
+  preferPrint?: boolean;
+  backLabel?: string;
 }
 
-export const CourseAssessmentView: React.FC<CourseAssessmentViewProps> = ({ course, onBack, onReviewLesson, onDataChanged }) => {
+export const CourseAssessmentView: React.FC<CourseAssessmentViewProps> = ({ course, onBack, onReviewLesson, onDataChanged, practiceLessonIds, startInSetup = false, preferPrint = false, backLabel = "과목으로 돌아가기" }) => {
   const owner = StorageService.getUser().id;
+  const practice = Boolean(practiceLessonIds);
+  const canGenerate = practiceLessonIds ? practiceLessonIds.length > 0 : courseIsComplete(course);
   const [initial] = useState(() => {
-    try { return { session: loadAssessment(owner, course.id), error: "" }; }
+    try { return { session: loadAssessment(owner, course.id, practice), error: "" }; }
     catch { return { session: null, error: "이전에 저장한 문제를 읽지 못했어요. 새 문제를 만들어 주세요." }; }
   });
   const [session, setSession] = useState<AssessmentSession | null>(initial.session);
   const [config, setConfig] = useState<AssessmentConfig>(initial.session?.config || { count: 10, type: "mixed" });
-  const [setup, setSetup] = useState(!initial.session);
+  const [setup, setSetup] = useState(startInSetup || !initial.session);
+  const [printMode, setPrintMode] = useState<PrintMode | null>(null);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState(initial.error);
   const [saveError, setSaveError] = useState(false);
@@ -50,13 +61,14 @@ export const CourseAssessmentView: React.FC<CourseAssessmentViewProps> = ({ cour
   };
   const createSession = (questions: AssessmentQuestion[]): AssessmentSession => ({
     version: 1, id: crypto.randomUUID(), courseId: course.id, config, questions, answers: {}, grades: {}, index: 0, stage: "solving", createdAt: new Date().toISOString(),
+    ...(practiceLessonIds ? { lessonIds: practiceLessonIds } : {}),
   });
-  const generate = async () => {
-    if (busy || !courseIsComplete(course)) return;
+  const generate = async (printAfter?: PrintMode) => {
+    if (busy || !canGenerate) return;
     const controller = startRequest();
     const key = JSON.stringify(config);
     if (generated.current.key !== key) generated.current = { key, questions: [] };
-    const sources = buildAssessmentSources(course, (id) => StorageService.getCachedLessonContent(id));
+    const sources = buildAssessmentSources(course, (id) => StorageService.getCachedLessonContent(id), practiceLessonIds);
     try {
       while (generated.current.questions.length < config.count) {
         const offset = generated.current.questions.length;
@@ -71,6 +83,7 @@ export const CourseAssessmentView: React.FC<CourseAssessmentViewProps> = ({ cour
       persist(createSession(generated.current.questions));
       generated.current = { key: "", questions: [] };
       setSetup(false); setShowUnanswered(false);
+      if (printAfter) setPrintMode(printAfter);
     } catch (e) { if (!controller.signal.aborted) setError(e instanceof Error ? e.message : "문제를 준비하지 못했어요."); }
     finally { if (!controller.signal.aborted) setBusy(""); }
   };
@@ -114,8 +127,14 @@ export const CourseAssessmentView: React.FC<CourseAssessmentViewProps> = ({ cour
 
   return <div className="mx-auto w-full max-w-3xl space-y-7 px-4 py-7 pb-24 sm:px-6" aria-busy={!!busy}>
     <div className="flex flex-wrap items-center justify-between gap-3">
-      <button className={secondary} onClick={() => { cancel(); onBack(); }}><ArrowLeft size={16} />과목으로 돌아가기</button>
-      {session && !saveError && <span className="text-xs text-[var(--lh-ink-secondary)]">이 기기에 자동 저장됨</span>}
+      <button className={secondary} onClick={() => { cancel(); onBack(); }}><ArrowLeft size={16} />{backLabel}</button>
+      <div className="flex flex-wrap items-center gap-2">
+        {session && !saveError && <span className="text-xs text-[var(--lh-ink-secondary)]">이 기기에 자동 저장됨</span>}
+        {session && !setup && <>
+          <button className={secondary} disabled={!!busy} onClick={() => setPrintMode("questions")}><Printer size={16} />시험지 PDF</button>
+          <button className={secondary} disabled={!!busy} onClick={() => setPrintMode("answers")}>정답 포함</button>
+        </>}
+      </div>
     </div>
     {error && <p role="alert" className="rounded-2xl border border-[var(--lh-line)] p-4 text-sm text-[var(--lh-danger)]">{error}</p>}
     {saveError && <div role="alert" className="rounded-2xl border border-[var(--lh-line)] p-4 text-sm text-[var(--lh-danger)]">답안을 기기에 저장하지 못했어요. 이 화면을 나가면 최근 답안을 잃을 수 있습니다. <button className="underline" onClick={() => session && persist(session)}>다시 저장</button></div>}
@@ -123,13 +142,13 @@ export const CourseAssessmentView: React.FC<CourseAssessmentViewProps> = ({ cour
       <div className="space-y-3 pt-3">
         <span className="text-sm text-[var(--lh-ink-secondary)]">{course.title}</span>
         <h1 ref={heading} tabIndex={-1} className="text-3xl font-medium tracking-tight outline-none">어떤 문제로 확인할까요?</h1>
-        <p className="text-sm leading-relaxed text-[var(--lh-ink-secondary)]">배운 내용을 떠올려 보세요. 시간 제한 없이, 내 속도로 풀면 돼요.</p>
+        <p className="text-sm leading-relaxed text-[var(--lh-ink-secondary)]">{practiceLessonIds ? `고른 개념 ${practiceLessonIds.length}개에서 문제를 만들어요. ` : ""}배운 내용을 떠올려 보세요. 시간 제한 없이, 내 속도로 풀면 돼요.</p>
       </div>
       {session && <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-[var(--lh-primary-subtle)] p-4">
         <p className="text-sm">{session.stage === "results" ? "지난 풀이 결과가 있어요." : `${session.questions.length}문제 중 ${answered}문제에 답했어요.`}</p>
         <button className={secondary} disabled={!!busy} onClick={() => { setSetup(false); setError(""); }}>{session.stage === "results" ? "결과 보기" : "이어서 풀기"}</button>
       </div>}
-      {!courseIsComplete(course) ? <p className="rounded-2xl border border-[var(--lh-line)] p-5">모든 레슨을 마치면 종합 문제를 풀 수 있어요.</p> : <div className="space-y-8 rounded-3xl border border-[var(--lh-line)] bg-[var(--lh-surface)] p-6 sm:p-8">
+      {!canGenerate ? <p className="rounded-2xl border border-[var(--lh-line)] p-5">{practice ? "문제를 만들 개념을 하나 이상 골라 주세요." : "모든 레슨을 마치면 종합 문제를 풀 수 있어요."}</p> : <div className="space-y-8 rounded-3xl border border-[var(--lh-line)] bg-[var(--lh-surface)] p-6 sm:p-8">
         <fieldset disabled={!!busy} className="space-y-3"><legend className="mb-3 text-sm font-medium">문제 수</legend>
           <div className="grid grid-cols-3 gap-2">{([5, 10, 20] as const).map((count) => <button key={count} aria-pressed={config.count === count} onClick={() => setConfig({ ...config, count })} className={`${secondary} ${config.count === count ? "!border-[var(--lh-primary)] !bg-[var(--lh-primary-subtle)] text-[var(--lh-primary)]" : ""}`}>{count}개</button>)}</div>
         </fieldset>
@@ -137,7 +156,10 @@ export const CourseAssessmentView: React.FC<CourseAssessmentViewProps> = ({ cour
           <div className="grid grid-cols-3 gap-2">{(["mixed", "multiple_choice", "essay"] as AssessmentType[]).map((type) => <button key={type} aria-pressed={config.type === type} onClick={() => setConfig({ ...config, type })} className={`${secondary} ${config.type === type ? "!border-[var(--lh-primary)] !bg-[var(--lh-primary-subtle)] text-[var(--lh-primary)]" : ""}`}>{typeLabels[type]}</button>)}</div>
           <p className="mt-3 text-xs leading-relaxed text-[var(--lh-ink-secondary)]">{config.type === "mixed" ? `객관식 ${Math.ceil(config.count / 2)}개 + 서술형 ${Math.floor(config.count / 2)}개` : config.type === "essay" ? "내 말로 짧게 설명해요. 핵심을 이해했다면 다른 표현도 괜찮아요." : "4개의 보기 중 알맞은 답을 골라요."}</p>
         </fieldset>
-        <button className={`${primary} w-full`} disabled={!!busy} onClick={generate}>{busy ? <Loader2 size={18} className="animate-spin" /> : <Sparkles size={18} />}{busy || `${config.count}문제 풀기`}</button>
+        {busy ? <button className={`${primary} w-full`} disabled><Loader2 size={18} className="animate-spin" />{busy}</button> : <div className={`flex gap-2 ${preferPrint ? "flex-col-reverse" : "flex-col"}`}>
+          <button className={`${preferPrint ? secondary : primary} w-full`} onClick={() => generate()}><Sparkles size={18} />{config.count}문제 바로 풀기</button>
+          <button className={`${preferPrint ? primary : secondary} w-full`} onClick={() => generate("questions")}><Printer size={16} />시험지로 만들어 PDF 저장</button>
+        </div>}
         {session && <p className="text-center text-xs text-[var(--lh-ink-secondary)]">새 문제를 만들면 이전 풀이 대신 새 풀이가 저장됩니다.</p>}
       </div>}
     </> : session?.stage === "solving" && question ? <>
@@ -172,5 +194,6 @@ export const CourseAssessmentView: React.FC<CourseAssessmentViewProps> = ({ cour
       <div className="space-y-3">{session.questions.map((q, i) => { const g = session.grades[q.id]; return <details key={q.id} className="rounded-2xl border border-[var(--lh-line)] bg-[var(--lh-surface)] p-5"><summary className="cursor-pointer text-sm leading-relaxed"><span className="mr-2 text-[var(--lh-ink-secondary)]">{i + 1}.</span>{q.question}<span className="ml-3 text-[var(--lh-primary)]">{g ? labels[g.status] : "채점 대기"}</span></summary><div className="mt-5 space-y-4 text-sm leading-relaxed"><div><p className="mb-1 text-xs text-[var(--lh-ink-secondary)]">내 답안</p><p className="whitespace-pre-wrap">{session.answers[q.id]}</p></div><div><p className="mb-1 text-xs text-[var(--lh-ink-secondary)]">{q.type === "essay" ? "모범 답안" : "정답"}</p><RichLessonRenderer content={q.answer} /></div>{g && <p>{g.feedback}</p>}{!!g?.missingPoints.length && <div className="rounded-xl bg-[var(--lh-surface-subtle)] p-3"><p className="mb-1 font-medium">이 부분을 보완해보세요</p><ul className="list-disc space-y-1 pl-5">{g.missingPoints.map((p) => <li key={p}>{p}</li>)}</ul></div>}<RichLessonRenderer content={q.explanation} /><button className={secondary} onClick={() => { cancel(); onReviewLesson(q.lessonId); }}>관련 레슨 복습하기<ArrowRight size={16} /></button></div></details>; })}</div>
     </> : null}
     {busy && <button className="mx-auto block text-sm text-[var(--lh-ink-secondary)] underline" onClick={cancel}>잠시 멈추기</button>}
+    {printMode && session && <AssessmentPrintSheet courseTitle={course.title} questions={session.questions} mode={printMode} onDone={() => setPrintMode(null)} />}
   </div>;
 }

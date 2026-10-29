@@ -4,8 +4,8 @@ import express from "express";
 import { once } from "node:events";
 import { AiGateway } from "../server/aiGateway";
 import { assessmentRouter } from "../server/assessment";
-import { assessmentScore, batchTypes, buildAssessmentSources, courseIsComplete, nextUnfinishedLesson, validateAssessmentQuestions, validateAssessmentGrades } from "../src/domain/assessment";
-import { assessmentStorageKey, loadAssessment, saveAssessment, recordAssessmentGrade } from "../src/services/assessment";
+import { assessmentScore, batchTypes, buildAssessmentSources, courseIsComplete, isAssessmentSession, nextUnfinishedLesson, validateAssessmentQuestions, validateAssessmentGrades } from "../src/domain/assessment";
+import { assessmentStorageKey, loadAssessment, practiceStorageKey, saveAssessment, recordAssessmentGrade } from "../src/services/assessment";
 import { StorageService } from "../src/services/storage";
 import { assessmentCourse, fixtureQuestion, fixtureSession } from "./fixtures/assessment";
 import { createFallbackLessonContent } from "../src/domain/lessonFallback";
@@ -47,6 +47,30 @@ test("source context includes only studied lessons and cannot use another course
   assert.ok(source.every((s) => !s.content.includes("unrelated")));
   const partial = structuredClone(assessmentCourse); partial.chapters[0].lessons[0].isCompleted = false;
   assert.equal(buildAssessmentSources(partial, () => null).length, 1);
+});
+
+test("concept practice limits sources to the chosen studied lessons", () => {
+  const picked = buildAssessmentSources(assessmentCourse, () => null, ["balance-2"]);
+  assert.deepEqual(picked.map((s) => s.lessonId), ["balance-2"]);
+  const partial = structuredClone(assessmentCourse); partial.chapters[0].lessons[1].isCompleted = false;
+  assert.equal(buildAssessmentSources(partial, () => null, ["balance-2"]).length, 0);
+});
+
+test("concept practice is stored apart from the course assessment and keeps its scope", () => {
+  const data = new Map<string, string>();
+  Object.defineProperty(globalThis, "localStorage", { configurable: true, value: { getItem: (k: string) => data.get(k) ?? null, setItem: (k: string, v: string) => data.set(k, v), removeItem: (k: string) => data.delete(k) } });
+  const course = fixtureSession();
+  const practice = { ...fixtureSession(), id: "practice-session", lessonIds: ["balance-2"] };
+  assert.equal(isAssessmentSession(practice), true);
+  assert.equal(isAssessmentSession({ ...practice, lessonIds: [] }), false);
+  assert.equal(isAssessmentSession({ ...practice, lessonIds: [3] }), false);
+  assert.equal(saveAssessment("learner-a", course), true);
+  assert.equal(saveAssessment("learner-a", practice), true);
+  assert.notEqual(practiceStorageKey("learner-a", course.courseId), assessmentStorageKey("learner-a", course.courseId));
+  assert.equal(loadAssessment("learner-a", course.courseId)?.id, "test-session");
+  assert.deepEqual(loadAssessment("learner-a", course.courseId, true), practice);
+  data.set(practiceStorageKey("learner-a", course.courseId), JSON.stringify(course));
+  assert.throws(() => loadAssessment("learner-a", course.courseId, true));
 });
 
 test("generated questions enforce count, type, source mapping, distinct choices and no duplicates", () => {

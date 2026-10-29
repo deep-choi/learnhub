@@ -5,17 +5,21 @@ import { notifyLearningDataChanged } from "./storage";
 import type { Course } from "../types/learning";
 
 export const assessmentStorageKey = (owner: string, courseId: string) => `learnhub_assessment_${encodeURIComponent(owner)}_${encodeURIComponent(courseId)}`;
+/** 학습 기록의 개념 연습은 과목 종합 평가와 따로 저장해 서로의 풀이를 덮어쓰지 않습니다. */
+export const practiceStorageKey = (owner: string, courseId: string) => assessmentStorageKey(owner, `practice:${courseId}`);
+const storageKeyFor = (owner: string, courseId: string, practice: boolean) =>
+  practice ? practiceStorageKey(owner, courseId) : assessmentStorageKey(owner, courseId);
 
-export function loadAssessment(owner: string, courseId: string): AssessmentSession | null {
-  const raw = localStorage.getItem(assessmentStorageKey(owner, courseId));
+export function loadAssessment(owner: string, courseId: string, practice = false): AssessmentSession | null {
+  const raw = localStorage.getItem(storageKeyFor(owner, courseId, practice));
   if (!raw) return null;
   const s: unknown = JSON.parse(raw);
-  if (!isAssessmentSession(s, courseId)) throw new Error("저장된 문제와 답안을 읽지 못했습니다. 새 문제를 만들어 주세요.");
+  if (!isAssessmentSession(s, courseId) || Boolean(s.lessonIds) !== practice) throw new Error("저장된 문제와 답안을 읽지 못했습니다. 새 문제를 만들어 주세요.");
   return s;
 }
 
 export function saveAssessment(owner: string, session: AssessmentSession): boolean {
-  try { localStorage.setItem(assessmentStorageKey(owner, session.courseId), JSON.stringify(session)); notifyLearningDataChanged(); return true; }
+  try { localStorage.setItem(storageKeyFor(owner, session.courseId, Boolean(session.lessonIds)), JSON.stringify(session)); notifyLearningDataChanged(); return true; }
   catch { return false; }
 }
 
