@@ -187,20 +187,19 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, initialEr
   const submitLabel = mode === "login" ? "로그인" : mode === "signup" ? "회원가입" : mode === "forgot" ? "재설정 링크 보내기" : "새 비밀번호 저장";
 
   return (
-    // 모바일 브라우저의 하단바 뒤로 내용이 숨지 않도록 덮개 높이를 보이는 화면(dvh)에 맞추고, 모바일에서는 아래에서 올라오는 시트로 띄웁니다.
+    // 모바일 브라우저의 하단바 뒤로 내용이 숨지 않도록 덮개 높이를 보이는 화면(dvh)에 맞추고, 상하좌우에 여백을 둔 가운데 창으로 띄웁니다.
     <div
-      className="fixed inset-x-0 top-0 z-50 flex h-[100dvh] items-end justify-center bg-black/30 backdrop-blur-[2px] sm:items-center sm:p-6"
+      className="fixed inset-x-0 top-0 z-50 flex h-[100dvh] items-center justify-center bg-black/30 p-4 backdrop-blur-[2px] sm:p-6"
       role="presentation"
       onMouseDown={(event) => { if (event.target === event.currentTarget && !isSubmitting) onClose(); }}
     >
       <div
-        className="flex max-h-[calc(100dvh-32px)] w-full flex-col overflow-hidden rounded-t-[28px] border border-b-0 border-[var(--lh-line)] bg-[var(--lh-surface)] text-[var(--lh-ink)] shadow-[0_-12px_40px_rgba(15,15,15,0.14)] sm:max-h-[calc(100dvh-48px)] sm:max-w-[420px] sm:rounded-[24px] sm:border-b sm:shadow-[0_24px_80px_rgba(15,15,15,0.18)]"
+        className="flex max-h-[calc(100dvh-32px)] w-full max-w-[420px] flex-col overflow-hidden rounded-[24px] border border-[var(--lh-line)] bg-[var(--lh-surface)] text-[var(--lh-ink)] shadow-[0_24px_80px_rgba(15,15,15,0.18)] sm:max-h-[calc(100dvh-48px)]"
         role="dialog"
         aria-modal="true"
         aria-labelledby="learnhub-auth-title"
       >
-        <div aria-hidden className="mx-auto mt-2.5 h-1 w-10 shrink-0 rounded-full bg-[var(--lh-line-strong)] sm:hidden" />
-        <section className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 pb-[max(24px,env(safe-area-inset-bottom))] pt-4 sm:px-8 sm:pb-8 sm:pt-7">
+        <section className="min-h-0 flex-1 overflow-y-auto overscroll-contain break-keep px-5 py-6 sm:px-8 sm:pb-8 sm:pt-7">
           <div className="flex items-start gap-3">
             <div className="min-w-0 flex-1 pt-1">
               <h1 id="learnhub-auth-title" className="text-[22px] font-semibold leading-8 tracking-[-0.02em]">{title}</h1>
@@ -307,7 +306,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, initialEr
                 <span>{mode === "login" ? "아직 계정이 없으신가요?" : "이미 계정이 있으신가요?"}</span>
                 <button type="button" onClick={() => switchMode(mode === "login" ? "signup" : "login")} disabled={isSubmitting} className={textLinkClass}>{mode === "login" ? "회원가입" : "로그인"}</button>
               </p>
-              <p className="mt-4 text-center text-[13px] leading-5 text-[var(--lh-ink-tertiary)]">Google로 처음 가입하면 만 14세 이상임을 확인한 것으로 봅니다.</p>
+              <p className="mt-4 text-balance text-center text-[13px] leading-5 text-[var(--lh-ink-tertiary)]">Google로 처음 가입하면 만 14세 이상임을 확인한 것으로 봅니다.</p>
             </>
           )}
         </section>
