@@ -66,24 +66,26 @@ const sameSelection = (a: AiRuntimeSelection, b: AiRuntimeSelection) =>
 
 /* ---------- 작은 빌딩 블록 ---------- */
 
+/** 좁은 화면에서는 창 안에 상자를 한 번 더 두르지 않고 구분선만 둡니다. */
 const Section: React.FC<{ title?: string; children: React.ReactNode }> = ({ title, children }) => (
   <section>
-    {title && <h4 className="mb-2 px-1 text-sm font-medium text-[var(--lh-ink-tertiary)]">{title}</h4>}
-    <div className="divide-y divide-[var(--lh-line)] rounded-xl border border-[var(--lh-line)] bg-[var(--lh-surface)]">{children}</div>
+    {title && <h4 className="text-sm font-medium text-[var(--lh-ink-tertiary)] sm:mb-2 sm:px-1">{title}</h4>}
+    <div className="divide-y divide-[var(--lh-line)] sm:rounded-xl sm:border sm:border-[var(--lh-line)] sm:bg-[var(--lh-surface)]">{children}</div>
   </section>
 );
 
+/** 좁은 화면에서는 글 아래에 조작(버튼·선택 상자)을 전체 폭으로 두고, 넓은 화면에서만 오른쪽에 나란히 둡니다. */
 const Row: React.FC<{ label: React.ReactNode; description?: React.ReactNode; children?: React.ReactNode; htmlFor?: string }> = ({ label, description, children, htmlFor }) => (
-  <div className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
-    <div className="min-w-0">
+  <div className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between sm:gap-6 sm:px-5">
+    <div className="min-w-0 sm:flex-1">
       {htmlFor ? (
         <label htmlFor={htmlFor} className="block text-[15px] font-medium text-[var(--lh-ink)]">{label}</label>
       ) : (
         <div className="text-[15px] font-medium text-[var(--lh-ink)]">{label}</div>
       )}
-      {description && <div className="mt-0.5 text-sm leading-relaxed text-[var(--lh-ink-secondary)]">{description}</div>}
+      {description && <div className="mt-0.5 break-keep text-sm leading-relaxed text-[var(--lh-ink-secondary)]">{description}</div>}
     </div>
-    {children && <div className="shrink-0">{children}</div>}
+    {children && <div className="w-full sm:w-auto sm:shrink-0">{children}</div>}
   </div>
 );
 
@@ -91,7 +93,7 @@ const Select: React.FC<React.SelectHTMLAttributes<HTMLSelectElement>> = ({ class
   <div className={`relative ${className}`}>
     <select
       {...props}
-      className="h-11 w-full cursor-pointer appearance-none rounded-lg border border-[var(--lh-line)] bg-[var(--lh-surface)] pl-3 pr-9 text-[15px]! text-[var(--lh-ink)] outline-none transition hover:border-[var(--lh-line-strong)] focus:border-[var(--lh-primary)] focus:ring-2 focus:ring-[var(--lh-primary-subtle)]"
+      className="h-12 w-full cursor-pointer appearance-none rounded-xl border border-[var(--lh-line)] bg-[var(--lh-surface)] pl-3 pr-9 text-[15px]! text-[var(--lh-ink)] outline-none transition hover:border-[var(--lh-line-strong)] focus:border-[var(--lh-primary)] focus:ring-2 focus:ring-[var(--lh-primary-subtle)] sm:h-11 sm:rounded-lg"
     >
       {children}
     </select>
@@ -100,7 +102,7 @@ const Select: React.FC<React.SelectHTMLAttributes<HTMLSelectElement>> = ({ class
 );
 
 const buttonBase =
-  "inline-flex h-11 sm:h-10 sm:min-h-0! cursor-pointer items-center justify-center gap-1.5 rounded-lg px-4 text-[15px]! font-medium transition disabled:cursor-not-allowed disabled:opacity-50";
+  "inline-flex h-12 w-full sm:h-10 sm:w-auto sm:min-h-0! cursor-pointer items-center justify-center gap-1.5 rounded-xl px-4 text-[15px]! font-medium transition disabled:cursor-not-allowed disabled:opacity-50 sm:rounded-lg";
 const secondaryButton = `${buttonBase} border border-[var(--lh-line)] bg-[var(--lh-surface)] text-[var(--lh-ink)] hover:bg-[var(--lh-surface-subtle)]`;
 const primaryButton = `${buttonBase} bg-[var(--lh-primary)] text-white hover:bg-[var(--lh-primary-hover)]`;
 const dangerButton = `${buttonBase} border border-[var(--lh-danger)]/30 text-[var(--lh-danger)] hover:bg-[var(--lh-danger)]/10`;
@@ -305,31 +307,32 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const limitsDisabled = aiConfiguration?.limits.enabled === false;
 
   return (
+    // 모바일: 보이는 화면 안에서 위쪽에 붙은 창으로 띄우고 높이는 내용만큼만 씁니다. 탭을 바꿔도 제목 위치가 흔들리지 않습니다.
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"
+      className="fixed inset-x-0 top-0 z-50 flex h-[100dvh] items-start justify-center bg-black/40 px-4 pb-4 pt-[max(1rem,6dvh)] backdrop-blur-sm sm:items-center sm:p-6"
       onClick={onClose}
     >
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby="settings-title"
-        className="flex h-[min(720px,calc(100dvh-2rem))] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-[var(--lh-line)] bg-[var(--lh-surface)] text-[var(--lh-ink)] shadow-2xl sm:flex-row"
+        className="flex max-h-[calc(100dvh-max(1rem,6dvh)-1rem)] w-full max-w-4xl flex-col overflow-hidden rounded-[24px] border border-[var(--lh-line)] bg-[var(--lh-surface)] text-[var(--lh-ink)] shadow-2xl sm:h-[min(720px,calc(100dvh-3rem))] sm:max-h-none sm:flex-row sm:rounded-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* 사이드 내비게이션 */}
-        <aside className="shrink-0 border-b border-[var(--lh-line)] bg-[var(--lh-surface-subtle)]/60 sm:w-60 sm:border-b-0 sm:border-r">
-          <div className="flex items-center justify-between px-5 pt-6 pb-3 sm:pb-5">
-            <h2 id="settings-title" className="text-[17px] font-semibold tracking-tight">설정</h2>
+        <aside className="shrink-0 border-b border-[var(--lh-line)] sm:w-60 sm:border-b-0 sm:border-r sm:bg-[var(--lh-surface-subtle)]/60">
+          <div className="flex items-center justify-between pb-3 pl-5 pr-2.5 pt-4 sm:px-5 sm:pb-5 sm:pt-6">
+            <h2 id="settings-title" className="text-xl font-semibold tracking-tight sm:text-[17px]">설정</h2>
             <button
               type="button"
               onClick={onClose}
               aria-label="설정 닫기"
-              className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-[var(--lh-ink-tertiary)] transition hover:bg-[var(--lh-surface-strong)] hover:text-[var(--lh-ink)] sm:hidden"
+              className="flex h-11 w-11 cursor-pointer items-center justify-center rounded-full text-[var(--lh-ink-secondary)] transition hover:bg-[var(--lh-surface-subtle)] hover:text-[var(--lh-ink)] sm:hidden"
             >
-              <X className="h-4 w-4" />
+              <X className="h-5 w-5" />
             </button>
           </div>
-          <nav className="flex gap-1 overflow-x-auto px-3 pb-3 sm:flex-col sm:overflow-visible">
+          <nav className="mx-4 mb-4 grid grid-cols-3 gap-1 rounded-xl bg-[var(--lh-surface-subtle)] p-1 sm:m-0 sm:flex sm:flex-col sm:bg-transparent sm:px-3 sm:pb-3 sm:pt-0">
             {SETTINGS_TABS.map(({ id, label, Icon }) => {
               const active = activeTab === id;
               return (
@@ -338,14 +341,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   type="button"
                   onClick={() => setActiveTab(id)}
                   aria-current={active ? "page" : undefined}
-                  className={`flex h-11 shrink-0 cursor-pointer items-center gap-2.5 rounded-lg px-3 text-[15px]! transition sm:w-full ${
+                  className={`flex h-10 min-w-0 cursor-pointer items-center justify-center gap-1.5 rounded-lg px-2 text-sm! transition sm:h-11 sm:w-full sm:justify-start sm:gap-2.5 sm:px-3 sm:text-[15px]! ${
                     active
                       ? "bg-[var(--lh-surface)] font-medium text-[var(--lh-ink)] shadow-sm"
                       : "text-[var(--lh-ink-secondary)] hover:bg-[var(--lh-surface-strong)]/60 hover:text-[var(--lh-ink)]"
                   }`}
                 >
-                  <Icon className={`h-[18px] w-[18px] ${active ? "text-[var(--lh-primary)]" : "text-[var(--lh-ink-tertiary)]"}`} />
-                  {label}
+                  <Icon className={`h-4 w-4 shrink-0 sm:h-[18px] sm:w-[18px] ${active ? "text-[var(--lh-primary)]" : "text-[var(--lh-ink-tertiary)]"}`} />
+                  <span className="truncate">{label}</span>
                 </button>
               );
             })}
@@ -354,7 +357,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
         {/* 본문 */}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <header className="flex items-start justify-between gap-4 px-6 pt-6 pb-5 sm:px-10 sm:pt-8">
+          <header className="hidden items-start justify-between gap-4 px-10 pb-5 pt-8 sm:flex">
             <div>
               <h3 className="text-xl font-semibold tracking-tight">{activeTabMeta.label}</h3>
               <p className="mt-0.5 text-[15px] text-[var(--lh-ink-secondary)]">{activeTabMeta.description}</p>
@@ -369,12 +372,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </button>
           </header>
 
-          <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-6 sm:px-10 sm:pb-10">
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-6 pt-5 sm:px-10 sm:pb-10 sm:pt-0">
             {/* 화면 */}
             {activeTab === "appearance" && (
               <div className="space-y-7">
                 <section>
-                  <h4 className="mb-2 px-1 text-sm font-medium text-[var(--lh-ink-tertiary)]">테마</h4>
+                  <h4 className="mb-2 sm:px-1 text-sm font-medium text-[var(--lh-ink-tertiary)]">테마</h4>
                   <div role="radiogroup" aria-label="테마" className="grid grid-cols-2 gap-3">
                     {(Object.keys(THEME_PREVIEWS) as ThemeMode[]).map((mode) => {
                       const preview = THEME_PREVIEWS[mode];
@@ -418,7 +421,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             </span>
                             <span className="text-[15px] font-medium">{preview.label}</span>
                           </div>
-                          <p className="mt-0.5 pl-6.5 text-sm text-[var(--lh-ink-tertiary)]">{preview.caption}</p>
+                          <p className="mt-0.5 break-keep pl-6.5 text-[13px] leading-5 text-[var(--lh-ink-tertiary)] sm:text-sm">{preview.caption}</p>
                         </button>
                       );
                     })}
@@ -430,13 +433,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             {/* 계정 */}
             {activeTab === "account" && (
               <div className="space-y-7">
-                <div className="flex items-center gap-4 rounded-xl border border-[var(--lh-line)] p-5">
+                <div className="flex flex-wrap items-center gap-4 sm:flex-nowrap sm:rounded-xl sm:border sm:border-[var(--lh-line)] sm:p-5">
                   <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[var(--lh-primary)] text-xl font-semibold text-white">
                     {isGuest ? <User className="h-5 w-5" /> : userAccount?.name?.slice(0, 1) || "U"}
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-[17px] font-semibold">{userAccount?.name || "게스트"}</div>
-                    <div className="truncate text-[15px] text-[var(--lh-ink-secondary)]">
+                    <div className={`text-[15px] text-[var(--lh-ink-secondary)] ${isGuest ? "break-keep leading-6" : "truncate"}`}>
                       {userAccount?.email || "로그인하면 학습 기록이 모든 기기에 저장됩니다."}
                     </div>
                   </div>
@@ -504,11 +507,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   </>
                 )}
 
-                <div className="flex flex-wrap gap-4 px-1 text-sm text-[var(--lh-ink-secondary)]">
+                <div className="flex flex-wrap gap-4 sm:px-1 text-sm text-[var(--lh-ink-secondary)]">
                   <a href="/privacy/" target="_blank" rel="noopener noreferrer">개인정보처리방침</a>
                   <a href="/account-deletion/" target="_blank" rel="noopener noreferrer">계정 삭제 안내</a>
                 </div>
-                <p className="flex items-center gap-2 px-1 text-sm text-[var(--lh-ink-tertiary)]">
+                <p className="flex items-center gap-2 sm:px-1 text-sm text-[var(--lh-ink-tertiary)]">
                   <ShieldCheck className="h-3.5 w-3.5 shrink-0" />
                   개인 학습 기록은 로그인한 계정별로 분리되어 저장됩니다.
                 </p>
@@ -519,7 +522,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             {activeTab === "ai" && (
               <div className="space-y-7">
                 <section>
-                  <div className="mb-2 flex items-center justify-between px-1">
+                  <div className="mb-2 flex items-center justify-between sm:px-1">
                     <h4 className="text-sm font-medium text-[var(--lh-ink-tertiary)]">제공자</h4>
                     <button
                       type="button"
@@ -531,7 +534,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       연결 상태 새로고침
                     </button>
                   </div>
-                  <div role="radiogroup" aria-label="AI 제공자" className="grid grid-cols-3 gap-2">
+                  <div role="radiogroup" aria-label="AI 제공자" className="grid gap-2 sm:grid-cols-3">
                     {AI_PROVIDER_ORDER.map((provider) => {
                       const configured = aiConfiguration?.providers[provider]?.configured === true;
                       const selected = aiSelection.provider === provider;
@@ -542,7 +545,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           role="radio"
                           aria-checked={selected}
                           onClick={() => updateAiProvider(provider)}
-                          className={`min-w-0 cursor-pointer rounded-xl border px-3.5 py-3 text-left transition ${
+                          className={`min-w-0 cursor-pointer rounded-xl border px-4 py-3 text-left transition sm:px-3.5 ${
                             selected
                               ? "border-[var(--lh-primary)] bg-[var(--lh-primary-subtle)] ring-1 ring-[var(--lh-primary)]"
                               : "border-[var(--lh-line)] hover:border-[var(--lh-line-strong)]"
@@ -569,9 +572,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       ))}
                     </Select>
                   </Row>
-                  <div className="px-5 py-4">
+                  <div className="py-4 sm:px-5">
                     <div className="text-[15px] font-medium">추론 수준</div>
-                    <div className="mt-0.5 text-sm leading-relaxed text-[var(--lh-ink-secondary)]">
+                    <div className="mt-0.5 break-keep text-sm leading-relaxed text-[var(--lh-ink-secondary)]">
                       높을수록 복잡한 문제에 유리하지만 응답이 느려지고 토큰을 더 씁니다.
                     </div>
                     <div role="radiogroup" aria-label="추론 수준" className="mt-3 flex rounded-lg border border-[var(--lh-line)] bg-[var(--lh-surface-subtle)] p-0.5">
@@ -612,20 +615,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
                 {aiConfiguration && (
                   <section>
-                    <h4 className="mb-2 px-1 text-sm font-medium text-[var(--lh-ink-tertiary)]">오늘 사용량</h4>
-                    <div className="grid grid-cols-3 divide-x divide-[var(--lh-line)] rounded-xl border border-[var(--lh-line)]">
+                    <h4 className="text-sm font-medium text-[var(--lh-ink-tertiary)] sm:mb-2 sm:px-1">오늘 사용량</h4>
+                    <div className="grid divide-y divide-[var(--lh-line)] sm:grid-cols-3 sm:divide-x sm:divide-y-0 sm:rounded-xl sm:border sm:border-[var(--lh-line)]">
                       {[
                         { label: "남은 요청", value: limitsDisabled ? "제한 없음" : `${aiConfiguration.usage.remainingRequestsToday.toLocaleString()} / ${aiConfiguration.limits.requestsPerDay.toLocaleString()}` },
                         { label: "남은 예약 출력", value: limitsDisabled ? "제한 없음" : aiConfiguration.usage.remainingReservedOutputTokensToday.toLocaleString() },
                         { label: "분당 요청 한도", value: limitsDisabled ? "제한 없음" : aiConfiguration.limits.requestsPerMinute.toLocaleString() },
                       ].map((stat) => (
-                        <div key={stat.label} className="min-w-0 px-4 py-3">
+                        <div key={stat.label} className="min-w-0 py-3 sm:px-4">
                           <div className="truncate text-sm text-[var(--lh-ink-tertiary)]">{stat.label}</div>
                           <div className="mt-1 truncate text-[17px] font-semibold tabular-nums">{stat.value}</div>
                         </div>
                       ))}
                     </div>
-                    <p className="mt-2 px-1 text-sm leading-relaxed text-[var(--lh-ink-tertiary)]">
+                    <p className="mt-2 break-keep sm:px-1 text-sm leading-relaxed text-[var(--lh-ink-tertiary)]">
                       {limitsDisabled
                         ? "테스트용으로 앱의 사용량 제한이 해제되어 있습니다. AI 제공자의 요금과 제한은 별도로 적용됩니다."
                         : "공급자 청구량이 아니라 LearnHub 서버가 보수적으로 예약한 사용량입니다. UTC 자정에 초기화됩니다."}
@@ -639,7 +642,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
           {/* AI 탭 저장 바 */}
           {activeTab === "ai" && (
-            <footer className="flex items-center justify-between gap-3 border-t border-[var(--lh-line)] px-6 py-4 sm:px-10">
+            <footer className="flex flex-col gap-3 border-t border-[var(--lh-line)] px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-10">
               <div className="min-w-0 text-sm">
                 {aiSettingsError ? (
                   <p role="alert" className="text-[var(--lh-danger)]">{aiSettingsError}</p>
@@ -654,7 +657,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <p className="text-[var(--lh-ink-tertiary)]">선택값은 계정에 동기화됩니다.</p>
                 )}
               </div>
-              <div className="flex shrink-0 gap-2">
+              <div className="flex w-full gap-2 sm:w-auto sm:shrink-0">
                 {aiDirty && (
                   <button
                     type="button"
