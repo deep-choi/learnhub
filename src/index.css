@@ -137,6 +137,8 @@ html {
 body {
   min-width: 320px;
   min-height: 100vh;
+  /* 모바일 브라우저는 100vh에 주소창·하단바 뒤까지 넣어 세므로, 보이는 높이(dvh)를 씁니다. */
+  min-height: 100dvh;
   margin: 0;
   background: var(--lh-canvas);
   color: var(--lh-ink);

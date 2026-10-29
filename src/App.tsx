@@ -551,7 +551,7 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-[var(--lh-canvas)] text-[var(--lh-ink)] font-sans">
+    <div className="flex h-[100dvh] w-full overflow-hidden bg-[var(--lh-canvas)] text-[var(--lh-ink)] font-sans">
       {/* 1. Left Notion Sidebar */}
       <Sidebar
         courses={courses}

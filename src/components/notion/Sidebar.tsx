@@ -188,7 +188,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       <aside
         aria-label="LearnHub 메뉴"
-        className={`${isOpen ? "fixed inset-y-0 left-0 z-50 flex shadow-2xl" : "hidden"} h-screen shrink-0 border-r border-[var(--lh-line)] bg-[var(--lh-surface)] text-sm select-none md:relative md:z-auto md:flex md:shadow-none`}
+        className={`${isOpen ? "fixed inset-y-0 left-0 z-50 flex shadow-2xl" : "hidden"} h-[100dvh] shrink-0 border-r border-[var(--lh-line)] bg-[var(--lh-surface)] text-sm select-none md:relative md:z-auto md:flex md:shadow-none`}
       >
         {/* 1단: 아이콘 레일 */}
         <div className="flex h-full w-[60px] shrink-0 flex-col items-center justify-between border-r border-[var(--lh-line)] py-3">

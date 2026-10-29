@@ -18,7 +18,7 @@ export const AppSkeleton: React.FC = () => (
   <div
     role="status"
     aria-live="polite"
-    className="flex h-screen w-screen overflow-hidden bg-[var(--lh-canvas)]"
+    className="flex h-[100dvh] w-full overflow-hidden bg-[var(--lh-canvas)]"
   >
     <span className="sr-only">계정의 학습 공간을 불러오는 중입니다.</span>
 

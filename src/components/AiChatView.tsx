@@ -76,6 +76,10 @@ interface SetupFlow {
 let messageSeq = 0;
 const nextId = () => `m-${Date.now().toString(36)}-${messageSeq++}`;
 
+/** 마우스로 쓰는 화면에서만 첫 입력칸에 바로 커서를 둡니다. 터치 화면에서는 누르지도 않았는데 입력창이 강조되고 키보드가 올라올 수 있습니다. */
+const canAutoFocusInput = () =>
+  typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia("(hover: hover) and (pointer: fine)").matches;
+
 /** 질문에서 지도에 남길 짧은 이름을 만듭니다. */
 const toConceptName = (question: string): string => {
   const firstSentence = question.split(/[.。!！?？\n]/u)[0] ?? question;
@@ -501,7 +505,7 @@ export const AiChatView: React.FC<AiChatViewProps> = ({
         }}
         rows={1}
         maxLength={2000}
-        autoFocus={!started}
+        autoFocus={!started && canAutoFocusInput()}
         placeholder={flow ? "직접 적어서 답해도 돼요" : courseMode ? "어떤 과목을 만들까요?" : "배우고 싶은 것을 물어보세요"}
         className={`lh-bare-input max-h-[200px] min-h-11 resize-none bg-transparent text-base leading-6 outline-none placeholder:text-[var(--lh-ink-tertiary)] ${isSignedIn ? "block w-full px-3 pb-1 pt-2.5" : "flex-1 px-2 py-2.5"}`}
       />
